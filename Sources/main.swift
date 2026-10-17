@@ -10,8 +10,8 @@ let maxLagFrames = Int(sampleRate * 1.0)
 let maxStartOffsetFrames = Int(sampleRate * 5.0)
 let gapFillThresholdFrames = Int(sampleRate * 0.1)
 let echoTailSeconds = 0.12
-let captureStallSeconds = 1.5
-let restartRetrySeconds = 3.0
+let captureStallSeconds = 0.6
+let restartRetrySeconds = 0.5
 let silentSystemWarningSeconds = 10.0
 let meterWidth = 10
 let meterFloorDecibels: Float = -60
@@ -131,6 +131,7 @@ func onSystemDeviceChange(queue: DispatchQueue, _ handler: @escaping () -> Void)
 
 final class Resampler {
     private let converter: AVAudioConverter
+    var inputSampleRate: Double { converter.inputFormat.sampleRate }
 
     init(from format: AVAudioFormat) throws {
         guard let converter = AVAudioConverter(from: format, to: monoFormat) else {
@@ -223,19 +224,39 @@ final class SystemAudioCapture {
     }
 }
 
-/// Records the preferred microphone when it is present, otherwise the system input, and can be rebuilt when devices change.
+func inputStreamFormat(of device: InputDevice) throws -> AudioStreamBasicDescription {
+    var streamsAddress = propertyAddress(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
+    var size: UInt32 = 0
+    try ensure(AudioObjectGetPropertyDataSize(device.id, &streamsAddress, 0, nil, &size), "listing \(device.name) streams")
+    var streams = [AudioStreamID](repeating: 0, count: Int(size) / MemoryLayout<AudioStreamID>.size)
+    guard !streams.isEmpty else { throw CaptureError(errorDescription: "\(device.name) has no input") }
+    try ensure(AudioObjectGetPropertyData(device.id, &streamsAddress, 0, nil, &size, &streams), "listing \(device.name) streams")
+    var formatAddress = propertyAddress(kAudioStreamPropertyVirtualFormat)
+    var format = AudioStreamBasicDescription()
+    var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+    try ensure(AudioObjectGetPropertyData(streams[0], &formatAddress, 0, nil, &formatSize, &format), "reading \(device.name) format")
+    return format
+}
+
+/// Records the preferred microphone when it is present, otherwise the system input, straight from its Core Audio
+/// device so every start reads the device's current format (AirPods change sample rate when their mic turns on).
 final class MicrophoneCapture {
     private let preferredName: String?
     private let onSamples: ([Float], UInt64) -> Void
-    private let onConfigurationChange: () -> Void
-    private var engine: AVAudioEngine?
-    private var configurationObserver: NSObjectProtocol?
+    private let onDeviceChange: () -> Void
+    private var ioProcID: AudioDeviceIOProcID?
+    private var deviceListener: AudioObjectPropertyListenerBlock?
     private(set) var device: InputDevice?
+    private static let deviceChangeAddresses = [
+        propertyAddress(kAudioDevicePropertyNominalSampleRate),
+        propertyAddress(kAudioDevicePropertyStreamConfiguration, scope: kAudioObjectPropertyScopeInput),
+        propertyAddress(kAudioDevicePropertyDeviceIsAlive),
+    ]
 
-    init(preferredName: String?, onSamples: @escaping ([Float], UInt64) -> Void, onConfigurationChange: @escaping () -> Void) {
+    init(preferredName: String?, onSamples: @escaping ([Float], UInt64) -> Void, onDeviceChange: @escaping () -> Void) {
         self.preferredName = preferredName
         self.onSamples = onSamples
-        self.onConfigurationChange = onConfigurationChange
+        self.onDeviceChange = onDeviceChange
     }
 
     func targetDevice() -> InputDevice? {
@@ -247,39 +268,58 @@ final class MicrophoneCapture {
 
     func start() throws {
         guard let target = targetDevice() else { throw CaptureError(errorDescription: "no microphone available") }
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        var deviceID = target.id
-        try ensure(AudioUnitSetProperty(input.audioUnit!, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)), "selecting microphone \(target.name)")
-        // Built-in mic arrays report several channels; channel 0 is a complete microphone signal.
-        let format = input.outputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0 else { throw CaptureError(errorDescription: "\(target.name) has no usable input") }
-        guard let firstChannelFormat = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1) else {
-            throw CaptureError(errorDescription: "unsupported microphone format \(format)")
+        let streamFormat = try inputStreamFormat(of: target)
+        let isFloat32 = streamFormat.mFormatID == kAudioFormatLinearPCM
+            && streamFormat.mFormatFlags & kAudioFormatFlagIsFloat != 0
+            && streamFormat.mBitsPerChannel == 32
+        guard isFloat32, let firstChannelFormat = AVAudioFormat(standardFormatWithSampleRate: streamFormat.mSampleRate, channels: 1) else {
+            throw CaptureError(errorDescription: "unsupported \(target.name) format")
         }
         let resampler = try Resampler(from: firstChannelFormat)
         let onSamples = onSamples
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, time in
-            guard let firstChannel = AVAudioPCMBuffer(pcmFormat: firstChannelFormat, frameCapacity: buffer.frameLength) else { return }
-            firstChannel.frameLength = buffer.frameLength
-            firstChannel.floatChannelData![0].update(from: buffer.floatChannelData![0], count: Int(buffer.frameLength))
-            onSamples(resampler.monoSamples(from: firstChannel), time.hostTime)
+        var procID: AudioDeviceIOProcID?
+        try ensure(AudioDeviceCreateIOProcIDWithBlock(&procID, target.id, nil) { _, inputData, inputTime, _, _ in
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
+            guard let firstBuffer = buffers.first, let data = firstBuffer.mData, firstBuffer.mNumberChannels > 0 else { return }
+            // Built-in mic arrays deliver several interleaved channels; channel 0 is a complete microphone signal.
+            let channelCount = Int(firstBuffer.mNumberChannels)
+            let frameCount = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
+            guard frameCount > 0, let firstChannel = AVAudioPCMBuffer(pcmFormat: firstChannelFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
+            firstChannel.frameLength = AVAudioFrameCount(frameCount)
+            let interleaved = data.assumingMemoryBound(to: Float.self)
+            let destination = firstChannel.floatChannelData![0]
+            for frame in 0..<frameCount { destination[frame] = interleaved[frame * channelCount] }
+            onSamples(resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime)
+        }, "listening to \(target.name)")
+        guard let procID else { throw CaptureError(errorDescription: "listening to \(target.name) failed") }
+        do {
+            try ensure(AudioDeviceStart(target.id, procID), "starting \(target.name)")
+        } catch {
+            AudioDeviceDestroyIOProcID(target.id, procID)
+            throw error
         }
-        try engine.start()
-        // A real device change stops the engine; the notification that follows startup leaves it running.
-        configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [onConfigurationChange, weak engine] _ in
-            if engine?.isRunning != true { onConfigurationChange() }
+        let deviceListener: AudioObjectPropertyListenerBlock = { [onDeviceChange] _, _ in onDeviceChange() }
+        for var address in Self.deviceChangeAddresses {
+            AudioObjectAddPropertyListenerBlock(target.id, &address, nil, deviceListener)
         }
-        self.engine = engine
+        self.deviceListener = deviceListener
+        ioProcID = procID
         device = target
     }
 
     func stop() {
-        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
-        configurationObserver = nil
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
+        guard let device else { return }
+        if let deviceListener {
+            for var address in Self.deviceChangeAddresses {
+                AudioObjectRemovePropertyListenerBlock(device.id, &address, nil, deviceListener)
+            }
+        }
+        deviceListener = nil
+        if let ioProcID {
+            AudioDeviceStop(device.id, ioProcID)
+            AudioDeviceDestroyIOProcID(device.id, ioProcID)
+        }
+        ioProcID = nil
     }
 }
 
@@ -421,6 +461,15 @@ final class Recorder {
 
     func appendSystem(_ samples: [Float], hostTime: UInt64) {
         lock.withLock { system.append(samples, hostTime: hostTime) }
+    }
+
+    /// Gives a freshly restarted capture the full stall window to deliver its first buffer.
+    func resetMicrophoneStallTimer() {
+        lock.withLock { microphone.lastBufferUptime = uptimeSeconds() }
+    }
+
+    func resetSystemStallTimer() {
+        lock.withLock { system.lastBufferUptime = uptimeSeconds() }
     }
 
     func secondsSinceMicrophoneAudio() -> Double {
@@ -641,7 +690,7 @@ let systemCapture = SystemAudioCapture(onSamples: recorder.appendSystem)
 let microphoneCapture: MicrophoneCapture? = includesMicrophone ? MicrophoneCapture(
     preferredName: microphoneQuery,
     onSamples: recorder.appendMicrophone,
-    onConfigurationChange: { writerQueue.async { microphoneNeedsRestart = true } }
+    onDeviceChange: { writerQueue.async { microphoneNeedsRestart = true } }
 ) : nil
 do {
     try systemCapture.start()
@@ -679,6 +728,7 @@ func superviseCaptures() {
             microphoneCapture.stop()
             do {
                 try microphoneCapture.start()
+                recorder.resetMicrophoneStallTimer()
                 announce("mic -> \(microphoneCapture.device?.name ?? "?")")
             } catch {
                 announce("mic unavailable, retrying: \(error.localizedDescription)")
@@ -691,6 +741,7 @@ func superviseCaptures() {
         systemCapture.stop()
         do {
             try systemCapture.start()
+            recorder.resetSystemStallTimer()
             announce("system audio capture restarted")
         } catch {
             announce("system audio unavailable, retrying: \(error.localizedDescription)")
