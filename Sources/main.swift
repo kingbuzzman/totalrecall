@@ -11,6 +11,7 @@ let maxStartOffsetFrames = Int(sampleRate * 5.0)
 let gapFillThresholdFrames = Int(sampleRate * 0.1)
 let echoTailSeconds = 0.12
 let captureStallSeconds = 0.6
+let switchTimeoutSeconds = 5.0
 let restartRetrySeconds = 0.5
 let silentSystemWarningSeconds = 10.0
 let meterWidth = 10
@@ -238,47 +239,33 @@ func inputStreamFormat(of device: InputDevice) throws -> AudioStreamBasicDescrip
     return format
 }
 
-/// Records the preferred microphone when it is present, otherwise the system input, straight from its Core Audio
-/// device so every start reads the device's current format (AirPods change sample rate when their mic turns on).
-final class MicrophoneCapture {
-    private let preferredName: String?
-    private let onSamples: ([Float], UInt64) -> Void
-    private let onDeviceChange: () -> Void
+/// One Core Audio capture of a single input device, read straight from the device so it always uses the device's
+/// current format (AirPods change sample rate when their mic turns on).
+final class MicrophoneSession {
+    let device: InputDevice
+    let id: Int
+    let startedAt = uptimeSeconds()
     private var ioProcID: AudioDeviceIOProcID?
     private var deviceListener: AudioObjectPropertyListenerBlock?
-    private(set) var device: InputDevice?
     private static let deviceChangeAddresses = [
         propertyAddress(kAudioDevicePropertyNominalSampleRate),
         propertyAddress(kAudioDevicePropertyStreamConfiguration, scope: kAudioObjectPropertyScopeInput),
         propertyAddress(kAudioDevicePropertyDeviceIsAlive),
     ]
 
-    init(preferredName: String?, onSamples: @escaping ([Float], UInt64) -> Void, onDeviceChange: @escaping () -> Void) {
-        self.preferredName = preferredName
-        self.onSamples = onSamples
-        self.onDeviceChange = onDeviceChange
-    }
-
-    func targetDevice() -> InputDevice? {
-        if let preferredName, let preferred = inputDevices(matching: preferredName).first { return preferred }
-        let defaultDevice = defaultInputDevice()
-        guard defaultDevice != kAudioObjectUnknown else { return nil }
-        return InputDevice(id: defaultDevice, name: stringProperty(defaultDevice, kAudioObjectPropertyName) ?? "system input")
-    }
-
-    func start() throws {
-        guard let target = targetDevice() else { throw CaptureError(errorDescription: "no microphone available") }
-        let streamFormat = try inputStreamFormat(of: target)
+    init(device: InputDevice, id: Int, onSamples: @escaping (Int, [Float], UInt64) -> Void, onDeviceChange: @escaping () -> Void) throws {
+        self.device = device
+        self.id = id
+        let streamFormat = try inputStreamFormat(of: device)
         let isFloat32 = streamFormat.mFormatID == kAudioFormatLinearPCM
             && streamFormat.mFormatFlags & kAudioFormatFlagIsFloat != 0
             && streamFormat.mBitsPerChannel == 32
         guard isFloat32, let firstChannelFormat = AVAudioFormat(standardFormatWithSampleRate: streamFormat.mSampleRate, channels: 1) else {
-            throw CaptureError(errorDescription: "unsupported \(target.name) format")
+            throw CaptureError(errorDescription: "unsupported \(device.name) format")
         }
         let resampler = try Resampler(from: firstChannelFormat)
-        let onSamples = onSamples
         var procID: AudioDeviceIOProcID?
-        try ensure(AudioDeviceCreateIOProcIDWithBlock(&procID, target.id, nil) { _, inputData, inputTime, _, _ in
+        try ensure(AudioDeviceCreateIOProcIDWithBlock(&procID, device.id, nil) { _, inputData, inputTime, _, _ in
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
             guard let firstBuffer = buffers.first, let data = firstBuffer.mData, firstBuffer.mNumberChannels > 0 else { return }
             // Built-in mic arrays deliver several interleaved channels; channel 0 is a complete microphone signal.
@@ -289,26 +276,24 @@ final class MicrophoneCapture {
             let interleaved = data.assumingMemoryBound(to: Float.self)
             let destination = firstChannel.floatChannelData![0]
             for frame in 0..<frameCount { destination[frame] = interleaved[frame * channelCount] }
-            onSamples(resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime)
-        }, "listening to \(target.name)")
-        guard let procID else { throw CaptureError(errorDescription: "listening to \(target.name) failed") }
+            onSamples(id, resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime)
+        }, "listening to \(device.name)")
+        guard let procID else { throw CaptureError(errorDescription: "listening to \(device.name) failed") }
         do {
-            try ensure(AudioDeviceStart(target.id, procID), "starting \(target.name)")
+            try ensure(AudioDeviceStart(device.id, procID), "starting \(device.name)")
         } catch {
-            AudioDeviceDestroyIOProcID(target.id, procID)
+            AudioDeviceDestroyIOProcID(device.id, procID)
             throw error
         }
-        let deviceListener: AudioObjectPropertyListenerBlock = { [onDeviceChange] _, _ in onDeviceChange() }
+        ioProcID = procID
+        let deviceListener: AudioObjectPropertyListenerBlock = { _, _ in onDeviceChange() }
         for var address in Self.deviceChangeAddresses {
-            AudioObjectAddPropertyListenerBlock(target.id, &address, nil, deviceListener)
+            AudioObjectAddPropertyListenerBlock(device.id, &address, nil, deviceListener)
         }
         self.deviceListener = deviceListener
-        ioProcID = procID
-        device = target
     }
 
     func stop() {
-        guard let device else { return }
         if let deviceListener {
             for var address in Self.deviceChangeAddresses {
                 AudioObjectRemovePropertyListenerBlock(device.id, &address, nil, deviceListener)
@@ -320,6 +305,108 @@ final class MicrophoneCapture {
             AudioDeviceDestroyIOProcID(device.id, ioProcID)
         }
         ioProcID = nil
+    }
+}
+
+/// Records the preferred microphone when it is present, otherwise the system input. Switching is make-before-break:
+/// the old microphone keeps recording until the new one delivers real audio, which hides the ~2 s AirPods take to
+/// switch Bluetooth into their call profile.
+final class MicrophoneCapture {
+    private let preferredName: String?
+    private let onSamples: ([Float], UInt64) -> Void
+    private let onDeviceChange: () -> Void
+    private let lock = NSLock()
+    private var active: MicrophoneSession?
+    private var pending: MicrophoneSession?
+    private var replaced: [MicrophoneSession] = []
+    private var switchedTo: InputDevice?
+    private var lastActiveAudioUptime = 0.0
+    private var nextSessionID = 0
+
+    init(preferredName: String?, onSamples: @escaping ([Float], UInt64) -> Void, onDeviceChange: @escaping () -> Void) {
+        self.preferredName = preferredName
+        self.onSamples = onSamples
+        self.onDeviceChange = onDeviceChange
+    }
+
+    /// The device being recorded, or the one being switched to.
+    var device: InputDevice? {
+        lock.withLock { (pending ?? active)?.device }
+    }
+
+    var isSwitching: Bool {
+        lock.withLock { pending.map { uptimeSeconds() - $0.startedAt < switchTimeoutSeconds } ?? false }
+    }
+
+    func targetDevice() -> InputDevice? {
+        if let preferredName, let preferred = inputDevices(matching: preferredName).first { return preferred }
+        let defaultDevice = defaultInputDevice()
+        guard defaultDevice != kAudioObjectUnknown else { return nil }
+        return InputDevice(id: defaultDevice, name: stringProperty(defaultDevice, kAudioObjectPropertyName) ?? "system input")
+    }
+
+    /// Starts recording the target device. While another device is recording, the new one waits as pending.
+    func start() throws {
+        guard let target = targetDevice() else { throw CaptureError(errorDescription: "no microphone available") }
+        let sessionID = lock.withLock {
+            nextSessionID += 1
+            return nextSessionID
+        }
+        let session = try MicrophoneSession(device: target, id: sessionID, onSamples: { [weak self] in self?.deliver(from: $0, $1, hostTime: $2) }, onDeviceChange: onDeviceChange)
+        lock.withLock {
+            if let pending { replaced.append(pending) }
+            if active == nil {
+                active = session
+                lastActiveAudioUptime = uptimeSeconds()
+            } else {
+                pending = session
+            }
+        }
+    }
+
+    /// Stops sessions that were switched away from and returns the new device if a switch completed.
+    /// Runs on the writer queue, never inside an audio callback.
+    func finishSwitch() -> InputDevice? {
+        let (finished, newDevice) = lock.withLock {
+            defer {
+                replaced.removeAll()
+                switchedTo = nil
+            }
+            return (replaced, switchedTo)
+        }
+        finished.forEach { $0.stop() }
+        return newDevice
+    }
+
+    func stop() {
+        let sessions = lock.withLock {
+            let sessions = [active, pending].compactMap { $0 } + replaced
+            active = nil
+            pending = nil
+            replaced.removeAll()
+            return sessions
+        }
+        sessions.forEach { $0.stop() }
+    }
+
+    private func deliver(from sessionID: Int, _ samples: [Float], hostTime: UInt64) {
+        let shouldRecord: Bool = lock.withLock {
+            let now = uptimeSeconds()
+            if sessionID == active?.id {
+                lastActiveAudioUptime = now
+                return true
+            }
+            guard let pending, sessionID == pending.id else { return false }
+            let activeWentQuiet = now - lastActiveAudioUptime > captureStallSeconds
+            guard samples.contains(where: { $0 != 0 }) || activeWentQuiet else { return false }
+            if let active { replaced.append(active) }
+            active = pending
+            self.pending = nil
+            switchedTo = pending.device
+            lastActiveAudioUptime = now
+            return true
+        }
+        if shouldRecord { onSamples(samples, hostTime) }
     }
 }
 
@@ -718,18 +805,19 @@ var nextSystemRestart = 0.0
 func superviseCaptures() {
     let now = uptimeSeconds()
     if let microphoneCapture {
+        if let newDevice = microphoneCapture.finishSwitch() {
+            announce("mic -> \(newDevice.name)")
+        }
         if devicesChanged, microphoneCapture.targetDevice()?.id != microphoneCapture.device?.id {
             microphoneNeedsRestart = true
         }
-        let stalled = recorder.secondsSinceMicrophoneAudio() > captureStallSeconds
+        let stalled = recorder.secondsSinceMicrophoneAudio() > captureStallSeconds && !microphoneCapture.isSwitching
         if (microphoneNeedsRestart || stalled) && now >= nextMicrophoneRestart {
             microphoneNeedsRestart = false
             nextMicrophoneRestart = now + restartRetrySeconds
-            microphoneCapture.stop()
             do {
                 try microphoneCapture.start()
                 recorder.resetMicrophoneStallTimer()
-                announce("mic -> \(microphoneCapture.device?.name ?? "?")")
             } catch {
                 announce("mic unavailable, retrying: \(error.localizedDescription)")
             }

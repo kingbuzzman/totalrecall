@@ -28,8 +28,9 @@ rerouting, and nothing to reconfigure. It is app-agnostic: it records everything
   that audio back out of your mic channel. In testing on MacBook Pro speakers this lowered the echo by ~13–15 dB; it
   reduces the "everyone twice" effect a lot but does not remove it completely. Headphones/AirPods avoid it entirely.
 - **Follows your devices.** The mic tracks the macOS system input, so putting in or taking out AirPods mid-meeting
-  switches the mic automatically. If a capture stops delivering audio it is rebuilt, and the gap is filled with silence
-  so the two channels stay in sync.
+  switches the mic automatically. Switching is make-before-break: the old mic keeps recording until the new one
+  delivers real audio, which hides the ~2 s AirPods need to switch Bluetooth into their call profile. If a capture
+  stops delivering audio it is rebuilt, and any gap is filled with silence so the two channels stay in sync.
 - **Survives crashes.** While recording it writes raw audio to `<output>.partial.caf`; on Ctrl-C it converts that to
   the requested format and deletes it. If the process is killed or the Mac crashes, the `.partial.caf` is still
   playable.
