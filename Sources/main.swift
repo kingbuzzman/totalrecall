@@ -27,7 +27,7 @@ case .help:
     print("totalrecall \(version)\n\n\(usage)")
     exit(0)
 case .version:
-    print("totalrecall \(version)")
+    print("\(version)")
     exit(0)
 case .record(let path, let parsedOptions):
     outputPath = path
