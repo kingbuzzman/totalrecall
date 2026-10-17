@@ -27,9 +27,11 @@ func pcmSettings(bigEndian: Bool) -> [String: Any] {
     ]
 }
 
-let aacSettings: [String: Any] = [
-    AVFormatIDKey: kAudioFormatMPEG4AAC,
-    AVSampleRateKey: sampleRate,
-    AVNumberOfChannelsKey: 2,
-    AVEncoderBitRateKey: 128_000,
-]
+var aacSettings: [String: Any] {
+    [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: 2,
+        AVEncoderBitRateKey: 128_000,
+    ]
+}

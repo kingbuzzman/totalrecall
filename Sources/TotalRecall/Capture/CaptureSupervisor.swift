@@ -1,3 +1,5 @@
+import Foundation
+
 /// A capture that delivers no audio for this long has stalled.
 let captureStallSeconds = 0.6
 

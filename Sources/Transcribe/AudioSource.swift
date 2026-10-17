@@ -10,8 +10,8 @@ protocol AudioSource {
     func read(maxFrames: Int) throws -> [[Float]]?
 }
 
-/// Any audio file macOS can read (.m4a, .mp3, .wav, .caf, ...).
-final class FileAudioSource: AudioSource {
+/// Any audio file macOS can read (.m4a, .mp3, .wav, .caf, ...). Read by one task at a time.
+final class FileAudioSource: AudioSource, @unchecked Sendable {
     private let file: AVAudioFile
     /// Reused from one read to the next; each read copies what it read out of it.
     private var buffer: AVAudioPCMBuffer?
@@ -37,8 +37,8 @@ final class FileAudioSource: AudioSource {
     }
 }
 
-/// A live WAV stream, such as `totalrecall -` on stdin.
-final class StreamAudioSource: AudioSource {
+/// A live WAV stream, such as `totalrecall -` on stdin. Read by one task at a time.
+final class StreamAudioSource: AudioSource, @unchecked Sendable {
     private let reader: WAVStreamReader
 
     var sampleRate: Double { reader.sampleRate }

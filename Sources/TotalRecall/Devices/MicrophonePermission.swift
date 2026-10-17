@@ -7,7 +7,7 @@ func requestMicrophoneAccess() -> Bool {
         return true
     case .notDetermined:
         let answered = DispatchSemaphore(value: 0)
-        var granted = false
+        nonisolated(unsafe) var granted = false  // written before `answered.signal()`, read after `answered.wait()`
         AVCaptureDevice.requestAccess(for: .audio) { answer in
             granted = answer
             answered.signal()

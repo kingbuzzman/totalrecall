@@ -14,8 +14,12 @@ import Foundation
 // Apple can change or remove these functions in any macOS release. They are looked up at runtime, so if they are
 // gone, totalrecall records without checking, as before, instead of failing to launch.
 
-private let tccFramework = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW)
-private let audioCaptureService = "kTCCServiceAudioCapture" as CFString
+// Neither changes once set, so any thread may read them.
+nonisolated(unsafe) private let tccFramework = dlopen(
+    "/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC",
+    RTLD_NOW
+)
+nonisolated(unsafe) private let audioCaptureService = "kTCCServiceAudioCapture" as CFString
 
 /// `int TCCAccessPreflight(CFStringRef service, CFDictionaryRef options)`: 0 granted, 1 denied, anything else unknown.
 private typealias TCCAccessPreflight = @convention(c) (CFString, CFDictionary?) -> Int32

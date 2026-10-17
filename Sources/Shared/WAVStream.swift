@@ -1,5 +1,5 @@
 import Accelerate
-import Foundation
+package import Foundation
 
 /// The live audio stream between `totalrecall -` and `transcribe -`: WAV of unknown length, the way streaming tools
 /// such as ffmpeg and sox write it (RIFF and data sizes of 0xFFFFFFFF), followed by interleaved 16-bit little-endian

@@ -78,7 +78,7 @@ do {
     }
 }
 
-func stopAndExit() -> Never {
+@MainActor func stopAndExit() -> Never {
     do {
         try session.stopAndSave()
     } catch let error as StoppedBeforeRecording {
@@ -93,7 +93,7 @@ func stopAndExit() -> Never {
     exit(0)
 }
 
-session.onOutputClosed = { DispatchQueue.main.async { stopAndExit() } }
+session.onOutputClosed = { @Sendable in DispatchQueue.main.async { stopAndExit() } }
 do {
     try session.start()
 } catch {

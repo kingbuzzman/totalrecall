@@ -1,8 +1,14 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-/// The code that ships fails to build on any compiler warning.
-let strict: [SwiftSetting] = [.treatAllWarnings(as: .error)]
+/// The code that ships: the Swift 6 language mode, which checks for data races, imports that are checked rather than
+/// leaked between files and modules, and a failed build on any compiler warning.
+let strict: [SwiftSetting] = [
+    .swiftLanguageMode(.v6),
+    .enableUpcomingFeature("MemberImportVisibility"),
+    .enableUpcomingFeature("InternalImportsByDefault"),
+    .treatAllWarnings(as: .error),
+]
 
 let package = Package(
     name: "totalrecall",

@@ -18,7 +18,7 @@ final class RecordingSession {
     private static let maxStartupWaitSeconds = 6.0
 
     /// Called on the writer queue when streaming to stdout and the program reading it has gone away.
-    var onOutputClosed: (() -> Void)?
+    var onOutputClosed: (@Sendable () -> Void)?
     private let destination: Destination
     private let recorder: Recorder
     private let systemCapture: SystemAudioCapture

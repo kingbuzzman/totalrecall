@@ -64,7 +64,8 @@ func finishOnStopSignals() -> [DispatchSourceSignal] {
 do {
     let locale = try await speechLocale(for: options.language)
     try await installSpeechModel(for: locale)
-    let source: AudioSource =
+    // Read here first, to tell the speakers apart, then by the reading task below.
+    let source: any AudioSource & Sendable =
         isLive
         ? try StreamAudioSource(handle: .standardInput)
         : try FileAudioSource(url: URL(fileURLWithPath: (inputPath as NSString).expandingTildeInPath))
