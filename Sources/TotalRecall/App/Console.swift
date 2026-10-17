@@ -1,6 +1,7 @@
 import Foundation
 
-/// Progress on stderr: timestamped announcements and, on a terminal, a level meter redrawn in place.
+/// Progress on stderr: messages ("totalrecall: ...", never timestamped, which would look like a line of a transcript)
+/// and, on a terminal, a level meter redrawn in place.
 ///
 /// On a terminal every message starts by clearing the current line, which may hold the meter or, when the recording
 /// streams to `transcribe -`, its text still being recognized: either is redrawn on its next update, below the message.
@@ -12,11 +13,11 @@ struct StatusLine {
     private let isTerminal = isatty(STDERR_FILENO) != 0
     private let showsMeter: Bool
 
-    /// The meter is only shown on a terminal, and not when `allowsMeter` is false: when the recording streams to
-    /// another program that writes to the same terminal, a line redrawn in place would garble its output.
-    init(recorder: Recorder, allowsMeter: Bool) {
+    /// The meter is only shown on a terminal, and not while streaming: the other program writes to the same terminal,
+    /// and a line redrawn in place would garble its output.
+    init(recorder: Recorder, isStreaming: Bool) {
         self.recorder = recorder
-        showsMeter = allowsMeter && isTerminal
+        showsMeter = !isStreaming && isTerminal
     }
 
     /// Returns to the start of the line and clears it, on a terminal.
@@ -28,18 +29,13 @@ struct StatusLine {
         return String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
     }
 
-    /// Prints `message` on a line of its own, stamped with the recording time.
+    /// Prints "totalrecall: `message`" on a line of its own.
     func announce(_ message: String) {
-        say("[\(elapsed)] \(message)")
-    }
-
-    /// Prints a warning on a line of its own, without a timestamp.
-    func warn(_ message: String) {
         say("totalrecall: \(message)")
     }
 
     func reportWriteFailure(_ error: Error) {
-        warn("write failed: \(error.localizedDescription)")
+        announce("write failed: \(error.localizedDescription)")
     }
 
     /// Prints `text` on a line of its own.

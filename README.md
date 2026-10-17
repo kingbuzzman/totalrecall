@@ -222,6 +222,7 @@ untouched.
 ## Releasing
 
 The version lives in `VERSION`; the build writes it into both tools. To release, add a `## <version>` section to
-`CHANGELOG.md`, bump `VERSION` and push to `master`: `.github/workflows/release.yml` sees that `v<VERSION>` has no tag
-yet, builds both tools on macOS 26, and publishes a GitHub release with the tag, that section as its notes, and
-`totalrecall-<VERSION>-macos-arm64.tar.gz`. `make release` builds the same tarball locally, in `build/`.
+`CHANGELOG.md`, bump `VERSION` and push to `master`. The integration workflow builds both tools on macOS 26 and tests
+them; only if the tests pass does `.github/workflows/release.yml` check that `v<VERSION>` has no tag yet and publish
+a GitHub release with the tag, that section as its notes, and the `totalrecall-<VERSION>-macos-arm64.tar.gz` that
+integration built. `make release` builds the same tarball locally, in `build/`.

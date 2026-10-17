@@ -13,6 +13,9 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - The "No system audio captured yet" warning is gone, replaced by that check.
 - Messages start on a clean line, so they no longer run into `transcribe`'s in-progress text when both print to the
   same terminal. Write failures now read `totalrecall: write failed: ...`.
+- All messages, such as mic switches, read `totalrecall: mic -> ...` on stderr, never with a timestamp, which looked
+  like a line of the transcript.
+- No more `mic -> <same mic>` announcements when the microphone capture restarts without changing device.
 
 ### transcribe
 

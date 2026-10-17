@@ -19,7 +19,7 @@ final class MicrophoneCapture {
     private var pending: MicrophoneSession?
     /// Sessions switched away from; `finishSwitch()` stops them outside the audio callbacks.
     private var replaced: [MicrophoneSession] = []
-    /// The device a switch completed to, until `finishSwitch()` reports it.
+    /// The device a switch to another device completed to, until `finishSwitch()` reports it.
     private var switchedTo: InputDevice?
     private var lastActiveAudioUptime = 0.0
     private var nextSessionID = 0
@@ -77,7 +77,7 @@ final class MicrophoneCapture {
         }
     }
 
-    /// Stops sessions that were switched away from and returns the new device if a switch completed.
+    /// Stops sessions that were switched away from and returns the new device if a switch to another device completed.
     /// Runs on the writer queue, never inside an audio callback.
     func finishSwitch() -> InputDevice? {
         let (finished, newDevice) = lock.withLock {
@@ -118,10 +118,11 @@ final class MicrophoneCapture {
             guard let pending, sessionID == pending.id else { return false }
             let activeWentQuiet = now - lastActiveAudioUptime > captureStallSeconds
             guard samples.contains(where: { $0 != 0 }) || activeWentQuiet else { return false }
+            // A restart of the same device (after a stall or a device change) is not a switch to announce.
+            if active?.device.id != pending.device.id { switchedTo = pending.device }
             if let active { replaced.append(active) }
             active = pending
             self.pending = nil
-            switchedTo = pending.device
             lastActiveAudioUptime = now
             return true
         }

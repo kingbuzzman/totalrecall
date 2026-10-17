@@ -3,7 +3,9 @@ import Foundation
 // The only place that ends the process: everything below main.swift reports failures by throwing.
 
 func fail(_ message: String) -> Never {
-    fputs("totalrecall: \(message)\n", stderr)
+    // On a terminal, start on a clean line, like every other message (see StatusLine).
+    let clearLine = isatty(STDERR_FILENO) != 0 ? "\r\u{1B}[K" : ""
+    fputs("\(clearLine)totalrecall: \(message)\n", stderr)
     exit(1)
 }
 

@@ -56,8 +56,8 @@ final class RecordingSession {
             options.includesMicrophone
             ? MicrophoneCapture(preferredName: options.microphoneQuery, onSamples: recorder.appendMicrophone)
             : nil
-        let isFile = if case .file = destination { true } else { false }
-        let status = StatusLine(recorder: recorder, allowsMeter: isFile)
+        let isStreaming = if case .standardOutput = destination { true } else { false }
+        let status = StatusLine(recorder: recorder, isStreaming: isStreaming)
         let writerQueue = DispatchQueue(label: "totalrecall.writer")
         self.destination = destination
         self.recorder = recorder
