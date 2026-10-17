@@ -1,5 +1,6 @@
 PREFIX ?= $(HOME)/.local
 SPEEXDSP := $(shell brew --prefix speexdsp)
+AUDIOLAB := tests/build/audiolab
 
 totalrecall: Sources/main.swift Sources/bridging.h Info.plist
 	swiftc -O -o $@ Sources/main.swift \
@@ -7,11 +8,19 @@ totalrecall: Sources/main.swift Sources/bridging.h Info.plist
 		-Xcc -I$(SPEEXDSP)/include -L$(SPEEXDSP)/lib -lspeexdsp \
 		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist
 
+$(AUDIOLAB): tests/audiolab/main.swift
+	mkdir -p $(dir $@)
+	swiftc -O -o $@ tests/audiolab/main.swift
+
+# Integration tests; run a subset with: make test TESTS="records_mic_and_system_audio switches_to_slow_starting_input"
+test: totalrecall $(AUDIOLAB)
+	tests/run.sh $(TESTS)
+
 install: totalrecall
 	mkdir -p $(PREFIX)/bin
 	ln -sf $(CURDIR)/totalrecall $(PREFIX)/bin/totalrecall
 
 clean:
-	rm -f totalrecall
+	rm -f totalrecall $(AUDIOLAB)
 
-.PHONY: install clean
+.PHONY: test install clean

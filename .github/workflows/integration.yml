@@ -1,0 +1,42 @@
+name: integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies and test audio devices
+        run: |
+          brew install speexdsp ffmpeg
+          brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
+          sudo killall coreaudiod || true
+
+      - name: Build
+        run: make totalrecall tests/build/audiolab
+
+      - name: Grant audio permissions
+        run: sudo tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
+
+      - name: Run integration tests
+        run: make test
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          system_profiler SPAudioDataType || true
+          log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
+
+      - name: Upload recordings and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-recordings
+          path: tests/build/results
+          if-no-files-found: ignore

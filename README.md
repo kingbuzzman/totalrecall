@@ -92,6 +92,38 @@ The first run asks for two permissions for the terminal app you run it from:
 
 If the system meter stays flat while audio is playing, the second one is missing; enable it and restart totalrecall.
 
+## Testing
+
+The integration tests run the real `totalrecall` binary and check the files it saves, so they test behavior rather
+than implementation and keep working across rewrites. They need no microphone or speakers, only three BlackHole
+loopback devices, so they run the same way locally and on headless CI machines:
+
+```sh
+brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch   # test devices, once
+make test                                                         # all scenarios, ~2 minutes
+make test TESTS="switches_to_slow_starting_input"                 # selected scenarios
+LONG=1 make test                                                  # adds a 2-minute drift test
+```
+
+How it works: `tests/audiolab` creates fake microphones, each a temporary aggregate device wrapping a BlackHole
+device that a helper process plays a click track into. Fake mics can appear, disappear, become the system input,
+change sample rate, or stay silent for a while before delivering audio, which is how AirPods look to totalrecall.
+Every click track is locked to the system clock, so the analysis can find every click in a recording and report lost
+audio, silence, which mic was recorded when, and drift between the channels, in milliseconds.
+
+The scenarios (`tests/run.sh`) cover recording, switching to a new or slow-starting input, sample-rate changes, a
+preferred `--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills,
+every output format, mixed channels, and usage errors. While the tests run, the system input and output are
+switched to the test devices and restored afterwards. Recordings and logs are kept in `tests/build/results`.
+
+CI runs the same suite on GitHub's macOS runners (`.github/workflows/integration.yml`). There,
+`tests/ci/grant-audio-permissions.sh` grants the microphone and system-audio permissions nobody can click "Allow"
+for; it refuses to run outside CI.
+
+Known limit: totalrecall's system-audio capture also hears the fake mics' playback, so echo cancellation sees the
+"voice" in its reference signal. The echo scenario therefore checks only that echo is reduced, not that the voice is
+untouched.
+
 ## Notes and limitations
 
 - It records **all** system audio, including notification sounds and music. Use Do Not Disturb during meetings.

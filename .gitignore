@@ -8,3 +8,4 @@
 *.aiff
 *.caf
 *.flac
+/tests/build/
