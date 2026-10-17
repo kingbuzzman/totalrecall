@@ -1,0 +1,10 @@
+/totalrecall
+*.partial.caf
+.DS_Store
+*.mp3
+*.m4a
+*.wav
+*.aif
+*.aiff
+*.caf
+*.flac
