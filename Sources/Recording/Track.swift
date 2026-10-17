@@ -79,6 +79,11 @@ final class Track {
         if samples.count < count { appendSilence(count - samples.count) }
     }
 
+    /// Drops the waiting samples after the first `count`.
+    func truncate(toCount count: Int) {
+        if samples.count > count { samples.removeLast(samples.count - count) }
+    }
+
     /// Delays the waiting samples by `count` frames of silence. The timeline is measured from this track's own first
     /// buffer, so it does not move.
     func delayStart(by count: Int) {

@@ -67,6 +67,8 @@ do {
 let stopSignals = handleStopSignals {
     do {
         try session.stopAndSave()
+    } catch let error as StoppedBeforeRecording {
+        fail(error.localizedDescription)
     } catch {
         fail(
             "could not save \(output.url.path): \(error.localizedDescription); "

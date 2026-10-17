@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 
 /// Progress on stderr: timestamped announcements and, on a terminal, a level meter redrawn in place.
@@ -9,9 +8,9 @@ struct StatusLine {
     let recorder: Recorder
     private let showsMeter = isatty(STDERR_FILENO) != 0
 
-    /// Length of audio written so far, as HH:MM:SS.
+    /// Length of the recording so far, as HH:MM:SS.
     var elapsed: String {
-        let seconds = Int(recorder.framesWritten / AVAudioFramePosition(sampleRate))
+        let seconds = Int(recorder.secondsRecorded)
         return String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
     }
 
