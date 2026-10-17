@@ -10,21 +10,37 @@ jobs:
     # The binaries need macOS 26 or later.
     runs-on: macos-26
     timeout-minutes: 20
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - uses: actions/checkout@v4
 
       - name: Lint
         run: make lint
 
-      - name: Install dependencies and test audio devices
+      - name: Install test audio devices
         run: |
-          brew install ffmpeg
           brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
           sudo killall coreaudiod || true
 
+      # Only the tests need ffmpeg, so it installs while the build runs; "Wait for ffmpeg" collects it.
+      - name: Start installing ffmpeg
+        run: |
+          nohup sh -c 'brew install ffmpeg; echo $? > "$RUNNER_TEMP/ffmpeg.tmp"; mv "$RUNNER_TEMP/ffmpeg.tmp" "$RUNNER_TEMP/ffmpeg.status"' \
+            > "$RUNNER_TEMP/ffmpeg.log" 2>&1 &
+
+      # Its folder is named after its version and macOS minimum, so an older cache is harmless: make builds afresh.
+      - name: Cache speexdsp
+        uses: actions/cache@v4
+        with:
+          path: build/speexdsp
+          key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+          restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
+
       # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here.
       - name: Build
-        run: make release tests/build/audiolab
+        run: make -j"$(sysctl -n hw.ncpu)" release tests/build/audiolab
 
       - name: Check the versions
         run: |
@@ -34,6 +50,13 @@ jobs:
 
       - name: Grant audio permissions
         run: sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
+
+      - name: Wait for ffmpeg
+        timeout-minutes: 10
+        run: |
+          until [ -f "$RUNNER_TEMP/ffmpeg.status" ]; do sleep 1; done
+          cat "$RUNNER_TEMP/ffmpeg.log"
+          exit "$(cat "$RUNNER_TEMP/ffmpeg.status")"
 
       - name: Run integration tests
         run: make test
