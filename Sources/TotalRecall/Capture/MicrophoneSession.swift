@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import Synchronization
 
 /// Receives each captured buffer, resampled to mono, with the host time of its first frame and the ID of the
 /// `MicrophoneSession` that captured it.
@@ -17,6 +18,11 @@ final class MicrophoneSession {
     let device: InputDevice
     let id: Int
     let startedAt = uptimeSeconds()
+    /// Set once the device no longer runs at the sample rate this session converts from, or has gone away. From then
+    /// on its audio is dropped: converted as if it were still at the old rate, it would come out stretched or squeezed
+    /// in time and shift everything after it. `MicrophoneCapture` replaces the session, and the timeline fills the
+    /// short gap with silence.
+    private let isStale = StaleFlag()
     private var ioProcID: AudioDeviceIOProcID?
     private var deviceListener: AudioObjectPropertyListenerBlock?
 
@@ -42,8 +48,12 @@ final class MicrophoneSession {
             throw RecordingError("unsupported \(device.name) format")
         }
         let resampler = try Resampler(from: firstChannelFormat)
+        let isStale = isStale
         let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
-            guard let firstChannel = Self.firstChannel(of: inputData, format: firstChannelFormat) else { return }
+            guard
+                !isStale.isSet,
+                let firstChannel = Self.firstChannel(of: inputData, format: firstChannelFormat)
+            else { return }
             onSamples(resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime, id)
         }
         var procID: AudioDeviceIOProcID?
@@ -56,7 +66,11 @@ final class MicrophoneSession {
             throw error
         }
         ioProcID = procID
-        let deviceListener: AudioObjectPropertyListenerBlock = { _, _ in onDeviceChange() }
+        let sampleRate = streamFormat.mSampleRate
+        let deviceListener: AudioObjectPropertyListenerBlock = { _, _ in
+            if !Self.isRunning(device.id, at: sampleRate) { isStale.set() }
+            onDeviceChange()
+        }
         for var address in Self.deviceChangeAddresses {
             AudioObjectAddPropertyListenerBlock(device.id, &address, nil, deviceListener)
         }
@@ -75,6 +89,21 @@ final class MicrophoneSession {
             AudioDeviceDestroyIOProcID(device.id, ioProcID)
         }
         ioProcID = nil
+    }
+
+    /// Whether the device is still there and running at `sampleRate`.
+    private static func isRunning(_ deviceID: AudioDeviceID, at sampleRate: Double) -> Bool {
+        let rate = try? readProperty(
+            deviceID,
+            propertyAddress(kAudioDevicePropertyNominalSampleRate),
+            initialValue: 0.0
+        )
+        let isAlive = try? readProperty(
+            deviceID,
+            propertyAddress(kAudioDevicePropertyDeviceIsAlive),
+            initialValue: 0 as UInt32
+        )
+        return rate == sampleRate && isAlive == 1
     }
 
     /// Copies channel 0 out of the device's interleaved buffer. Built-in mic arrays deliver several interleaved
@@ -100,5 +129,16 @@ final class MicrophoneSession {
         let destination = firstChannel.floatChannelData![0]
         for frame in 0..<frameCount { destination[frame] = interleaved[frame * channelCount] }
         return firstChannel
+    }
+}
+
+/// A flag set from a Core Audio notification thread and read on the audio thread, without locking.
+private final class StaleFlag: Sendable {
+    private let value = Atomic<Bool>(false)
+
+    var isSet: Bool { value.load(ordering: .relaxed) }
+
+    func set() {
+        value.store(true, ordering: .relaxed)
     }
 }

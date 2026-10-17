@@ -16,6 +16,8 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - All messages, such as mic switches, read `totalrecall: mic -> ...` on stderr, never with a timestamp, which looked
   like a line of the transcript.
 - No more `mic -> <same mic>` announcements when the microphone capture restarts without changing device.
+- Fixed: when a microphone changed sample rate mid-recording (AirPods do when their mic turns on), up to half a second
+  of its audio was recorded stretched or squeezed, shifting the mic channel out of sync by tens of milliseconds.
 
 ### transcribe
 
