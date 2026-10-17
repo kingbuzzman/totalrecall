@@ -4,7 +4,6 @@ import Foundation
 struct LevelSnapshot {
     let microphonePeak: Float
     let systemPeak: Float
-    let systemHasHeardSound: Bool
 }
 
 /// Writes the microphone (left) and system audio (right), or their mix on both channels, to its sink: a crash-safe
@@ -136,8 +135,7 @@ final class Recorder {
         lock.withLock {
             LevelSnapshot(
                 microphonePeak: microphone.takePeak(),
-                systemPeak: system.takePeak(),
-                systemHasHeardSound: system.hasHeardSound
+                systemPeak: system.takePeak()
             )
         }
     }

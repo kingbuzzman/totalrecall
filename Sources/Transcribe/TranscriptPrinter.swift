@@ -17,11 +17,13 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     func update(_ update: TranscriptUpdate) {
+        // The recognizer sometimes reports bare punctuation, such as "." for silence.
+        let hasWords = update.text.contains { $0.isLetter || $0.isNumber }
         lock.withLock {
             let key = update.speaker?.rawValue ?? ""
             if update.isFinal {
                 volatileText[key] = nil
-                if !update.text.isEmpty {
+                if hasWords {
                     finals.append(update)
                     if printsLines {
                         clearLiveLine()
@@ -29,7 +31,7 @@ final class TranscriptPrinter: @unchecked Sendable {
                     }
                 }
             } else {
-                volatileText[key] = update.text
+                volatileText[key] = hasWords ? update.text : nil
             }
             drawLiveLine()
             fflush(stdout)

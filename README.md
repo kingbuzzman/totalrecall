@@ -138,13 +138,20 @@ The first run downloads Apple's speech model.
 
 ## Permissions
 
-The first run asks for two permissions for the terminal app you run it from:
+totalrecall needs two separate permissions, which macOS grants to the terminal app you run it from:
 
-- **Microphone** — System Settings › Privacy & Security › Microphone
-- **System audio** — System Settings › Privacy & Security › Screen & System Audio Recording (System Audio Recording
-  Only)
+- **System audio** — System Settings › Privacy & Security › Screen & System Audio Recording › System Audio Recording
+  Only
+- **Microphone** — System Settings › Privacy & Security › Microphone (not needed with `--no-mic`)
 
-If the system meter stays flat while audio is playing, the second one is missing; enable it and restart totalrecall.
+On start it checks both and asks for any that macOS has not asked about yet. If one is denied, it exits with an error
+saying where to allow it; macOS does not ask again once you have said no. After allowing system audio, quit and
+reopen the terminal.
+
+Apple offers no public way to check or request the system audio permission (without it, recordings silently get no
+system audio), so totalrecall uses macOS's undocumented TCC functions for it; see
+`Sources/TotalRecall/Devices/SystemAudioPermission.swift`. If a macOS update removes them, totalrecall records without
+the check.
 
 ## Code layout
 

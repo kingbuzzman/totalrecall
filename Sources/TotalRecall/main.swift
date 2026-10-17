@@ -52,6 +52,12 @@ case .standardOutput:
         fail("refusing to write audio to the terminal; pipe it into another program, e.g. totalrecall - | transcribe -")
     }
 }
+if !requestSystemAudioAccess() {
+    fail(
+        "system audio recording is not allowed; allow your terminal in System Settings > Privacy & Security > "
+            + "Screen & System Audio Recording > System Audio Recording Only, then quit and reopen it"
+    )
+}
 if options.includesMicrophone && !requestMicrophoneAccess() {
     fail(
         "microphone access denied; allow your terminal in System Settings > Privacy & Security > Microphone, "

@@ -12,7 +12,6 @@ struct StoppedBeforeRecording: LocalizedError {
 final class RecordingSession {
     private static let tickSeconds = 0.25
     private static let ticksPerLevelUpdate = 4
-    private static let silentSystemWarningSeconds = 10.0
     /// How often to check whether the recording can start.
     private static let startupPollSeconds = 0.01
     /// Longest to wait for the recording to be able to start, such as with a muted microphone, before starting anyway.
@@ -33,7 +32,6 @@ final class RecordingSession {
     private var hasStarted = false
     private var isOutputClosed = false
     private var ticks = 0
-    private var hasWarnedAboutSilence = false
 
     /// Creates the partial recording or starts the stream; throws if that fails.
     init(options: Options, destination: Destination) throws {
@@ -131,7 +129,7 @@ final class RecordingSession {
             fputs("Saved \(output.url.path)\n", stderr)
         case .standardOutput:
             let reason = isOutputClosed ? " (the program reading it exited)" : ""
-            fputs("\nStreamed \(status.elapsed) of audio\(reason).\n", stderr)
+            status.say("Streamed \(status.elapsed) of audio\(reason).")
         }
     }
 
@@ -152,7 +150,7 @@ final class RecordingSession {
         if !isReady {
             status.announce("no sound from the mic or system audio yet; recording anyway")
         }
-        status.showLevels(LevelSnapshot(microphonePeak: 0, systemPeak: 0, systemHasHeardSound: false))
+        status.showLevels(LevelSnapshot(microphonePeak: 0, systemPeak: 0))
 
         writerTimer.schedule(deadline: .now() + Self.tickSeconds, repeating: Self.tickSeconds)
         writerTimer.setEventHandler { [weak self] in self?.tick() }
@@ -171,7 +169,6 @@ final class RecordingSession {
         ticks += 1
         guard ticks % Self.ticksPerLevelUpdate == 0 else { return }
         let levels = recorder.levels()
-        warnIfSystemAudioIsSilent(levels)
         status.showLevels(levels)
     }
 
@@ -184,17 +181,5 @@ final class RecordingSession {
         guard !isOutputClosed else { return }
         isOutputClosed = true
         onOutputClosed?()
-    }
-
-    /// Usually means the terminal lacks the system audio recording permission, which fails silently.
-    private func warnIfSystemAudioIsSilent(_ levels: LevelSnapshot) {
-        guard !hasWarnedAboutSilence, !levels.systemHasHeardSound else { return }
-        guard Double(ticks) * Self.tickSeconds >= Self.silentSystemWarningSeconds else { return }
-        hasWarnedAboutSilence = true
-        status.announce(
-            "No system audio captured yet. If something is playing, allow your terminal in System Settings > "
-                + "Privacy & Security > Screen & System Audio Recording (System Audio Recording Only), "
-                + "then restart totalrecall."
-        )
     }
 }

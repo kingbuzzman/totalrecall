@@ -2,6 +2,22 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## 0.2.0
+
+### totalrecall
+
+- Checks the System Audio Recording permission before recording. If macOS has not asked yet, it shows the prompt; if
+  the permission is denied, totalrecall exits with an error saying where to allow it, instead of quietly recording
+  silence. Apple has no public API for this permission, so this uses macOS's undocumented TCC functions; if a macOS
+  update removes them, totalrecall records without the check.
+- The "No system audio captured yet" warning is gone, replaced by that check.
+- Messages start on a clean line, so they no longer run into `transcribe`'s in-progress text when both print to the
+  same terminal. Write failures now read `totalrecall: write failed: ...`.
+
+### transcribe
+
+- Ignores results without words, such as the "." the recognizer reports for silence (no more `Them: .`).
+
 ## 0.1.0
 
 First release: `totalrecall` and `transcribe` for macOS 26 on Apple Silicon.

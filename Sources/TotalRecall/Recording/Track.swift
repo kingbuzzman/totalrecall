@@ -10,7 +10,6 @@ final class Track {
 
     /// Host time of the first buffer, or nil until one arrives.
     private(set) var startHostTime: UInt64?
-    private(set) var hasHeardSound = false
     private var samples: [Float] = []
     private var peak: Float = 0
     private var lastBufferUptime = uptimeSeconds()
@@ -49,9 +48,7 @@ final class Track {
         samples.append(contentsOf: kept)
         timelineFrames += kept.count
         lastBufferUptime = uptimeSeconds()
-        let newPeak = kept.reduce(0) { max($0, abs($1)) }
-        peak = max(peak, newPeak)
-        if newPeak > 0 { hasHeardSound = true }
+        peak = max(peak, kept.reduce(0) { max($0, abs($1)) })
     }
 
     func take(_ count: Int) -> [Float] {
