@@ -4,20 +4,20 @@ Record any meeting — Zoom, Slack huddles, Google Meet, Teams, anything that pl
 from the command line. Start it, talk, press Ctrl-C, and the recording is saved where you said.
 
 ```sh
-totalrecall ~/Meetings/standup.mp3
+./totalrecall ~/Meetings/standup.mp3
 ```
 
 It can also stream the recording into `transcribe`, the on-device speech-to-text tool that ships with it, for a live
 transcript that labels who is talking:
 
 ```sh
-totalrecall - | transcribe -
+./totalrecall - | ./transcribe -
 ```
 
 [![totalrecall - | transcribe - live: a YouTube video's audio is transcribed as "Them", the microphone as "You", and the
 mic follows a switch to AirPods mid-recording](docs/demo.jpg)](docs/demo.mp4)
 
-▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound): `totalrecall - | transcribe -` transcribing a YouTube video
+▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound): `./totalrecall - | ./transcribe -` transcribing a YouTube video
 as Them and the microphone as You, live, and following the switch to AirPods mid-recording.
 
 ## Why
@@ -28,7 +28,7 @@ playing" together with your microphone: QuickTime and Cmd-Shift-5 only capture t
 virtual loopback driver such as BlackHole plus a Multi-Output Device, which breaks your volume keys and has to be
 reconfigured whenever you switch between AirPods and speakers.
 
-totalrecall uses Core Audio process taps to capture system audio directly, so there is no driver, no audio
+`totalrecall` uses Core Audio process taps to capture system audio directly, so there is no driver, no audio
 rerouting, and nothing to reconfigure. It is app-agnostic: it records everything the Mac plays.
 
 ## What it does
@@ -77,8 +77,10 @@ make            # builds ./totalrecall and ./transcribe
 make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/dir)
 ```
 
-The first build downloads and compiles [speexdsp](https://speex.org/) (echo cancellation), which is linked into
-totalrecall, so the binary needs nothing installed. Make sure `~/.local/bin` is on your `PATH`.
+The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
+[speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs
+nothing installed, and embeds each tool's `Info.plist` with the version from `VERSION`. Make sure `~/.local/bin` is on
+your `PATH`.
 
 ## Usage
 
@@ -167,8 +169,8 @@ saying where to allow it; macOS does not ask again once you have said no. After 
 reopen the terminal.
 
 Apple offers no public way to check or request the system audio permission (without it, recordings silently get no
-system audio), so totalrecall uses macOS's undocumented TCC functions for it; see
-`Sources/TotalRecall/Devices/SystemAudioPermission.swift`. If a macOS update removes them, totalrecall records without
+system audio), so `totalrecall` uses macOS's undocumented TCC functions for it; see
+`Sources/TotalRecall/Devices/SystemAudioPermission.swift`. If a macOS update removes them, `totalrecall` records without
 the check.
 
 ## Code layout
@@ -178,8 +180,9 @@ the check.
 | Folder | Contents |
 | --- | --- |
 | `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
-| `Transcribe/` | The transcriber: audio sources (file or stdin stream), one recognizer per speaker, and the transcript printer |
+| `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, and the transcript printer |
 | `Shared/` | The WAV stream format between `totalrecall -` and `transcribe -`, and the version |
+| `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 
 Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
 
@@ -200,41 +203,52 @@ and `make lint` to check it.
 
 ## Testing
 
-The integration tests run the real `totalrecall` binary and check the files it saves, so they test behavior rather
-than implementation and keep working across rewrites. They need no microphone or speakers, only three BlackHole
-loopback devices, so they run the same way locally and on headless CI machines:
-
 ```sh
-brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch   # test devices, once
-make test                                                         # all scenarios, ~2 minutes
-make test TESTS="switches_to_slow_starting_input"                 # selected scenarios
-LONG=1 make test                                                  # adds a 2-minute drift test
+make test                          # everything; the recording tests need the devices below
+make test TESTS=RecorderTests      # a subset (a swift test --filter)
+LONG=1 make test                   # adds a 2-minute drift test
+make coverage                      # the same tests on a build instrumented for coverage
 ```
 
-How it works: `tests/audiolab` creates fake microphones, each a temporary aggregate device wrapping a BlackHole
-device that a helper process plays a click track into. Fake mics can appear, disappear, become the system input,
-change sample rate, or stay silent for a while before delivering audio, which is how AirPods look to totalrecall.
-Every click track is locked to the system clock, so the analysis can find every click in a recording and report lost
-audio, silence, which mic was recorded when, and drift between the channels, in milliseconds.
+The tests use [Swift Testing](https://developer.apple.com/documentation/testing) and live in `Tests/`:
 
-The scenarios (`tests/run.sh`) cover recording, switching to a new or slow-starting input, sample-rate changes, a
-preferred `--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills,
-every output format, mixed channels, and usage errors. While the tests run, the system input and output are
-switched to the test devices and restored afterwards. Recordings and logs are kept in `tests/build/results`.
+| Target | Tests |
+| --- | --- |
+| `TotalRecallTests` | totalrecall's logic: options, the timeline and recorder (alignment, splicing, padding, mixing, the end at the stop), echo cancellation, output files and formats, resampling, sample-rate watching |
+| `TranscribeTests` | transcribe's logic: arguments, speaker detection, mixing, the transcript, language picking, audio sources |
+| `SharedTests` | The WAV stream writer and reader, including malformed streams |
+| `AudioLabTests` | The click-track analysis the end-to-end tests rely on |
+| `IntegrationTests` | The release binaries end to end: totalrecall's command line, transcribe on speech from `say`, and totalrecall recording through fake audio devices |
 
-CI runs the same suite on GitHub's macOS runners (`.github/workflows/integration.yml`). There,
-`tests/ci/grant-audio-permissions.sh` grants the microphone and system-audio permissions nobody can click "Allow"
-for; it refuses to run outside CI.
+The recording tests need no microphone or speakers, only three BlackHole loopback devices, so they run the same way
+locally and on headless CI machines:
 
-`make coverage` runs the suite against a build of totalrecall instrumented for coverage (it takes `TESTS` like
-`make test`), prints line coverage per file, writes an HTML report to `tests/build/coverage/html`, and fails if
-coverage drops below `COVERAGE_MIN` percent (set in the `Makefile`). Without the BlackHole devices it runs only
-the scenarios that need none and reports that partial coverage without checking the minimum. CI runs it after `make test`, shows the
-report in the job summary, and uploads the HTML as the `coverage` artifact. The released binaries are the
-uninstrumented ones.
+```sh
+brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
+```
+
+Without them those tests are skipped, except on CI, where they fail. `Tests/AudioLab` creates fake microphones, each
+a temporary aggregate device wrapping a BlackHole device that the tests play a click track into. Fake mics can appear,
+disappear, become the system input, change sample rate, or stay silent for a while before delivering audio, which is
+how AirPods look to totalrecall. Every click track is locked to the system clock, so the analysis can find every click
+in a recording and report lost audio, silence, which mic was recorded when, and drift between the channels, in
+milliseconds. The tests cover recording, switching to a new or slow-starting input, sample-rate changes, a preferred
+`--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills, every output
+format, mixed channels, system audio only, and streaming to stdout. Each test switches the system input and output
+to the test devices and restores them afterwards. Recordings and logs are kept in `.build/test-results`.
+
+`make coverage` builds the tools and the tests once with coverage instrumentation, runs the tests with the end-to-end
+ones on those builds, prints line coverage per file, writes an HTML report to `.build/coverage/html`, and fails if
+coverage drops below `COVERAGE_MIN` percent (set in the `Makefile`). Without the test devices the coverage is partial,
+and the minimum is not checked.
+
+CI (`.github/workflows/integration.yml`) runs `make test` and `make coverage` on GitHub's macOS runners, shows the
+coverage in the job summary, and uploads the HTML report and the recordings. There,
+`.github/scripts/grant-audio-permissions.sh` grants the microphone and system-audio permissions nobody can click
+"Allow" for; it refuses to run outside CI. The released binaries are the uninstrumented ones `make test` tested.
 
 Known limit: totalrecall's system-audio capture also hears the fake mics' playback, so echo cancellation sees the
-"voice" in its reference signal. The echo scenario therefore checks only that echo is reduced, not that the voice is
+"voice" in its reference signal. The echo test therefore checks only that echo is reduced, not that the voice is
 untouched.
 
 ## Notes and limitations
