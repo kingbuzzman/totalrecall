@@ -124,6 +124,15 @@ func mixDown(_ chunk: [[Float]]) -> [Float] {
     return sum
 }
 
+let speechRecognitionUnavailable = "on-device speech recognition is not available on this Mac"
+
+/// Whether this Mac can transcribe at all. Some cannot, such as the virtual machines CI runs on: the recognizer is
+/// either unavailable outright or offers no languages, which would otherwise read as a missing model for every one.
+func speechRecognitionIsAvailable() async -> Bool {
+    guard SpeechTranscriber.isAvailable else { return false }
+    return !(await SpeechTranscriber.supportedLocales.isEmpty)
+}
+
 /// The recognizer's locale for a `--language` value such as `es` or `es-MX`. A language without a region is
 /// recognized with the Mac's region if the recognizer has it (`es` on a US Mac is es-US), else the language's main
 /// region (es-ES), else any region it has for the language.

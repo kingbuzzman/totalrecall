@@ -29,6 +29,8 @@ Changes how `transcribe` prints, and what both tools accept; see the commands to
   `transcribe - meeting.txt --live`.
 - Refuses to overwrite an existing `<text-file>` unless given `--force`, like totalrecall.
 - `transcribe -` refuses to start when nothing is piped in.
+- On a Mac without on-device speech recognition, such as a virtual machine, it says so, instead of reporting a missing
+  speech model for every language.
 - Reads a `totalrecall -` stream about 3 times faster, and mixes the channels for `--mix` about 7 times faster.
   Transcripts are unchanged.
 

@@ -1,6 +1,7 @@
 import AudioLab
 import Foundation
 import Shared
+import Speech
 import Testing
 
 /// transcribe on speech from `say`, with Apple's on-device recognizer (downloaded on first use).
@@ -8,7 +9,7 @@ struct TranscribeTests {
     private static let you = "Good morning everyone, thanks for joining the call."
     private static let them = "Happy to be here, let's get started."
 
-    @Test func transcribesARecording() async throws {
+    @Test(.needsSpeechRecognition) func transcribesARecording() async throws {
         let file = try await Speech.file(saying: "The quick brown fox jumps over the lazy dog.", name: "fox.caf")
 
         let result = try await transcribe(file.path)
@@ -18,7 +19,7 @@ struct TranscribeTests {
         #expect(result.standardOutput.lowercased().contains("quick brown fox"))
     }
 
-    @Test func labelsTotalRecallsChannelSplit() async throws {
+    @Test(.needsSpeechRecognition) func labelsTotalRecallsChannelSplit() async throws {
         let result = try await transcribe(try await conversation().path)
 
         let labels = result.standardOutput.split(separator: "\n").map { $0.split(separator: " ").dropFirst().first }
@@ -28,7 +29,7 @@ struct TranscribeTests {
         #expect(result.standardOutput.contains("Them: Happy to be here"))
     }
 
-    @Test func transcribesBothChannelsTogetherWithMix() async throws {
+    @Test(.needsSpeechRecognition) func transcribesBothChannelsTogetherWithMix() async throws {
         let result = try await transcribe("--mix", try await conversation().path)
 
         #expect(result.status == 0, "\(result.standardError)")
@@ -38,7 +39,7 @@ struct TranscribeTests {
         #expect(result.standardOutput.contains("Happy to be here"))
     }
 
-    @Test func writesTheTranscriptToATextFile() async throws {
+    @Test(.needsSpeechRecognition) func writesTheTranscriptToATextFile() async throws {
         let audio = try await Speech.file(saying: Self.them, name: "to-file.caf")
         let text = TestEnvironment.result("to-file.txt")
         try? FileManager.default.removeItem(at: text)
@@ -63,14 +64,31 @@ struct TranscribeTests {
                 == "transcribe: \(text.standardizedFileURL.path) already exists (use --force to overwrite)\n"
         )
         #expect(try String(contentsOf: text, encoding: .utf8) == "keep me")
+    }
 
-        let forced = try await transcribe("--force", audio.path, text.path)
+    @Test(.needsSpeechRecognition) func overwritesAnExistingTextFileWithForce() async throws {
+        let audio = try await Speech.file(saying: Self.them, name: "forced.caf")
+        let text = TestEnvironment.result("forced.txt")
+        try Data("replace me".utf8).write(to: text)
 
-        #expect(forced.status == 0, "\(forced.standardError)")
+        let result = try await transcribe("--force", audio.path, text.path)
+
+        #expect(result.status == 0, "\(result.standardError)")
         #expect(try String(contentsOf: text, encoding: .utf8).contains("Happy to be here"))
     }
 
-    @Test func transcribesALiveStreamOnStandardInput() async throws {
+    /// Runs only where the recognizer is missing, such as on CI, where the tests that transcribe are skipped.
+    @Test(.disabled("this Mac can recognize speech") { await speechRecognitionIsAvailable() })
+    func explainsThatThisMacCannotRecognizeSpeech() async throws {
+        let audio = try await Speech.file(saying: Self.them, name: "unavailable.caf")
+
+        let result = try await transcribe(audio.path)
+
+        #expect(result.status == 1)
+        #expect(result.standardError == "transcribe: on-device speech recognition is not available on this Mac\n")
+    }
+
+    @Test(.needsSpeechRecognition) func transcribesALiveStreamOnStandardInput() async throws {
         let speech = try await Speech.samples(saying: Self.you)
         let stream =
             WAVStream.header(sampleRate: 48_000, channelCount: 2)
@@ -83,7 +101,7 @@ struct TranscribeTests {
         #expect(!result.standardOutput.contains("\u{1B}"), "only --live redraws the line being recognized")
     }
 
-    @Test func savesALiveStreamWithoutPrinting() async throws {
+    @Test(.needsSpeechRecognition) func savesALiveStreamWithoutPrinting() async throws {
         let text = TestEnvironment.result("stream-to-file.txt")
         try? FileManager.default.removeItem(at: text)
 
@@ -98,7 +116,7 @@ struct TranscribeTests {
         #expect(try String(contentsOf: text, encoding: .utf8).contains("Good morning"))
     }
 
-    @Test func showsTheLiveTranscriptWhileSavingItWithLive() async throws {
+    @Test(.needsSpeechRecognition) func showsTheLiveTranscriptWhileSavingItWithLive() async throws {
         let text = TestEnvironment.result("live-to-file.txt")
         try? FileManager.default.removeItem(at: text)
 
@@ -127,7 +145,7 @@ struct TranscribeTests {
     }
 
     /// Ctrl-C reaches every program in `totalrecall - | transcribe -`; transcribe finishes once totalrecall ends the stream.
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.needsSpeechRecognition, .timeLimit(.minutes(1)))
     func finishesTheTranscriptWhenInterruptedBeforeTheStreamEnds() async throws {
         let text = TestEnvironment.result("interrupted.txt")
         let transcribe = try await LiveTranscribe.start(writingTo: text, saying: Self.you)
@@ -139,7 +157,7 @@ struct TranscribeTests {
         #expect(try String(contentsOf: text, encoding: .utf8).contains("Good morning"))
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.needsSpeechRecognition, .timeLimit(.minutes(1)))
     func quitsAtOnceOnASecondInterrupt() async throws {
         let transcribe = try await LiveTranscribe.start(writingTo: TestEnvironment.result("quit.txt"), saying: Self.you)
 
@@ -158,14 +176,14 @@ struct TranscribeTests {
         #expect(result.standardError.hasPrefix("transcribe: "))
     }
 
-    @Test func reportsALanguageItHasNoModelFor() async throws {
+    @Test(.needsSpeechRecognition) func reportsALanguageItHasNoModelFor() async throws {
         let result = try await transcribe("--language", "xx", TestEnvironment.result("unused.caf").path)
 
         #expect(result.status == 1)
         #expect(result.standardError == "transcribe: no speech model for xx; see transcribe --list-languages\n")
     }
 
-    @Test func listsTheLanguages() async throws {
+    @Test(.needsSpeechRecognition) func listsTheLanguages() async throws {
         let result = try await transcribe("--list-languages")
 
         #expect(result.status == 0)
@@ -265,6 +283,21 @@ enum Speech {
         let url = TestEnvironment.result(name)
         try writeAudioFile([try await samples(saying: text)], sampleRate: 48_000, to: url)
         return url
+    }
+}
+
+/// Whether this Mac has Apple's on-device speech recognizer, with at least one language; as transcribe checks it.
+func speechRecognitionIsAvailable() async -> Bool {
+    guard SpeechTranscriber.isAvailable else { return false }
+    return !(await SpeechTranscriber.supportedLocales.isEmpty)
+}
+
+extension Trait where Self == ConditionTrait {
+    /// Skips the tests that transcribe on a Mac without on-device speech recognition, such as CI's virtual machines.
+    static var needsSpeechRecognition: Self {
+        .enabled("needs on-device speech recognition, which this Mac does not have") {
+            await speechRecognitionIsAvailable()
+        }
     }
 }
 

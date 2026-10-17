@@ -21,6 +21,7 @@ let textPath: String?
 let options: Options
 switch command {
 case .listLanguages:
+    guard await speechRecognitionIsAvailable() else { fail(speechRecognitionUnavailable) }
     let installed = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
     for locale in await SpeechTranscriber.supportedLocales.map({ $0.identifier(.bcp47) }).sorted() {
         let mark = installed.contains(locale) ? "*" : " "
@@ -76,6 +77,7 @@ func finishOnStopSignals() -> [any DispatchSourceSignal] {
 }
 
 do {
+    guard await speechRecognitionIsAvailable() else { throw TranscribeError(speechRecognitionUnavailable) }
     let locale = try await speechLocale(for: options.language)
     try await installSpeechModel(for: locale)
     // Read here first, to tell the speakers apart, then by the reading task below.
