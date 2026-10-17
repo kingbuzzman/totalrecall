@@ -1,13 +1,17 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-/// Every target: the Swift 6 language mode, which checks for data races, imports that are checked rather than leaked
-/// between files and modules, existentials spelled `any`, and a failed build on any compiler warning.
+/// Every target: the Swift 6 language mode, which checks for data races, plus every feature the compiler lists as a
+/// Swift 7 default (checked imports, existentials spelled `any`, nonisolated async functions running on their caller's
+/// actor, isolated conformances, immutable weak captures), and a failed build on any compiler warning.
 let strict: [SwiftSetting] = [
     .swiftLanguageMode(.v6),
     .enableUpcomingFeature("MemberImportVisibility"),
     .enableUpcomingFeature("InternalImportsByDefault"),
     .enableUpcomingFeature("ExistentialAny"),
+    .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+    .enableUpcomingFeature("InferIsolatedConformances"),
+    .enableUpcomingFeature("ImmutableWeakCaptures"),
     .treatAllWarnings(as: .error),
 ]
 
