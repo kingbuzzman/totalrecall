@@ -14,6 +14,12 @@ transcript that labels who is talking:
 totalrecall - | transcribe -
 ```
 
+[![totalrecall - | transcribe - live: a YouTube video's audio is transcribed as "Them", the microphone as "You", and the
+mic follows a switch to AirPods mid-recording](docs/demo.jpg)](docs/demo.mp4)
+
+▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound): `totalrecall - | transcribe -` transcribing a YouTube video
+as Them and the microphone as You, live, and following the switch to AirPods mid-recording.
+
 ## Why
 
 Meeting apps either don't let you keep a recording (Slack huddle captions vanish when the huddle ends) or only record
