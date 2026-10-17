@@ -1,5 +1,5 @@
 import AVFoundation
-import Foundation
+package import Foundation
 
 package enum Channel: String, Sendable {
     case left

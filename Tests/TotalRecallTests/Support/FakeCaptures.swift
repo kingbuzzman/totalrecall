@@ -40,7 +40,7 @@ final class FakeMicrophones {
     /// The device `MicrophoneCapture` should record, nil for none.
     var target: InputDevice?
     /// Thrown by the next sessions that start.
-    var failure: Error?
+    var failure: (any Error)?
     private(set) var sessions: [Session] = []
     private(set) var preferredNames: [String?] = []
 
@@ -67,7 +67,7 @@ final class FakeMicrophones {
 }
 
 final class FakeSystemCapture: RestartableCapture {
-    var failure: Error?
+    var failure: (any Error)?
     private(set) var starts = 0
     private(set) var stops = 0
 

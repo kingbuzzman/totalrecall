@@ -45,7 +45,7 @@ let textURL = textPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTild
 // ends and finish the transcript from it. A second Ctrl-C quits right away.
 let stopSignals = isLive ? finishOnStopSignals() : []
 
-func finishOnStopSignals() -> [DispatchSourceSignal] {
+func finishOnStopSignals() -> [any DispatchSourceSignal] {
     signal(SIGPIPE, SIG_IGN)
     let queue = DispatchQueue(label: "transcribe.signals")
     nonisolated(unsafe) var isStopping = false  // only touched on `queue`

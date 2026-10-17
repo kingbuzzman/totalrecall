@@ -10,7 +10,7 @@ struct RecorderTests {
         microphone: Bool = true,
         isolation: Bool = true,
         echoCancellation: Bool = false,
-        rawSink: AudioSink? = nil
+        rawSink: (any AudioSink)? = nil
     ) -> Recorder {
         Recorder(
             writingTo: sink,

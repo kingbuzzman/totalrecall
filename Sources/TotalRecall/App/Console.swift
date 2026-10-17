@@ -42,7 +42,7 @@ struct StatusLine {
         say("totalrecall: \(message)")
     }
 
-    func reportWriteFailure(_ error: Error) {
+    func reportWriteFailure(_ error: any Error) {
         announce("write failed: \(error.localizedDescription)")
     }
 

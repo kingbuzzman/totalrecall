@@ -7,7 +7,7 @@ let maxSpeakerDetectionSeconds = 10.0
 /// Whether a stereo source has different audio on its two channels (totalrecall's split: you left, everyone else
 /// right) rather than the same on both (a mixed or system-only recording). Returns the chunks it read on the way, so
 /// they can still be transcribed.
-func hasSeparateSpeakers(_ source: AudioSource) throws -> (Bool, [[[Float]]]) {
+func hasSeparateSpeakers(_ source: any AudioSource) throws -> (Bool, [[[Float]]]) {
     let chunkFrames = Int(source.sampleRate * chunkSeconds)
     var chunks: [[[Float]]] = []
     var (framesRead, soundFrames) = (0, 0)

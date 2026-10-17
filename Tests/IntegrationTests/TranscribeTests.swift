@@ -147,9 +147,10 @@ final class LiveTranscribe {
         try live.process.run()
         let stream =
             WAVStream.header(sampleRate: 48_000, channelCount: 1) + WAVStream.samples([speech], count: speech.count)
+        let input = live.input.fileHandleForWriting
         await withCheckedContinuation { continuation in
             Thread {
-                try? live.input.fileHandleForWriting.write(contentsOf: stream)
+                try? input.write(contentsOf: stream)
                 continuation.resume()
             }
             .start()

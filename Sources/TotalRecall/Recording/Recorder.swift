@@ -46,8 +46,8 @@ final class Recorder {
     /// Frames taken from the tracks for the file so far, which is the file's timeline position.
     private var framesTaken = 0
     private var isAligned = false
-    private let sink: AudioSink
-    private let rawSink: AudioSink?
+    private let sink: any AudioSink
+    private let rawSink: (any AudioSink)?
     private var isClosed = false
     /// Raw audio taken off the tracks under the lock, written by `writeAvailable()` outside it.
     private var pendingRaw: [(microphone: [Float], system: [Float])] = []
@@ -56,8 +56,8 @@ final class Recorder {
     private var pendingWarmUp: (microphone: [Float], speaker: [Float])?
 
     init(
-        writingTo sink: AudioSink,
-        rawSink: AudioSink? = nil,
+        writingTo sink: any AudioSink,
+        rawSink: (any AudioSink)? = nil,
         includesMicrophone: Bool,
         isolatesSpeakers: Bool,
         cancelsEcho: Bool

@@ -26,8 +26,8 @@ final class RecordingSession {
     private let supervisor: CaptureSupervisor
     private let status: StatusLine
     private let writerQueue: DispatchQueue
-    private let startupTimer: DispatchSourceTimer
-    private let writerTimer: DispatchSourceTimer
+    private let startupTimer: any DispatchSourceTimer
+    private let writerTimer: any DispatchSourceTimer
     /// Whether the recording started; used only on the writer queue.
     private var hasStarted = false
     private var isOutputClosed = false
@@ -35,8 +35,8 @@ final class RecordingSession {
 
     /// Creates the partial recording or starts the stream; throws if that fails.
     init(options: Options, destination: Destination) throws {
-        let sink: AudioSink
-        var rawSink: AudioSink?
+        let sink: any AudioSink
+        var rawSink: (any AudioSink)?
         switch destination {
         case .file(let output):
             sink = try AudioFileSink(url: output.partialURL)
@@ -173,7 +173,7 @@ final class RecordingSession {
     }
 
     /// A failed write to stdout means the program reading the stream has exited, which ends the recording.
-    private func handleWriteFailure(_ error: Error) {
+    private func handleWriteFailure(_ error: any Error) {
         guard case .standardOutput = destination else {
             status.reportWriteFailure(error)
             return

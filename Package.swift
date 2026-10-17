@@ -1,12 +1,13 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-/// The code that ships: the Swift 6 language mode, which checks for data races, imports that are checked rather than
-/// leaked between files and modules, and a failed build on any compiler warning.
+/// Every target: the Swift 6 language mode, which checks for data races, imports that are checked rather than leaked
+/// between files and modules, existentials spelled `any`, and a failed build on any compiler warning.
 let strict: [SwiftSetting] = [
     .swiftLanguageMode(.v6),
     .enableUpcomingFeature("MemberImportVisibility"),
     .enableUpcomingFeature("InternalImportsByDefault"),
+    .enableUpcomingFeature("ExistentialAny"),
     .treatAllWarnings(as: .error),
 ]
 
@@ -28,12 +29,11 @@ let package = Package(
             swiftSettings: strict
         ),
         .executableTarget(name: "Transcribe", dependencies: ["Shared"], exclude: ["Info.plist"], swiftSettings: strict),
-        .target(name: "AudioLab", path: "Tests/AudioLab"),
-        .testTarget(name: "SharedTests", dependencies: ["Shared"]),
-        .testTarget(name: "TotalRecallTests", dependencies: ["TotalRecall", "Shared"]),
-        .testTarget(name: "TranscribeTests", dependencies: ["Transcribe", "Shared"]),
-        .testTarget(name: "AudioLabTests", dependencies: ["AudioLab"]),
-        .testTarget(name: "IntegrationTests", dependencies: ["AudioLab", "Shared"]),
-    ],
-    swiftLanguageModes: [.v5]
+        .target(name: "AudioLab", path: "Tests/AudioLab", swiftSettings: strict),
+        .testTarget(name: "SharedTests", dependencies: ["Shared"], swiftSettings: strict),
+        .testTarget(name: "TotalRecallTests", dependencies: ["TotalRecall", "Shared"], swiftSettings: strict),
+        .testTarget(name: "TranscribeTests", dependencies: ["Transcribe", "Shared"], swiftSettings: strict),
+        .testTarget(name: "AudioLabTests", dependencies: ["AudioLab"], swiftSettings: strict),
+        .testTarget(name: "IntegrationTests", dependencies: ["AudioLab", "Shared"], swiftSettings: strict),
+    ]
 )

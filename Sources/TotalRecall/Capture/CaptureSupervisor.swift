@@ -9,7 +9,7 @@ final class CaptureSupervisor {
     private static let restartRetrySeconds = 0.5
 
     private let recorder: Recorder
-    private let systemCapture: RestartableCapture
+    private let systemCapture: any RestartableCapture
     private let microphoneCapture: MicrophoneCapture?
     private let announce: (String) -> Void
     private var microphoneNeedsRestart = false
@@ -19,7 +19,7 @@ final class CaptureSupervisor {
 
     init(
         recorder: Recorder,
-        systemCapture: RestartableCapture,
+        systemCapture: any RestartableCapture,
         microphoneCapture: MicrophoneCapture?,
         announce: @escaping (String) -> Void
     ) {

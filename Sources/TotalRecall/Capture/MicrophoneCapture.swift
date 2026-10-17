@@ -10,7 +10,7 @@ final class MicrophoneCapture {
     /// Starts capturing a device: `(device, sessionID, onSamples, onDeviceChange)`.
     typealias SessionFactory = (
         InputDevice, Int, @escaping MicrophoneAudioHandler, @escaping () -> Void
-    ) throws -> MicrophoneCaptureSession
+    ) throws -> any MicrophoneCaptureSession
 
     /// How long a pending switch keeps the capture from counting as stalled while the new device starts up.
     private static let switchTimeoutSeconds = 5.0
@@ -21,11 +21,11 @@ final class MicrophoneCapture {
     private let makeSession: SessionFactory
     private let lock = UnfairLock()
     /// The session being recorded.
-    private var active: MicrophoneCaptureSession?
+    private var active: (any MicrophoneCaptureSession)?
     /// A newly started session that takes over as soon as it delivers real audio.
-    private var pending: MicrophoneCaptureSession?
+    private var pending: (any MicrophoneCaptureSession)?
     /// Sessions switched away from; `finishSwitch()` stops them outside the audio callbacks.
-    private var replaced: [MicrophoneCaptureSession] = []
+    private var replaced: [any MicrophoneCaptureSession] = []
     /// The device a switch to another device completed to, until `finishSwitch()` reports it.
     private var switchedTo: InputDevice?
     private var lastActiveAudioUptime = 0.0

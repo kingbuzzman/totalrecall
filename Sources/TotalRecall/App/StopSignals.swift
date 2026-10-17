@@ -6,7 +6,7 @@ import Foundation
 func handleStopSignals(
     _ signals: [Int32] = [SIGINT, SIGTERM, SIGHUP],
     handler: @escaping () -> Void
-) -> [DispatchSourceSignal] {
+) -> [any DispatchSourceSignal] {
     signal(SIGPIPE, SIG_IGN)
     return signals.map { signalNumber in
         signal(signalNumber, SIG_IGN)
