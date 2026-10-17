@@ -2,6 +2,20 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## 0.2.3
+
+### totalrecall
+
+- Lighter on the audio threads: the captures allocate less per buffer, a 48 kHz microphone skips resampling
+  altogether, and the echo canceller no longer warms up while holding a lock the captures wait on, which held them up
+  for up to about 50 ms as each recording started. Recordings are unchanged, sample for sample.
+- Streaming with `totalrecall -` encodes the audio about 17 times faster.
+
+### transcribe
+
+- Reads a `totalrecall -` stream about 3 times faster, and mixes the channels for `--mix` about 7 times faster.
+  Transcripts are unchanged.
+
 ## 0.2.2
 
 ### transcribe
