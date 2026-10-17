@@ -10,3 +10,4 @@
 *.flac
 /tests/build/
 /transcribe
+/build/

@@ -7,14 +7,15 @@ on:
 
 jobs:
   integration:
-    runs-on: macos-latest
+    # The binaries need macOS 26 or later.
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies and test audio devices
         run: |
-          brew install speexdsp ffmpeg
+          brew install ffmpeg
           brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
           sudo killall coreaudiod || true
 

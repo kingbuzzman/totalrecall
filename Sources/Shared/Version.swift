@@ -1,4 +1,4 @@
 import Foundation
 
-/// CFBundleShortVersionString from the tool's Info.plist, which the Makefile embeds in the binary.
+/// The repo's VERSION, which the Makefile writes into the Info.plist it embeds in each binary.
 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"

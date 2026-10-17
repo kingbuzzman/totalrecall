@@ -7,6 +7,13 @@ from the command line. Start it, talk, press Ctrl-C, and the recording is saved 
 totalrecall ~/Meetings/standup.mp3
 ```
 
+It can also stream the recording into `transcribe`, the on-device speech-to-text tool that ships with it, for a live
+transcript that labels who is talking:
+
+```sh
+totalrecall - | transcribe -
+```
+
 ## Why
 
 Meeting apps either don't let you keep a recording (Slack huddle captions vanish when the huddle ends) or only record
@@ -15,7 +22,7 @@ playing" together with your microphone: QuickTime and Cmd-Shift-5 only capture t
 virtual loopback driver such as BlackHole plus a Multi-Output Device, which breaks your volume keys and has to be
 reconfigured whenever you switch between AirPods and speakers.
 
-totalrecall uses Core Audio process taps (macOS 14.2+) to capture system audio directly, so there is no driver, no audio
+totalrecall uses Core Audio process taps to capture system audio directly, so there is no driver, no audio
 rerouting, and nothing to reconfigure. It is app-agnostic: it records everything the Mac plays.
 
 ## What it does
@@ -39,24 +46,38 @@ rerouting, and nothing to reconfigure. It is app-agnostic: it records everything
 
 ## Requirements
 
-- macOS 14.2 or later (Apple Silicon or Intel), Xcode Command Line Tools (`xcode-select --install`)
-- [speexdsp](https://speex.org/) for echo cancellation: `brew install speexdsp`
+- macOS 26 or later; the tools refuse to launch on anything older
 - [ffmpeg](https://ffmpeg.org/) only for formats macOS can't write natively, such as `.mp3` or `.flac`:
   `brew install ffmpeg`
 
-## Build and install
+## Install
+
+Download the latest release (Apple Silicon) and put both tools on your `PATH`:
 
 ```sh
-make            # builds ./totalrecall
-make install    # symlinks it into ~/.local/bin (override with PREFIX=/some/dir)
+gh release download --repo kingbuzzman/totalrecall --pattern '*.tar.gz'
+tar -xzf totalrecall-*-macos-arm64.tar.gz -C ~/.local/bin totalrecall transcribe
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
+The binaries are not notarized. Downloading with `gh` or `curl` works as is; if you download the tarball with a
+browser, clear the quarantine flag first: `xattr -d com.apple.quarantine totalrecall-*.tar.gz`.
+
+## Build from source
+
+Needs the Xcode Command Line Tools (`xcode-select --install`).
+
+```sh
+make            # builds ./totalrecall and ./transcribe
+make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/dir)
+```
+
+The first build downloads and compiles [speexdsp](https://speex.org/) (echo cancellation), which is linked into
+totalrecall, so the binary needs nothing installed. Make sure `~/.local/bin` is on your `PATH`.
 
 ## Usage
 
 ```sh
-totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file>
+totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file | ->
 totalrecall --list-mics
 totalrecall --version
 ```
@@ -72,7 +93,8 @@ totalrecall --version
 | `--version` | Print the version (also shown at the top of `--help`) |
 
 The output format follows the extension: `.m4a` (AAC), `.wav`, `.aiff` and `.caf` are written natively; anything
-else is converted with ffmpeg.
+else is converted with ffmpeg. With `-` instead of a file name, the recording streams to stdout as WAV while it is
+being made, for another program to read: `transcribe -`, or `ffmpeg -i - meeting.mp3`.
 
 Examples:
 
@@ -83,6 +105,36 @@ totalrecall --mic "macbook" ~/call.m4a                # keep using the Mac mic e
 ```
 
 Stop with Ctrl-C (SIGTERM and closing the terminal also save the file).
+
+Recording starts once the microphone is actually on and totalrecall has heard a second of the room, so that its noise
+suppression starts out tuned to the background; with AirPods that takes 2–3 s. The counter starts at that moment and
+the file covers exactly the time it shows.
+
+## Transcription
+
+`transcribe` turns speech into text on-device with Apple's speech recognizer (English); nothing leaves the Mac.
+
+```sh
+transcribe [--mix] <audio-file | -> [<text-file>]
+```
+
+```sh
+totalrecall - | transcribe -               # live: text appears as people speak
+transcribe ~/Meetings/standup.mp3          # a finished recording, printed in time order
+transcribe standup.mp3 standup.txt         # ... or written to a file
+```
+
+Recordings with totalrecall's channel split are labeled by speaker, since your mic is on the left and everyone else on
+the right:
+
+```
+[00:00:03] You: Today we will review the release plan.
+[00:00:05] Them: Sounds good, the migration finished yesterday.
+```
+
+Mixed recordings (`--no-speaker-isolation`, `--no-mic`) and `--mix` give one unlabeled transcript. Live on a terminal,
+the words still being recognized show on the last line, and each line is printed about a second after it is spoken.
+The first run downloads Apple's speech model.
 
 ## Permissions
 
@@ -96,16 +148,27 @@ If the system meter stays flat while audio is playing, the second one is missing
 
 ## Code layout
 
-`Sources/` is one Swift module built by `make`; each folder is a layer that only uses the ones below it:
+`make` builds two binaries from `Sources/`, plus the code they share:
 
 | Folder | Contents |
 | --- | --- |
-| `main.swift` | Entry point and the only code that exits: parses options, checks the output path and permissions, starts the session, saves on a stop signal |
-| `App/` | Command-line options, the recording session (writer timer, saving), stop signals, status output |
+| `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
+| `Transcribe/` | The transcriber: audio sources (file or stdin stream), one recognizer per speaker, and the transcript printer |
+| `Shared/` | The WAV stream format between `totalrecall -` and `transcribe -`, and the version |
+
+Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
+
+| Folder | Contents |
+| --- | --- |
+| `main.swift` | Entry point and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
+| `App/` | Command-line options, the recording session (startup, writer timer, saving), stop signals, status output |
 | `Capture/` | System-audio tap, microphone capture with make-before-break switching, and the supervisor that restarts stalled captures |
-| `Recording/` | Per-channel timelines, echo cancellation, the crash-safe partial file, and export to the final format |
+| `Recording/` | Per-channel timelines, echo cancellation, the file or stream it writes to, and export to the final format |
 | `Devices/` | Core Audio property helpers, input-device discovery, microphone permission |
 | `Common.swift` | The shared error type and clock |
+
+`TOTALRECALL_RAW=1` also saves the unprocessed mic and system audio as `<output>.raw.caf`, for tuning the processing
+against real recordings.
 
 Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
 and `make lint` to check it.
@@ -148,3 +211,10 @@ untouched.
 - With the AirPods mic active, macOS uses the Bluetooth call profile, so your voice is recorded at about 24 kHz. That
   is fine for transcription; the Mac mic is clearer in a quiet room.
 - Tell the other participants when you record. Some jurisdictions require everyone's consent.
+
+## Releasing
+
+The version lives in `VERSION`; the build writes it into both tools. To release, add a `## <version>` section to
+`CHANGELOG.md`, bump `VERSION` and push to `master`: `.github/workflows/release.yml` sees that `v<VERSION>` has no tag
+yet, builds both tools on macOS 26, and publishes a GitHub release with the tag, that section as its notes, and
+`totalrecall-<VERSION>-macos-arm64.tar.gz`. `make release` builds the same tarball locally, in `build/`.
