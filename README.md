@@ -92,6 +92,22 @@ The first run asks for two permissions for the terminal app you run it from:
 
 If the system meter stays flat while audio is playing, the second one is missing; enable it and restart totalrecall.
 
+## Code layout
+
+`Sources/` is one Swift module built by `make`; each folder is a layer that only uses the ones below it:
+
+| Folder | Contents |
+| --- | --- |
+| `main.swift` | Entry point and the only code that exits: parses options, checks the output path and permissions, starts the session, saves on a stop signal |
+| `App/` | Command-line options, the recording session (writer timer, saving), stop signals, status output |
+| `Capture/` | System-audio tap, microphone capture with make-before-break switching, and the supervisor that restarts stalled captures |
+| `Recording/` | Per-channel timelines, echo cancellation, the crash-safe partial file, and export to the final format |
+| `Devices/` | Core Audio property helpers, input-device discovery, microphone permission |
+| `Common.swift` | The shared error type and clock |
+
+Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
+and `make lint` to check it.
+
 ## Testing
 
 The integration tests run the real `totalrecall` binary and check the files it saves, so they test behavior rather

@@ -1,9 +1,10 @@
 PREFIX ?= $(HOME)/.local
 SPEEXDSP := $(shell brew --prefix speexdsp)
 AUDIOLAB := tests/build/audiolab
+SOURCES := $(shell find Sources -name '*.swift')
 
-totalrecall: Sources/main.swift Sources/bridging.h Info.plist
-	swiftc -O -o $@ Sources/main.swift \
+totalrecall: $(SOURCES) Sources/bridging.h Info.plist
+	swiftc -O -wmo -o $@ $(SOURCES) \
 		-import-objc-header Sources/bridging.h \
 		-Xcc -I$(SPEEXDSP)/include -L$(SPEEXDSP)/lib -lspeexdsp \
 		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist
