@@ -2,6 +2,15 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## Unreleased
+
+### transcribe
+
+- `--language LANG` transcribes other languages than English, such as `--language es` or `--language es-MX`;
+  `--list-languages` lists the ones Apple's recognizer supports. The default stays US English.
+- Fixed: transcribing with a speech model that was not downloaded yet failed with "the speech recognizer cannot take
+  ... Hz audio" instead of downloading it.
+
 ## 0.2.1
 
 ### totalrecall

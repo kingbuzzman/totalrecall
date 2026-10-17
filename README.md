@@ -112,17 +112,23 @@ the file covers exactly the time it shows.
 
 ## Transcription
 
-`transcribe` turns speech into text on-device with Apple's speech recognizer (English); nothing leaves the Mac.
+`transcribe` turns speech into text on-device with Apple's speech recognizer; nothing leaves the Mac.
 
 ```sh
-transcribe [--mix] <audio-file | -> [<text-file>]
+transcribe [--language LANG] [--mix] <audio-file | -> [<text-file>]
+transcribe --list-languages
 ```
 
 ```sh
 totalrecall - | transcribe -               # live: text appears as people speak
 transcribe ~/Meetings/standup.mp3          # a finished recording, printed in time order
 transcribe standup.mp3 standup.txt         # ... or written to a file
+transcribe --language es reunion.mp3       # in Spanish
 ```
+
+The default language is US English. `--language` takes a language (`es`) or a language and region (`es-MX`); a
+language alone uses your Mac's region when the recognizer has it, else the language's main one. `--list-languages`
+lists what Apple's recognizer supports, with `*` on the ones already downloaded.
 
 Recordings with totalrecall's channel split are labeled by speaker, since your mic is on the left and everyone else on
 the right:
@@ -134,7 +140,7 @@ the right:
 
 Mixed recordings (`--no-speaker-isolation`, `--no-mic`) and `--mix` give one unlabeled transcript. Live on a terminal,
 the words still being recognized show on the last line, and each line is printed about a second after it is spoken.
-The first run downloads Apple's speech model.
+The first run in each language downloads Apple's speech model for it.
 
 ## Permissions
 

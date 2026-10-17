@@ -31,12 +31,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
 
     init(speaker: Speaker?, locale: Locale, sampleRate: Double) async throws {
         self.speaker = speaker
-        transcriber = SpeechTranscriber(
-            locale: locale,
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults, .fastResults],
-            attributeOptions: [.audioTimeRange]
-        )
+        transcriber = Self.makeModule(locale: locale)
         analyzer = SpeechAnalyzer(modules: [transcriber])
         sourceFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
         guard
@@ -48,6 +43,15 @@ final class SpeakerTranscriber: @unchecked Sendable {
         self.analyzerFormat = analyzerFormat
         self.converter = converter
         (inputStream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
+    }
+
+    static func makeModule(locale: Locale) -> SpeechTranscriber {
+        SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults, .fastResults],
+            attributeOptions: [.audioTimeRange]
+        )
     }
 
     /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in.
@@ -113,11 +117,34 @@ func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
     transcribers[0].append(mixed)
 }
 
-/// Downloads the on-device speech model for these transcribers if it is not installed yet.
-func installSpeechModel(for transcribers: [SpeakerTranscriber]) async throws {
-    let modules = transcribers.map(\.transcriber)
+/// The recognizer's locale for a `--language` value such as `es` or `es-MX`. A language without a region is
+/// recognized with the Mac's region if the recognizer has it (`es` on a US Mac is es-US), else the language's main
+/// region (es-ES), else any region it has for the language.
+func speechLocale(for identifier: String) async throws -> Locale {
+    let wanted = Locale.Language(identifier: identifier)
+    let supported = await SpeechTranscriber.supportedLocales.sorted { $0.identifier < $1.identifier }
+    let sameLanguage = supported.filter { $0.language.languageCode == wanted.languageCode }
+    let regions =
+        wanted.region.map { [$0] }
+        ?? [Locale.current.region, Locale.Language(identifier: wanted.maximalIdentifier).region].compactMap { $0 }
+    for region in regions {
+        if let locale = sameLanguage.first(where: { $0.region == region }) { return locale }
+    }
+    if wanted.region == nil, let locale = sameLanguage.first { return locale }
+    let variants = sameLanguage.map { $0.identifier(.bcp47) }
+    throw TranscribeError(
+        variants.isEmpty
+            ? "no speech model for \(identifier); see transcribe --list-languages"
+            : "no speech model for \(identifier); try \(variants.joined(separator: ", "))"
+    )
+}
+
+/// Downloads the on-device speech model for this locale if it is not installed yet. Transcribers can only be made once
+/// it is, as the audio format the recognizer takes comes from the model.
+func installSpeechModel(for locale: Locale) async throws {
+    let modules = [SpeakerTranscriber.makeModule(locale: locale)]
     guard let request = try await AssetInventory.assetInstallationRequest(supporting: modules) else { return }
-    fputs("downloading the speech model...\n", stderr)
+    fputs("downloading the \(locale.identifier(.bcp47)) speech model...\n", stderr)
     try await request.downloadAndInstall()
 }
 

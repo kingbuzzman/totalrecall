@@ -1,17 +1,21 @@
 import Foundation
+import Speech
 
 // transcribe: on-device speech to text for totalrecall recordings, from a file or live from `totalrecall -`.
 
 let usage = """
-    usage: transcribe [--mix] <audio-file | -> [<text-file>]
+    usage: transcribe [--language LANG] [--mix] <audio-file | -> [<text-file>]
+           transcribe --list-languages
            transcribe --version
 
-    Transcribes speech on-device with Apple's speech recognizer (English). With - it reads a live WAV stream from
-    stdin, such as totalrecall -, and prints the text as it is spoken; otherwise it transcribes the audio file.
+    Transcribes speech on-device with Apple's speech recognizer. With - it reads a live WAV stream from stdin, such
+    as totalrecall -, and prints the text as it is spoken; otherwise it transcribes the audio file.
     Prints the transcript, or writes it to <text-file>.
     Recordings with totalrecall's channel split (your mic left, everyone else right) are labeled You and Them.
 
-      --mix     transcribe both channels together, without speaker labels
+      --language LANG   the language spoken, such as es or es-MX (default: en-US)
+      --list-languages  list the languages the speech recognizer supports; * marks installed models
+      --mix             transcribe both channels together, without speaker labels
     """
 
 /// Audio is read and handed to the recognizers in chunks of this length.
@@ -49,10 +53,24 @@ func hasSeparateSpeakers(_ source: AudioSource) throws -> (Bool, [[[Float]]]) {
 
 var arguments = CommandLine.arguments.dropFirst()
 var mixesChannels = false
+var language = "en-US"
 var paths: [String] = []
 while let argument = arguments.popFirst() {
     switch argument {
     case "--mix": mixesChannels = true
+    case "--language":
+        guard let value = arguments.popFirst(), !value.hasPrefix("-") else {
+            fail("--language needs a language, such as es")
+        }
+        language = value
+    case "--list-languages":
+        let installed = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
+        for locale in await SpeechTranscriber.supportedLocales.map({ $0.identifier(.bcp47) }).sorted() {
+            let mark = installed.contains(locale) ? "*" : " "
+            let name = Locale.current.localizedString(forIdentifier: locale) ?? locale
+            print("\(mark) \(locale.padding(toLength: 8, withPad: " ", startingAt: 0)) \(name)")
+        }
+        exit(0)
     case "-h", "--help":
         print("transcribe \(version)\n\n\(usage)")
         exit(0)
@@ -69,6 +87,8 @@ let isLive = paths[0] == "-"
 let textURL = paths.count == 2 ? URL(fileURLWithPath: (paths[1] as NSString).expandingTildeInPath) : nil
 
 do {
+    let locale = try await speechLocale(for: language)
+    try await installSpeechModel(for: locale)
     let source: AudioSource =
         isLive
         ? try StreamAudioSource(handle: .standardInput)
@@ -79,7 +99,6 @@ do {
         (separatesSpeakers, pendingChunks) = try hasSeparateSpeakers(source)
     }
 
-    let locale = Locale(identifier: "en-US")
     let transcribers =
         separatesSpeakers
         ? [
@@ -87,7 +106,6 @@ do {
             try await SpeakerTranscriber(speaker: .them, locale: locale, sampleRate: source.sampleRate),
         ]
         : [try await SpeakerTranscriber(speaker: nil, locale: locale, sampleRate: source.sampleRate)]
-    try await installSpeechModel(for: transcribers)
     // Live, lines are printed as they are spoken; for a file, the recognizers race ahead independently, so the
     // transcript is printed in time order at the end.
     let printer = TranscriptPrinter(printsLines: isLive && textURL == nil, isLive: isLive)
