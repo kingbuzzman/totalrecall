@@ -128,11 +128,11 @@ transcribe --list-languages
 ```
 
 ```sh
-totalrecall - | transcribe -                        # live: text appears as people speak
-transcribe ~/Meetings/standup.mp3                   # a finished recording, printed in time order
-transcribe standup.mp3 standup.txt                  # ... or written to a file
-transcribe --language es reunion.mp3                # in Spanish
-totalrecall - | transcribe - | tee -i standup.txt   # live on screen and saved to a file as it goes
+./totalrecall - | ./transcribe -                        # live: text appears as people speak
+./totalrecall - | ./transcribe - | tee -i standup.txt   # live on screen and saved to a file as it goes
+./transcribe ~/Meetings/standup.mp3                     # a finished recording, printed in time order
+./transcribe standup.mp3 standup.txt                    # ... or written to a file
+./transcribe --language es reunion.mp3                  # in Spanish
 ```
 
 The default language is US English. `--language` takes a language (`es`) or a language and region (`es-MX`); a
