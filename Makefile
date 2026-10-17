@@ -9,8 +9,11 @@ MACOS_MIN := 26.0
 SPEEXDSP_VERSION := 1.2.1
 SPEEXDSP_SHA256 := 8c777343e4a6399569c72abc38a95b24db56882c83dbdb6c6424a5f4aeb54d3d
 SPEEXDSP_URL := https://ftp.osuosl.org/pub/xiph/releases/speex/speexdsp-$(SPEEXDSP_VERSION).tar.gz
-# One folder per version and macOS minimum, so changing either builds it afresh.
-SPEEXDSP := $(CURDIR)/$(BUILD)/speexdsp/$(SPEEXDSP_VERSION)-macos$(MACOS_MIN)
+# One folder per version, macOS minimum and build recipe, so changing any of them builds it afresh. Bump SPEEXDSP_RECIPE
+# when changing how it is built, or CI reuses its cached copy.
+SPEEXDSP_RECIPE := 2
+SPEEXDSP := $(CURDIR)/$(BUILD)/speexdsp/$(SPEEXDSP_VERSION)-macos$(MACOS_MIN)-r$(SPEEXDSP_RECIPE)
+SPEEXDSP_CFLAGS := -O2 -mmacosx-version-min=$(MACOS_MIN)
 # Where Package.swift's CSpeexDSP finds it.
 export PKG_CONFIG_PATH := $(SPEEXDSP)/lib/pkgconfig
 SOURCES := Package.swift $(shell find Sources -type f)
@@ -22,24 +25,31 @@ COVERAGE_FLAGS := -c release --build-path .build/coverage -Xswiftc -enable-testi
 	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall)
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75
+# Every build goes through it: a single warning, from any tool, fails the build.
+STRICT := scripts/no-warnings.sh
 
 all: totalrecall transcribe
 
 totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	swift build -c release --product $@ $(call INFO_PLIST,TotalRecall)
+	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,TotalRecall)
 	cp "$$(swift build -c release --show-bin-path)/$@" $@
 
 transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist
-	swift build -c release --product $@ $(call INFO_PLIST,Transcribe)
+	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,Transcribe)
 	cp "$$(swift build -c release --show-bin-path)/$@" $@
 
+# Only the library, its headers and its pkg-config file, with warnings as errors: speexdsp's own test programs have
+# warnings of their own. lt_cv_apple_cc_single_mod=no skips libtool's check of -single_module, which ld warns is obsolete.
 $(SPEEXDSP)/lib/libspeexdsp.a:
 	mkdir -p $(SPEEXDSP)/src
 	curl -fsSL -o $(SPEEXDSP)/src.tar.gz $(SPEEXDSP_URL)
 	echo "$(SPEEXDSP_SHA256)  $(SPEEXDSP)/src.tar.gz" | shasum -a 256 -c -
 	tar -xzf $(SPEEXDSP)/src.tar.gz -C $(SPEEXDSP)/src --strip-components 1
-	cd $(SPEEXDSP)/src && ./configure --quiet --disable-shared --enable-static \
-		--prefix=$(SPEEXDSP) CFLAGS="-O2 -mmacosx-version-min=$(MACOS_MIN)" && $(MAKE) --quiet install
+	$(STRICT) sh -c 'cd $(SPEEXDSP)/src \
+		&& ./configure --quiet --disable-shared --enable-static --prefix=$(SPEEXDSP) \
+			CFLAGS="$(SPEEXDSP_CFLAGS)" lt_cv_apple_cc_single_mod=no \
+		&& $(MAKE) --quiet -C libspeexdsp CFLAGS="$(SPEEXDSP_CFLAGS) -Werror" install-libLTLIBRARIES \
+		&& $(MAKE) --quiet -C include install && $(MAKE) --quiet install-pkgconfigDATA'
 
 # Each tool's Info.plist, with the version from VERSION.
 $(BUILD)/%/Info.plist: Sources/%/Info.plist VERSION
@@ -57,7 +67,8 @@ $(RELEASE): totalrecall transcribe README.md
 # Unit and end-to-end tests, the latter against the release builds; run a subset with: make test TESTS=RecorderTests
 # Tests that need the BlackHole test devices are skipped without them, except on CI.
 test: totalrecall transcribe $(SPEEXDSP)/lib/libspeexdsp.a
-	swift test $(if $(TESTS),--filter '$(TESTS)')
+	$(STRICT) swift build --build-tests
+	swift test --skip-build $(if $(TESTS),--filter '$(TESTS)')
 
 # The tests again, on the build instrumented for coverage; fails below COVERAGE_MIN. Takes TESTS like make test.
 coverage: coverage-build
@@ -65,7 +76,7 @@ coverage: coverage-build
 		swift test --skip-build $(COVERAGE_FLAGS) $(if $(TESTS),--filter '$(TESTS)')
 
 coverage-build: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	swift build --build-tests $(COVERAGE_FLAGS)
+	$(STRICT) swift build --build-tests $(COVERAGE_FLAGS)
 
 # Where coverage-build puts the tools, which CI grants the audio permissions to.
 coverage-bin:

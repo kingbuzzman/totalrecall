@@ -15,6 +15,9 @@ let strict: [SwiftSetting] = [
     .treatAllWarnings(as: .error),
 ]
 
+/// Linker warnings fail the link too; no compiler setting covers them.
+let strictLinking: [LinkerSetting] = [.unsafeFlags(["-Xlinker", "-fatal_warnings"])]
+
 let package = Package(
     name: "totalrecall",
     platforms: [.macOS("26.0")],
@@ -30,14 +33,46 @@ let package = Package(
             name: "TotalRecall",
             dependencies: ["CSpeexDSP", "Shared"],
             exclude: ["Info.plist"],
-            swiftSettings: strict
+            swiftSettings: strict,
+            linkerSettings: strictLinking
         ),
-        .executableTarget(name: "Transcribe", dependencies: ["Shared"], exclude: ["Info.plist"], swiftSettings: strict),
+        .executableTarget(
+            name: "Transcribe",
+            dependencies: ["Shared"],
+            exclude: ["Info.plist"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
         .target(name: "AudioLab", path: "Tests/AudioLab", swiftSettings: strict),
-        .testTarget(name: "SharedTests", dependencies: ["Shared"], swiftSettings: strict),
-        .testTarget(name: "TotalRecallTests", dependencies: ["TotalRecall", "Shared"], swiftSettings: strict),
-        .testTarget(name: "TranscribeTests", dependencies: ["Transcribe", "Shared"], swiftSettings: strict),
-        .testTarget(name: "AudioLabTests", dependencies: ["AudioLab"], swiftSettings: strict),
-        .testTarget(name: "IntegrationTests", dependencies: ["AudioLab", "Shared"], swiftSettings: strict),
+        .testTarget(
+            name: "SharedTests",
+            dependencies: ["Shared"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
+        .testTarget(
+            name: "TotalRecallTests",
+            dependencies: ["TotalRecall", "Shared"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
+        .testTarget(
+            name: "TranscribeTests",
+            dependencies: ["Transcribe", "Shared"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
+        .testTarget(
+            name: "AudioLabTests",
+            dependencies: ["AudioLab"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
+        .testTarget(
+            name: "IntegrationTests",
+            dependencies: ["AudioLab", "Shared"],
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
     ]
 )
