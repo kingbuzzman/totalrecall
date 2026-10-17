@@ -65,7 +65,8 @@ Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
 against real recordings.
 
 Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
-and `make lint` to check it.
+and `make lint` to check it. `make lint` also checks the GitHub workflows for security problems with
+[zizmor](https://docs.zizmor.sh), run through `pipx` (`brew install pipx`) at the version the Makefile pins.
 
 ## Testing
 

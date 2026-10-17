@@ -5,8 +5,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only; nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A newer push cancels a run still going on the same branch or pull request, except on master: release.yml releases
+# from every master run that passes.
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   integration:
+    name: integration
     # The binaries need macOS 26 or later.
     runs-on: macos-26
     timeout-minutes: 10
@@ -14,7 +25,9 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Lint
         run: make lint
@@ -32,7 +45,7 @@ jobs:
 
       # Its folder is named after its version and macOS minimum, so an older cache is harmless: make builds afresh.
       - name: Cache speexdsp
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/speexdsp
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
@@ -79,7 +92,7 @@ jobs:
           log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
 
       - name: Upload the release tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
           path: build/totalrecall-*-macos-*.tar.gz*
@@ -88,7 +101,7 @@ jobs:
 
       - name: Upload the coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
           path: build/coverage/html
@@ -97,7 +110,7 @@ jobs:
 
       - name: Upload recordings and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-recordings
           path: build/test-results

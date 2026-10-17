@@ -32,6 +32,8 @@ COVERAGE_FLAGS := -c release --scratch-path $(BUILD)/swiftpm-coverage -Xswiftc -
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75
 COVERAGE_REPORT := $(BUILD)/coverage
+# Lints the GitHub workflows for security problems; pinned, so CI and every machine run the same checks.
+ZIZMOR := pipx run zizmor==1.31.1
 # Every build goes through it: a single warning, from any tool, fails the build.
 STRICT := scripts/no-warnings.sh
 # Runs the tests under a pseudo-terminal, so their progress is printed as it happens: into a pipe, such as CI's log, it
@@ -105,6 +107,7 @@ format:
 
 lint:
 	swift format lint --recursive --strict Package.swift Sources Tests
+	$(ZIZMOR) .github/workflows
 
 install: $(TOOLS)
 	mkdir -p $(PREFIX)/bin
