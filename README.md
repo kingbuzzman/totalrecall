@@ -1,267 +1,123 @@
 # totalrecall
 
-Record any meeting — Zoom, Slack huddles, Google Meet, Teams, anything that plays through your Mac — to an audio file
-from the command line. Start it, talk, press Ctrl-C, and the recording is saved where you said.
+**Meeting recording and transcription that runs entirely on your Mac. Free, with no AI subscription, no account and no
+cloud.**
 
-```sh
-./totalrecall ~/Meetings/standup.mp3
-```
-
-It can also stream the recording into `transcribe`, the on-device speech-to-text tool that ships with it, for a live
-transcript that labels who is talking:
-
-```sh
-./totalrecall - | ./transcribe -
-```
+Zoom, Google Meet, Slack huddles, Teams: if your Mac plays it, `totalrecall` records it, along with your microphone.
+Pipe it into `transcribe` for a live transcript that knows who's talking. Transcription uses the speech recognizer
+built into macOS, so your audio and your words never leave your Mac.
 
 [![totalrecall - | transcribe - live: a YouTube video's audio is transcribed as "Them", the microphone as "You", and the
 mic follows a switch to AirPods mid-recording](docs/demo.jpg)](docs/demo.mp4)
 
-▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound): `./totalrecall - | ./transcribe -` transcribing a YouTube video
-as Them and the microphone as You, live, and following the switch to AirPods mid-recording.
+▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound)
 
-## Why
-
-Meeting apps either don't let you keep a recording (Slack huddle captions vanish when the huddle ends) or only record
-when the host allows it and announce it to everyone. macOS has no built-in way to record "what the speakers are
-playing" together with your microphone: QuickTime and Cmd-Shift-5 only capture the mic, and the usual workaround is a
-virtual loopback driver such as BlackHole plus a Multi-Output Device, which breaks your volume keys and has to be
-reconfigured whenever you switch between AirPods and speakers.
-
-`totalrecall` uses Core Audio process taps to capture system audio directly, so there is no driver, no audio
-rerouting, and nothing to reconfigure. It is app-agnostic: it records everything the Mac plays.
-
-## What it does
-
-- **Records system audio + your microphone** into one stereo file: your mic on the **left** channel, everyone else
-  (system audio) on the **right**, so you can always tell when you were talking. `--no-speaker-isolation` mixes both
-  into both channels instead.
-- **Cancels speaker echo.** Without headphones the mic also hears the other participants through the speakers. Because
-  totalrecall has the exact system audio, it uses it as the reference for a speexdsp acoustic echo canceller and strips
-  that audio back out of your mic channel. In testing on MacBook Pro speakers this lowered the echo by ~13–15 dB; it
-  reduces the "everyone twice" effect a lot but does not remove it completely. Headphones/AirPods avoid it entirely.
-- **Follows your devices.** The mic tracks the macOS system input, so putting in or taking out AirPods mid-meeting
-  switches the mic automatically. Switching is make-before-break: the old mic keeps recording until the new one
-  delivers real audio, which hides the ~2 s AirPods need to switch Bluetooth into their call profile. If a capture
-  stops delivering audio it is rebuilt, and any gap is filled with silence so the two channels stay in sync.
-- **Survives crashes.** While recording it writes raw audio to `<output>.partial.caf`; on Ctrl-C it converts that to
-  the requested format and deletes it. If the process is killed or the Mac crashes, the `.partial.caf` is still
-  playable.
-- **Shows live levels** for the mic and system audio, and warns if no system audio arrives (usually a missing
-  permission).
-
-## Requirements
-
-- macOS 26 or later; the tools refuse to launch on anything older
-- [ffmpeg](https://ffmpeg.org/) only for formats macOS can't write natively, such as `.mp3` or `.flac`:
-  `brew install ffmpeg`
-
-## Install
-
-Download the latest release (Apple Silicon) and put both tools on your `PATH`:
+## Quick start
 
 ```sh
-gh release download --repo kingbuzzman/totalrecall --pattern '*.tar.gz'
-tar -xzf totalrecall-*-macos-arm64.tar.gz -C ~/.local/bin totalrecall transcribe
+totalrecall standup.mp3          # record, press Ctrl-C to stop and save
+totalrecall - | transcribe -     # live transcript as people speak
+transcribe standup.mp3           # transcribe a recording afterwards
 ```
-
-The binaries are not notarized. Downloading with `gh` or `curl` works as is; if you download the tarball with a
-browser, clear the quarantine flag first: `xattr -d com.apple.quarantine totalrecall-*.tar.gz`.
-
-## Build from source
-
-Needs the Xcode Command Line Tools (`xcode-select --install`).
-
-```sh
-make            # builds ./totalrecall and ./transcribe
-make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/dir)
-```
-
-The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
-[speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs
-nothing installed, and embeds each tool's `Info.plist` with the version from `VERSION`. Make sure `~/.local/bin` is on
-your `PATH`.
-
-## Usage
-
-```sh
-totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file | ->
-totalrecall --list-mics
-totalrecall --version
-```
-
-| Option | Effect |
-| --- | --- |
-| `--mic NAME` | Prefer this mic whenever it is connected (case-insensitive part of a `--list-mics` name, e.g. `--mic airpods`); falls back to the system input otherwise |
-| `--no-mic` | Record system audio only |
-| `--no-speaker-isolation` | Mix mic and system audio into both channels instead of left/right |
-| `--no-echo-cancellation` | Keep the raw mic signal |
-| `--force` | Overwrite an existing output file |
-| `--list-mics` | List microphones; `*` marks the current system input |
-| `--version` | Print the version (also shown at the top of `--help`) |
-
-The output format follows the extension: `.m4a` (AAC), `.wav`, `.aiff` and `.caf` are written natively; anything
-else is converted with ffmpeg. With `-` instead of a file name, the recording streams to stdout as WAV while it is
-being made, for another program to read: `transcribe -`, or `ffmpeg -i - meeting.mp3`.
-
-Examples:
-
-```sh
-totalrecall /tmp/meeting.mp3                          # mic left, everyone else right
-totalrecall --no-speaker-isolation ~/call.m4a         # ordinary mixed recording
-totalrecall --mic "macbook" ~/call.m4a                # keep using the Mac mic even with AirPods in
-```
-
-Stop with Ctrl-C (SIGTERM and closing the terminal also save the file).
-
-Recording starts once the microphone is actually on and totalrecall has heard a second of the room, so that its noise
-suppression starts out tuned to the background; with AirPods that takes 2–3 s. The counter starts at that moment and
-the file covers exactly the time it shows.
-
-## Transcription
-
-`transcribe` turns speech into text on-device with Apple's speech recognizer; nothing leaves the Mac.
-
-```sh
-transcribe [--language LANG] [--mix] <audio-file | -> [<text-file>]
-transcribe --list-languages
-```
-
-```sh
-./totalrecall - | ./transcribe -                        # live: text appears as people speak
-./totalrecall - | ./transcribe - | tee -i standup.txt   # live on screen and saved to a file as it goes
-./transcribe ~/Meetings/standup.mp3                     # a finished recording, printed in time order
-./transcribe standup.mp3 standup.txt                    # ... or written to a file
-./transcribe --language es reunion.mp3                  # in Spanish
-```
-
-The default language is US English. `--language` takes a language (`es`) or a language and region (`es-MX`); a
-language alone uses your Mac's region when the recognizer has it, else the language's main one. `--list-languages`
-lists what Apple's recognizer supports, with `*` on the ones already downloaded.
-
-Recordings with totalrecall's channel split are labeled by speaker, since your mic is on the left and everyone else on
-the right:
 
 ```
 [00:00:03] You: Today we will review the release plan.
 [00:00:05] Them: Sounds good, the migration finished yesterday.
 ```
 
-Mixed recordings (`--no-speaker-isolation`, `--no-mic`) and `--mix` give one unlabeled transcript. Live on a terminal,
-the words still being recognized show on the last line, and each line is printed about a second after it is spoken.
-The first run in each language downloads Apple's speech model for it.
+## Why
 
-Ctrl-C on a live pipeline stops totalrecall, which ends the stream; `transcribe` finishes the words it has already
-heard, prints them, and only then exits (press Ctrl-C again to quit at once). With `tee`, use `-i` so that `tee` keeps
-running for those last lines too. Through `tee` the output is not a terminal, so only finished lines are shown, not the
-words still being recognized.
+AI note-takers charge a monthly fee, upload your meetings to their servers, and often send a bot into the call that
+everyone can see. Meeting apps aren't much help on their own: Slack huddle captions vanish when the huddle ends, and Zoom
+only records if the host allows it.
 
-## Permissions
+totalrecall does the same job with only your Mac:
 
-totalrecall needs two separate permissions, which macOS grants to the terminal app you run it from:
+- 🔒 **100% local.** Recording and transcription run on your Mac. No audio or text is uploaded, and no bot joins the
+  call.
+- 💸 **Free.** There's no subscription, account, API key or usage limit. It uses the speech recognizer that comes with
+  macOS.
+- 📴 **Works offline.** After a one-time download of Apple's speech model for each language, it needs no internet.
+- 🎧 **No drivers, no setup.** It captures system audio directly with Core Audio, so there's no BlackHole and no audio
+  rerouting.
+- 🗣️ **You vs. Them.** Your mic goes on the left channel and everyone else on the right, so transcripts are labeled
+  by speaker.
+- 🔄 **Handles real meetings.** It cancels speaker echo, follows your AirPods in and out mid-call, and survives crashes.
 
-- **System audio** — System Settings › Privacy & Security › Screen & System Audio Recording › System Audio Recording
-  Only
-- **Microphone** — System Settings › Privacy & Security › Microphone (not needed with `--no-mic`)
+## Install
 
-On start it checks both and asks for any that macOS has not asked about yet. If one is denied, it exits with an error
-saying where to allow it; macOS does not ask again once you have said no. After allowing system audio, quit and
-reopen the terminal.
-
-Apple offers no public way to check or request the system audio permission (without it, recordings silently get no
-system audio), so `totalrecall` uses macOS's undocumented TCC functions for it; see
-`Sources/TotalRecall/Devices/SystemAudioPermission.swift`. If a macOS update removes them, `totalrecall` records without
-the check.
-
-## Code layout
-
-`make` builds two binaries from `Sources/`, plus the code they share:
-
-| Folder | Contents |
-| --- | --- |
-| `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
-| `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, and the transcript printer |
-| `Shared/` | The WAV stream format between `totalrecall -` and `transcribe -`, and the version |
-| `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
-
-Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
-
-| Folder | Contents |
-| --- | --- |
-| `main.swift` | Entry point and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
-| `App/` | Command-line options, the recording session (startup, writer timer, saving), stop signals, status output |
-| `Capture/` | System-audio tap, microphone capture with make-before-break switching, and the supervisor that restarts stalled captures |
-| `Recording/` | Per-channel timelines, echo cancellation, the file or stream it writes to, and export to the final format |
-| `Devices/` | Core Audio property helpers, input-device discovery, microphone permission |
-| `Common.swift` | The shared error type and clock |
-
-`TOTALRECALL_RAW=1` also saves the unprocessed mic and system audio as `<output>.raw.caf`, for tuning the processing
-against real recordings.
-
-Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
-and `make lint` to check it.
-
-## Testing
+Needs macOS 26+ on Apple Silicon.
 
 ```sh
-make test                          # everything; the recording tests need the devices below
-make test TESTS=RecorderTests      # a subset (a swift test --filter)
-LONG=1 make test                   # adds a 2-minute drift test
-make coverage                      # the same tests on a build instrumented for coverage
+gh release download --repo kingbuzzman/totalrecall --pattern '*.tar.gz'
+tar -xzf totalrecall-*-macos-arm64.tar.gz -C ~/.local/bin totalrecall transcribe
 ```
 
-The tests use [Swift Testing](https://developer.apple.com/documentation/testing) and live in `Tests/`:
+- If you downloaded the tarball in a browser, run `xattr -d com.apple.quarantine totalrecall-*.tar.gz` first (the
+  binaries aren't notarized).
+- For `.mp3` or `.flac` output, run `brew install ffmpeg`. `.m4a`, `.wav`, `.aiff` and `.caf` work without it.
+- To build from source, run `make && make install`. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-| Target | Tests |
-| --- | --- |
-| `TotalRecallTests` | totalrecall's logic: options, the timeline and recorder (alignment, splicing, padding, mixing, the end at the stop), echo cancellation, output files and formats, resampling, sample-rate watching, make-before-break mic switching and capture restarts (with fake sessions), the status line, stop signals, input-device lookup |
-| `TranscribeTests` | transcribe's logic: arguments, speaker detection, mixing, the transcript and its live line, language picking, audio sources |
-| `SharedTests` | The WAV stream writer and reader, including malformed streams |
-| `AudioLabTests` | The click-track analysis the end-to-end tests rely on |
-| `IntegrationTests` | The release binaries end to end: totalrecall's command line, transcribe on speech from `say`, and totalrecall recording through fake audio devices |
+On the first run, macOS asks your terminal for two permissions: **Microphone** and **System Audio Recording**. After you
+allow system audio, quit and reopen the terminal. If you clicked "Don't Allow", turn them on in System Settings ›
+Privacy & Security.
 
-The recording tests need no microphone or speakers, only three BlackHole loopback devices, so they run the same way
-locally and on headless CI machines:
+## Recipes
 
 ```sh
-brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
+totalrecall ~/Meetings/standup.m4a                  # mic left, everyone else right
+totalrecall --no-speaker-isolation call.m4a         # ordinary mixed recording
+totalrecall --mic macbook call.m4a                  # keep the Mac mic even with AirPods in
+totalrecall --no-mic webinar.m4a                    # system audio only
+totalrecall - | transcribe - | tee -i standup.txt   # live transcript, saved as it goes
+totalrecall - | ffmpeg -i - meeting.flac            # stream into any tool that reads WAV
+transcribe --language es reunion.mp3                # Spanish (or es-MX, fr, ja, ...)
 ```
 
-Without them those tests are skipped, except on CI, where they fail. `Tests/AudioLab` creates fake microphones, each
-a temporary aggregate device wrapping a BlackHole device that the tests play a click track into. Fake mics can appear,
-disappear, become the system input, change sample rate, or stay silent for a while before delivering audio, which is
-how AirPods look to totalrecall. Every click track is locked to the system clock, so the analysis can find every click
-in a recording and report lost audio, silence, which mic was recorded when, and drift between the channels, in
-milliseconds. The tests cover recording, switching to a new or slow-starting input, sample-rate changes, a preferred
-`--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills, every output
-format, mixed channels, system audio only, and streaming to stdout. Each test switches the system input and output
-to the test devices and restores them afterwards. Recordings and logs are kept in `.build/test-results`.
+<details>
+<summary>All options</summary>
 
-`make coverage` builds the tools and the tests once with coverage instrumentation, runs the tests with the end-to-end
-ones on those builds, prints line coverage per file, writes an HTML report to `.build/coverage/html`, and fails if
-coverage drops below `COVERAGE_MIN` percent (75, set in the `Makefile`). Without the test devices the coverage is partial,
-and the minimum is not checked.
+```sh
+totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file | ->
+totalrecall --list-mics
+```
 
-CI (`.github/workflows/integration.yml`) runs `make test` and `make coverage` on GitHub's macOS runners, shows the
-coverage in the job summary, and uploads the HTML report and the recordings. There,
-`.github/scripts/grant-audio-permissions.sh` grants the microphone and system-audio permissions nobody can click
-"Allow" for; it refuses to run outside CI. The released binaries are the uninstrumented ones `make test` tested.
+| Option | Effect |
+| --- | --- |
+| `--mic NAME` | Prefer this mic whenever it's connected (part of a `--list-mics` name); otherwise use the system input |
+| `--no-mic` | Record system audio only |
+| `--no-speaker-isolation` | Mix mic and system audio into both channels instead of left/right |
+| `--no-echo-cancellation` | Keep the raw mic signal |
+| `--force` | Overwrite an existing output file |
+| `--list-mics` | List microphones; `*` marks the current system input |
+| `-` as output | Stream WAV to stdout while recording |
 
-Known limit: totalrecall's system-audio capture also hears the fake mics' playback, so echo cancellation sees the
-"voice" in its reference signal. The echo test therefore checks only that echo is reduced, not that the voice is
-untouched.
+```sh
+transcribe [--language LANG] [--mix] <audio-file | -> [<text-file>]
+transcribe --list-languages
+```
 
-## Notes and limitations
+| Option | Effect |
+| --- | --- |
+| `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
+| `--mix` | Transcribe both channels together, without speaker labels |
+| `--list-languages` | List supported languages; `*` marks models already downloaded |
+| `<text-file>` | Write the transcript there instead of printing it |
 
-- It records **all** system audio, including notification sounds and music. Use Do Not Disturb during meetings.
-- With the AirPods mic active, macOS uses the Bluetooth call profile, so your voice is recorded at about 24 kHz. That
-  is fine for transcription; the Mac mic is clearer in a quiet room.
-- Tell the other participants when you record. Some jurisdictions require everyone's consent.
+Both tools also take `--version` and `--help`.
 
-## Releasing
+</details>
 
-The version lives in `VERSION`; the build writes it into both tools. To release, add a `## <version>` section to
-`CHANGELOG.md`, bump `VERSION` and push to `master`. The integration workflow builds both tools on macOS 26 and tests
-them; only if the tests pass does `.github/workflows/release.yml` check that `v<VERSION>` has no tag yet and publish
-a GitHub release with the tag, that section as its notes, and the `totalrecall-<VERSION>-macos-arm64.tar.gz` that
-integration built. `make release` builds the same tarball locally, in `build/`.
+## Good to know
+
+- **Turn on Do Not Disturb.** totalrecall records *all* system audio, notification sounds included.
+- **Recording starts after a short pause.** totalrecall waits until the mic is live and it has heard about a second of
+  the room. With AirPods, that takes 2–3 s.
+- **Stopping a live transcript.** Ctrl-C stops recording, and `transcribe` prints the last words before it exits. Press
+  Ctrl-C again to quit immediately. With `tee`, use `-i` so those last lines are saved too.
+- **AirPods sound lower quality.** Their Bluetooth call profile records at about 24 kHz. That's fine for transcripts,
+  but the Mac mic is clearer in a quiet room.
+- **Headphones beat echo cancellation.** Echo cancellation reduces the "everyone twice" effect a lot, but not
+  completely.
+- **The first transcription in a language takes longer** while Apple's speech model downloads.
+- **Tell people you're recording.** Some places require everyone's consent.
