@@ -13,14 +13,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Lint
+        run: make lint
+
       - name: Install dependencies and test audio devices
         run: |
           brew install ffmpeg
           brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
           sudo killall coreaudiod || true
 
+      # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here.
       - name: Build
-        run: make totalrecall tests/build/audiolab
+        run: make release tests/build/audiolab
+
+      - name: Check the versions
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          test "$(./totalrecall --version)" = "$version"
+          test "$(./transcribe --version)" = "$version"
 
       - name: Grant audio permissions
         run: sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
@@ -33,6 +43,14 @@ jobs:
         run: |
           system_profiler SPAudioDataType || true
           log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
+
+      - name: Upload the release tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: build/totalrecall-*-macos-*.tar.gz*
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload recordings and logs
         if: always()

@@ -1,29 +1,41 @@
 name: release
 
-# Publishes a GitHub release when VERSION on master names a version that has no tag yet: builds both tools, then
-# creates the v<VERSION> tag on that commit and a release with the tarball attached, its notes taken from the version's
-# section of CHANGELOG.md. To release, add that section, bump VERSION and push.
+# Publishes a GitHub release when VERSION on master names a version that has no tag yet. It runs only after the
+# integration workflow passes on master, and publishes the tarball that run built and tested: it creates the
+# v<VERSION> tag on that commit and a release with the tarball attached, its notes taken from the version's section of
+# CHANGELOG.md. To release, add that section, bump VERSION and push. To retry, re-run this workflow's run, or run the
+# integration workflow on master.
 
 on:
-  push:
+  workflow_run:
+    workflows: [integration]
+    types: [completed]
     branches: [master]
-  workflow_dispatch:
 
 permissions:
   contents: write
+  # To download the tarball from the integration run.
+  actions: read
 
-# Two pushes in a row must not race to create the same release.
+# Two runs in a row must not race to create the same release.
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
   release:
-    # The binaries need macOS 26 or later.
-    runs-on: macos-26
-    timeout-minutes: 20
+    # A pull request from a fork's master branch also counts as master here; only release what was pushed.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request'
+    # Nothing is built here, so any runner will do.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The commit integration tested; github.sha is master's latest commit, which may be newer.
+      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Check for a new version
         id: version
@@ -41,17 +53,23 @@ jobs:
             echo "is-new=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build
+      - name: Download the tarball
         if: steps.version.outputs.is-new == 'true'
-        run: make release
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: build
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
 
-      - name: Check the binaries
+      - name: Check the tarball
         if: steps.version.outputs.is-new == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          test "$(./totalrecall --version)" = "$VERSION"
-          test "$(./transcribe --version)" = "$VERSION"
+          cd build
+          ls totalrecall-"$VERSION"-macos-*.tar.gz > /dev/null
+          shasum -a 256 -c totalrecall-"$VERSION"-macos-*.tar.gz.sha256
 
       - name: Create the release and tag
         if: steps.version.outputs.is-new == 'true'
@@ -69,4 +87,4 @@ jobs:
             notes=(--generate-notes)
           fi
           gh release create "v$VERSION" build/totalrecall-"$VERSION"-macos-*.tar.gz* \
-            --target "$GITHUB_SHA" --title "totalrecall $VERSION" "${notes[@]}"
+            --target "$SHA" --title "totalrecall $VERSION" "${notes[@]}"
