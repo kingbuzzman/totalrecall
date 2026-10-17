@@ -42,18 +42,22 @@ if let microphoneQuery = options.microphoneQuery, InputDevice.matching(microphon
     fail("no microphone matches \"\(microphoneQuery)\"; available:\n\(available)")
 }
 
-let destination = Destination(path: outputPath)
-switch destination {
-case .file(let output):
+let destination = Destination(path: outputPath, streams: options.streams)
+if let output = destination.file {
     do {
         try output.checkCanCreate(overwrite: options.overwrite)
     } catch {
         fail(error.localizedDescription)
     }
-case .standardOutput:
-    if isatty(STDOUT_FILENO) != 0 {
-        fail("refusing to write audio to the terminal; pipe it into another program, e.g. totalrecall - | transcribe -")
-    }
+}
+if destination.streams && isatty(STDOUT_FILENO) != 0 {
+    fail("refusing to write audio to the terminal; pipe it into another program, e.g. totalrecall - | transcribe -")
+}
+if !destination.streams && standardOutputIsPipe() {
+    fail(
+        "stdout is a pipe, but nothing would be streamed into it; add --stream to stream the recording, "
+            + "e.g. totalrecall \(outputPath) --stream | transcribe -"
+    )
 }
 if !requestSystemAudioAccess() {
     fail(
@@ -72,10 +76,8 @@ let session: RecordingSession
 do {
     session = try RecordingSession(options: options, destination: destination)
 } catch {
-    switch destination {
-    case .file(let output): fail("cannot create \(output.partialURL.path): \(error.localizedDescription)")
-    case .standardOutput: fail("cannot write to stdout: \(error.localizedDescription)")
-    }
+    guard let output = destination.file else { fail("cannot write to stdout: \(error.localizedDescription)") }
+    fail("cannot create \(output.partialURL.path): \(error.localizedDescription)")
 }
 
 @MainActor func stopAndExit() -> Never {
@@ -84,13 +86,19 @@ do {
     } catch let error as StoppedBeforeRecording {
         fail(error.localizedDescription)
     } catch {
-        guard case .file(let output) = destination else { fail(error.localizedDescription) }
+        guard let output = destination.file else { fail(error.localizedDescription) }
         fail(
             "could not save \(output.url.path): \(error.localizedDescription); "
                 + "the raw recording is kept at \(output.partialURL.path)"
         )
     }
     exit(0)
+}
+
+/// Whether stdout is a pipe into another program, rather than the terminal, a file or /dev/null.
+func standardOutputIsPipe() -> Bool {
+    var info = stat()
+    return fstat(STDOUT_FILENO, &info) == 0 && info.st_mode & S_IFMT == S_IFIFO
 }
 
 session.onOutputClosed = { @Sendable in DispatchQueue.main.async { stopAndExit() } }

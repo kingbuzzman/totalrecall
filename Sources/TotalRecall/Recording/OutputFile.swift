@@ -1,20 +1,21 @@
 import AVFoundation
 import Foundation
 
-/// Where the recording goes: a file, or a live WAV stream on stdout (`-`) for another program such as `transcribe -`.
-enum Destination {
-    case file(OutputFile)
-    case standardOutput
+/// Where the recording goes: a file, a live WAV stream on stdout (`-`) for another program such as `transcribe -`, or
+/// both (`--stream`).
+struct Destination {
+    /// The file to save, or nil when only streaming.
+    let file: OutputFile?
+    let streams: Bool
 
-    init(path: String) {
-        self = path == "-" ? .standardOutput : .file(OutputFile(path: path))
+    init(path: String, streams: Bool = false) {
+        file = path == "-" ? nil : OutputFile(path: path)
+        self.streams = path == "-" || streams
     }
 
     var description: String {
-        switch self {
-        case .file(let output): output.url.path
-        case .standardOutput: "stdout"
-        }
+        guard let file else { return "stdout" }
+        return streams ? "\(file.url.path) and stdout" : file.url.path
     }
 }
 

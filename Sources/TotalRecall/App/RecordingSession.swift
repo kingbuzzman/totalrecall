@@ -17,7 +17,8 @@ final class RecordingSession {
     /// Longest to wait for the recording to be able to start, such as with a muted microphone, before starting anyway.
     private static let maxStartupWaitSeconds = 6.0
 
-    /// Called on the writer queue when streaming to stdout and the program reading it has gone away.
+    /// Called on the writer queue when only streaming to stdout and the program reading it has gone away. With
+    /// `--stream`, the file keeps recording instead.
     var onOutputClosed: (@Sendable () -> Void)?
     private let destination: Destination
     private let recorder: Recorder
@@ -33,16 +34,22 @@ final class RecordingSession {
     private var isOutputClosed = false
     private var ticks = 0
 
-    /// Creates the partial recording or starts the stream; throws if that fails.
+    /// Creates the partial recording and starts the stream, as the destination asks; throws if that fails.
     init(options: Options, destination: Destination) throws {
+        let fileSink = try destination.file.map { try AudioFileSink(url: $0.partialURL) }
+        let rawSink = try destination.file?.rawURL.map(AudioFileSink.init)
+        let streamSink = destination.streams ? try WAVStreamSink(handle: .standardOutput) : nil
+        var fileAndStream: FileAndStreamSink?
         let sink: any AudioSink
-        var rawSink: (any AudioSink)?
-        switch destination {
-        case .file(let output):
-            sink = try AudioFileSink(url: output.partialURL)
-            rawSink = try output.rawURL.map(AudioFileSink.init)
-        case .standardOutput:
-            sink = try WAVStreamSink(handle: .standardOutput)
+        if let fileSink, let streamSink {
+            let both = FileAndStreamSink(file: fileSink, stream: streamSink)
+            fileAndStream = both
+            sink = both
+        } else if let fileSink {
+            sink = fileSink
+        } else {
+            // A destination always has a file, a stream or both.
+            sink = streamSink!
         }
         let recorder = Recorder(
             writingTo: sink,
@@ -56,8 +63,7 @@ final class RecordingSession {
             options.includesMicrophone
             ? MicrophoneCapture(preferredName: options.microphoneQuery, onSamples: recorder.appendMicrophone)
             : nil
-        let isStreaming = if case .standardOutput = destination { true } else { false }
-        let status = StatusLine(recorder: recorder, isStreaming: isStreaming)
+        let status = StatusLine(recorder: recorder, isStreaming: destination.streams)
         let writerQueue = DispatchQueue(label: "totalrecall.writer")
         self.destination = destination
         self.recorder = recorder
@@ -73,6 +79,11 @@ final class RecordingSession {
         )
         startupTimer = DispatchSource.makeTimerSource(queue: writerQueue)
         writerTimer = DispatchSource.makeTimerSource(queue: writerQueue)
+        if let fileAndStream, let file = destination.file {
+            fileAndStream.onStreamClosed = { [status] in
+                status.announce("the program reading the stream exited; still recording to \(file.url.path)")
+            }
+        }
     }
 
     /// Starts the captures, and the recording as soon as the recorder is ready. If a capture cannot start, deletes the
@@ -114,7 +125,7 @@ final class RecordingSession {
                 try recorder.close()
             } catch {
                 // A stream's reader usually exits at the same time: Ctrl-C stops every program in the pipeline.
-                if case .file = destination { status.reportWriteFailure(error) }
+                if destination.file != nil { status.reportWriteFailure(error) }
             }
             return hasStarted
         }
@@ -122,19 +133,18 @@ final class RecordingSession {
             removePartialRecording()
             throw StoppedBeforeRecording()
         }
-        switch destination {
-        case .file(let output):
-            fputs("\nSaving \(status.elapsed) of audio...\n", stderr)
-            try output.save()
-            fputs("Saved \(output.url.path)\n", stderr)
-        case .standardOutput:
+        guard let output = destination.file else {
             let reason = isOutputClosed ? " (the program reading it exited)" : ""
             status.say("Streamed \(status.elapsed) of audio\(reason).")
+            return
         }
+        fputs("\nSaving \(status.elapsed) of audio...\n", stderr)
+        try output.save()
+        fputs("Saved \(output.url.path)\n", stderr)
     }
 
     private func removePartialRecording() {
-        if case .file(let output) = destination { try? FileManager.default.removeItem(at: output.partialURL) }
+        if let output = destination.file { try? FileManager.default.removeItem(at: output.partialURL) }
     }
 
     /// Starts the recording at the moment it tells the user so. Runs on the writer queue.
@@ -172,9 +182,10 @@ final class RecordingSession {
         status.showLevels(levels)
     }
 
-    /// A failed write to stdout means the program reading the stream has exited, which ends the recording.
+    /// When only streaming, a failed write means the program reading the stream has exited, which ends the recording.
+    /// With a file, it is the file that failed: the stream's failures never get here (see `FileAndStreamSink`).
     private func handleWriteFailure(_ error: any Error) {
-        guard case .standardOutput = destination else {
+        guard destination.file == nil else {
             status.reportWriteFailure(error)
             return
         }

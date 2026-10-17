@@ -4,18 +4,28 @@ import Testing
 @testable import TotalRecall
 
 struct DestinationTests {
-    @Test func dashIsStandardOutput() {
+    @Test func dashOnlyStreams() {
         let destination = Destination(path: "-")
 
+        #expect(destination.file == nil)
+        #expect(destination.streams)
         #expect(destination.description == "stdout")
-        guard case .standardOutput = destination else {
-            Issue.record("expected standard output, got \(destination)")
-            return
-        }
     }
 
     @Test func anythingElseIsAFile() {
-        #expect(Destination(path: "/tmp/meeting.m4a").description == "/tmp/meeting.m4a")
+        let destination = Destination(path: "/tmp/meeting.m4a")
+
+        #expect(destination.file?.url.path == "/tmp/meeting.m4a")
+        #expect(!destination.streams)
+        #expect(destination.description == "/tmp/meeting.m4a")
+    }
+
+    @Test func streamsAFileToo() {
+        let destination = Destination(path: "/tmp/meeting.m4a", streams: true)
+
+        #expect(destination.file?.url.path == "/tmp/meeting.m4a")
+        #expect(destination.streams)
+        #expect(destination.description == "/tmp/meeting.m4a and stdout")
     }
 }
 

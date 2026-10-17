@@ -1,6 +1,8 @@
 /totalrecall
-*.partial.caf
+/transcribe
+
 .DS_Store
+*.txt
 *.mp3
 *.m4a
 *.wav
@@ -10,5 +12,4 @@
 *.flac
 /.build/
 /Tests/build/
-/transcribe
 /build/

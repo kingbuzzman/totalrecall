@@ -47,7 +47,7 @@ rerouting, and nothing to reconfigure.
 | --- | --- |
 | `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
 | `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, and the transcript printer |
-| `Shared/` | The WAV stream format between `totalrecall -` and `transcribe -`, and the version |
+| `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, and the version |
 | `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 
 Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:

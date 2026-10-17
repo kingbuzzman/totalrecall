@@ -36,6 +36,31 @@ struct CommandLineTests {
         #expect(result.standardOutput.contains("totalrecall: refusing to write audio to the terminal"))
     }
 
+    @Test func refusesToStreamAudioToATerminalWhileSavingAFile() async throws {
+        let output = TestEnvironment.result("terminal-stream.wav")
+        try? FileManager.default.removeItem(at: output)
+
+        let result = try await ProcessResult.run(
+            URL(fileURLWithPath: "/usr/bin/script"),
+            ["-q", "/dev/null", TestEnvironment.totalrecall.path, output.path, "--stream"]
+        )
+
+        #expect(result.status == 1)
+        #expect(result.standardOutput.contains("totalrecall: refusing to write audio to the terminal"))
+    }
+
+    /// Without --stream nothing goes to stdout, so a pipe there is a forgotten --stream.
+    @Test func refusesAPipeWithoutStream() async throws {
+        let output = TestEnvironment.result("pipe-without-stream.wav")
+        try? FileManager.default.removeItem(at: output)
+
+        let result = try await totalrecall(output.path)
+
+        #expect(result.status == 1)
+        #expect(result.standardError.hasPrefix("totalrecall: stdout is a pipe, but nothing would be streamed into it"))
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+    }
+
     @Test func needsAnOutputFile() async throws {
         let result = try await totalrecall()
 

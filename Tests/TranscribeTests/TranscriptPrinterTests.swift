@@ -6,40 +6,49 @@ struct TranscriptPrinterTests {
     private static let clearLine = "\r\u{1B}[K"
 
     let output = Output()
+    let saved = Output()
 
-    private func makePrinter(printsLines: Bool = false, live: Bool = false, width: Int = 80) -> TranscriptPrinter {
-        TranscriptPrinter(
+    private func makePrinter(
+        printsLines: Bool = true,
+        live: Bool = false,
+        saves: Bool = false,
+        width: Int = 80
+    ) -> TranscriptPrinter {
+        let saved = saved
+        let save: ((String) -> Void)? = saves ? { saved.append($0) } : nil
+        return TranscriptPrinter(
             printsLines: printsLines,
             isLive: live,
-            isTerminal: live,
             terminalWidth: { width },
-            write: output.append
+            write: output.append,
+            save: save
         )
     }
 
-    @Test func ordersTheTranscriptByTimeAcrossSpeakers() {
-        let printer = makePrinter()
+    @Test func writesLinesInTheOrderTheySettleNotByTime() {
+        let printer = makePrinter(saves: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 5, text: "Fine, thanks.", isFinal: true))
         printer.update(TranscriptUpdate(speaker: .you, start: 1, text: "How are you?", isFinal: true))
 
-        #expect(printer.transcript == "[00:00:01] You: How are you?\n[00:00:05] Them: Fine, thanks.\n")
-        #expect(output.text.isEmpty)
+        let lines = "[00:00:05] Them: Fine, thanks.\n[00:00:01] You: How are you?\n"
+        #expect(output.text == lines)
+        #expect(saved.text == lines)
     }
 
     @Test func leavesOutTextStillBeingRecognized() {
-        let printer = makePrinter()
+        let printer = makePrinter(saves: true)
         printer.update(TranscriptUpdate(speaker: nil, start: 0, text: "Hello", isFinal: true))
         printer.update(TranscriptUpdate(speaker: nil, start: 2, text: "wor", isFinal: false))
 
-        #expect(printer.transcript == "[00:00:00] Hello\n")
+        #expect(output.text == "[00:00:00] Hello\n")
+        #expect(saved.text == "[00:00:00] Hello\n")
     }
 
     @Test func dropsFinalTextWithoutWords() {
-        let printer = makePrinter(printsLines: true)
+        let printer = makePrinter()
         printer.update(TranscriptUpdate(speaker: nil, start: 0, text: ".", isFinal: true))
         printer.update(TranscriptUpdate(speaker: nil, start: 1, text: "42", isFinal: true))
 
-        #expect(printer.transcript == "[00:00:01] 42\n")
         #expect(output.text == "[00:00:01] 42\n")
     }
 
@@ -48,20 +57,30 @@ struct TranscriptPrinterTests {
         let printer = makePrinter()
         printer.update(TranscriptUpdate(speaker: nil, start: start, text: "Hi", isFinal: true))
 
-        #expect(printer.transcript == "[\(time)] Hi\n")
+        #expect(output.text == "[\(time)] Hi\n")
     }
 
-    @Test func printsFinalLinesAsTheyArrive() {
-        let printer = makePrinter(printsLines: true)
+    @Test func savingAloneWritesNothingToStandardOutput() {
+        let printer = makePrinter(printsLines: false, saves: true)
         printer.update(TranscriptUpdate(speaker: .you, start: 1, text: "Hi", isFinal: true))
+        printer.finish()
+
+        #expect(saved.text == "[00:00:01] You: Hi\n")
+        #expect(output.text.isEmpty)
+    }
+
+    @Test func savesOnlySettledLinesWhileShowingTheLiveTranscript() {
+        let printer = makePrinter(live: true, saves: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 2, text: "Hel", isFinal: false))
         printer.update(TranscriptUpdate(speaker: .them, start: 2, text: "Hello", isFinal: true))
+        printer.finish()
 
-        #expect(output.text == "[00:00:01] You: Hi\n[00:00:02] Them: Hello\n")
+        #expect(saved.text == "[00:00:02] Them: Hello\n")
+        #expect(output.text.contains(dimmed("… Them: Hel")))
     }
 
     @Test func showsTextStillBeingRecognizedDimmedOnTheLastLine() {
-        let printer = makePrinter(printsLines: true, live: true)
+        let printer = makePrinter(live: true)
 
         printer.update(TranscriptUpdate(speaker: .them, start: 0, text: "so the", isFinal: false))
         printer.update(TranscriptUpdate(speaker: .you, start: 0, text: "right", isFinal: false))
@@ -70,7 +89,7 @@ struct TranscriptPrinterTests {
     }
 
     @Test func movesFinalTextAboveTheLiveLine() {
-        let printer = makePrinter(printsLines: true, live: true)
+        let printer = makePrinter(live: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 0, text: "so the", isFinal: false))
         printer.update(TranscriptUpdate(speaker: .you, start: 0, text: "right", isFinal: false))
         output.clear()
@@ -81,7 +100,7 @@ struct TranscriptPrinterTests {
     }
 
     @Test func keepsTheMostRecentWordsThatFitTheTerminal() {
-        let printer = makePrinter(printsLines: true, live: true, width: 21)
+        let printer = makePrinter(live: true, width: 21)
 
         printer.update(TranscriptUpdate(speaker: nil, start: 0, text: "one two three four five", isFinal: false))
 
@@ -89,7 +108,7 @@ struct TranscriptPrinterTests {
     }
 
     @Test func clearsTheLiveLineWhenFinished() {
-        let printer = makePrinter(printsLines: true, live: true)
+        let printer = makePrinter(live: true)
         printer.update(TranscriptUpdate(speaker: nil, start: 0, text: "almost", isFinal: false))
         output.clear()
 
@@ -98,8 +117,8 @@ struct TranscriptPrinterTests {
         #expect(output.text == Self.clearLine)
     }
 
-    @Test func showsNoLiveLineOffATerminal() {
-        let printer = TranscriptPrinter(printsLines: true, isLive: true, isTerminal: false, write: output.append)
+    @Test func showsNoLiveLineWithoutLive() {
+        let printer = makePrinter()
 
         printer.update(TranscriptUpdate(speaker: nil, start: 0, text: "almost", isFinal: false))
         printer.finish()

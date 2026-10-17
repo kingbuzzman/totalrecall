@@ -255,6 +255,46 @@ struct RecordingTests {
         #expect(streaming.logText.contains("(the program reading it exited)"))
     }
 
+    @Test func streamsWhileSavingTheFile() async throws {
+        let pipe = Pipe()
+        let recording = try await TotalRecallProcess.recordAndStream(
+            to: TestEnvironment.result("stream-and-file.wav"),
+            pipe: pipe,
+            "--no-echo-cancellation"
+        )
+        async let received = pipe.fileHandleForReading.readAll()
+        try await Task.sleep(for: .seconds(4))
+        expectSaved(await recording.stop(), recording)
+
+        let reader = try WAVStreamReader(handle: .reading(await received))
+        var streamed = [Float]()
+        while let chunk = try reader.read(maxFrames: 4_800) { streamed += chunk[0] }
+        let stream = Recording(left: streamed, right: streamed, sampleRate: reader.sampleRate)
+        expectNoLostAudio(stream.clicks(on: .left, pitches: [Pitch.micA], skipStart: 0.5, skipEnd: 0.3), atLeast: 25)
+        let file = try Recording(contentsOf: recording.output)
+        expectNoLostAudio(file.clicks(on: .left, pitches: [Pitch.micA], skipStart: 0.5, skipEnd: 0.3), atLeast: 25)
+        expectNoLostAudio(file.clicks(on: .right, pitches: [Pitch.system], skipStart: 0.5, skipEnd: 0.3), atLeast: 25)
+    }
+
+    /// The file is what matters: when the program reading the stream exits, totalrecall keeps recording it.
+    @Test func keepsSavingTheFileWhenTheProgramReadingTheStreamExits() async throws {
+        let pipe = Pipe()
+        let recording = try await TotalRecallProcess.recordAndStream(
+            to: TestEnvironment.result("stream-closed-file.wav"),
+            pipe: pipe,
+            "--no-echo-cancellation"
+        )
+        try await Task.sleep(for: .seconds(1))
+        try pipe.fileHandleForReading.close()
+        try await Task.sleep(for: .seconds(4))
+        expectSaved(await recording.stop(), recording)
+
+        #expect(recording.logText.contains("the program reading the stream exited; still recording to"))
+        let file = try Recording(contentsOf: recording.output)
+        #expect(file.duration >= 4.5, "\(file.duration) s")
+        expectNoLostAudio(file.clicks(on: .left, pitches: [Pitch.micA], skipStart: 0.5, skipEnd: 0.3), atLeast: 35)
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LONG"] == "1", "set LONG=1 to run"))
     func staysInSyncOverTwoMinutes() async throws {
         let recording = try await TotalRecallProcess.record(

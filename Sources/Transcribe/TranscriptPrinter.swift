@@ -1,33 +1,35 @@
 import Foundation
 
-/// Shows the transcript as it comes in: final text as timestamped lines ("[00:01:23] Them: ..."), and, when live on a
-/// terminal, the text still being recognized on a last line that is redrawn in place. Updates arrive from one task per
-/// speaker, so everything is guarded by a lock.
+/// Writes the transcript as it comes in: each line ("[00:01:23] Them: ...") the moment the recognizer settles on it, in
+/// the order they settle, never reordered. Lines go to stdout, to a text file, or both; live, stdout also shows the text
+/// still being recognized on a last line that is redrawn in place. Updates arrive from one task per speaker, so
+/// everything is guarded by a lock.
 final class TranscriptPrinter: @unchecked Sendable {
-    private let isLive: Bool
     private let printsLines: Bool
+    private let isLive: Bool
     private let write: (String) -> Void
+    private let save: ((String) -> Void)?
     private let terminalWidth: () -> Int
     private let lock = NSLock()
     private var volatileText: [String: String] = [:]
-    private var finals: [TranscriptUpdate] = []
 
-    /// `printsLines` prints final lines to stdout as they arrive; `isLive` also shows text still being recognized, on
-    /// a terminal.
+    /// `printsLines` prints each line to stdout, and `isLive` also shows the text still being recognized there, drawn
+    /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file.
     init(
         printsLines: Bool,
         isLive: Bool,
-        isTerminal: Bool = isatty(STDOUT_FILENO) != 0,
         terminalWidth: @escaping () -> Int = TranscriptPrinter.standardOutputWidth,
         write: @escaping (String) -> Void = {
             fputs($0, stdout)
             fflush(stdout)
-        }
+        },
+        save: ((String) -> Void)? = nil
     ) {
         self.printsLines = printsLines
-        self.isLive = isLive && printsLines && isTerminal
+        self.isLive = isLive && printsLines
         self.terminalWidth = terminalWidth
         self.write = write
+        self.save = save
     }
 
     func update(_ update: TranscriptUpdate) {
@@ -38,10 +40,11 @@ final class TranscriptPrinter: @unchecked Sendable {
             if update.isFinal {
                 volatileText[key] = nil
                 if hasWords {
-                    finals.append(update)
+                    let line = Self.line(update) + "\n"
+                    save?(line)
                     if printsLines {
                         clearLiveLine()
-                        write(Self.line(update) + "\n")
+                        write(line)
                     }
                 }
             } else {
@@ -49,11 +52,6 @@ final class TranscriptPrinter: @unchecked Sendable {
             }
             drawLiveLine()
         }
-    }
-
-    /// The whole transcript in time order.
-    var transcript: String {
-        lock.withLock { finals.sorted { $0.start < $1.start }.map(Self.line).joined(separator: "\n") + "\n" }
     }
 
     func finish() {

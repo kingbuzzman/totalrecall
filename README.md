@@ -7,17 +7,19 @@ Zoom, Google Meet, Slack huddles, Teams: if your Mac plays it, `totalrecall` rec
 Pipe it into `transcribe` for a live transcript that knows who's talking. Transcription uses the speech recognizer
 built into macOS, so your audio and your words never leave your Mac.
 
-[![totalrecall - | transcribe - live: a YouTube video's audio is transcribed as "Them", the microphone as "You", and the
-mic follows a switch to AirPods mid-recording](docs/demo.jpg)](docs/demo.mp4)
+[![totalrecall - | transcribe - --live: a YouTube video's audio is transcribed as "Them", the microphone as "You", and
+the mic follows a switch to AirPods mid-recording](docs/demo.jpg)](docs/demo.mp4)
 
 ▶ [Watch the demo](docs/demo.mp4) (1½ min, with sound)
 
 ## Quick start
 
 ```sh
-totalrecall standup.mp3          # record, press Ctrl-C to stop and save
-totalrecall - | transcribe -     # live transcript as people speak
-transcribe standup.mp3           # transcribe a recording afterwards
+totalrecall standup.mp3                                                 # record, press Ctrl-C to stop and save
+transcribe standup.mp3                                                  # transcribe a recording afterwards
+
+totalrecall - | transcribe - --live                                     # live transcript as people speak
+totalrecall standup.mp3 --stream | transcribe - standup.txt --live      # live transcript as people speak with artifacts
 ```
 
 ```
@@ -65,20 +67,22 @@ Privacy & Security.
 ## Recipes
 
 ```sh
-totalrecall ~/Meetings/standup.m4a                  # mic left, everyone else right
-totalrecall --no-speaker-isolation call.m4a         # ordinary mixed recording
-totalrecall --mic macbook call.m4a                  # keep the Mac mic even with AirPods in
-totalrecall --no-mic webinar.m4a                    # system audio only
-totalrecall - | transcribe - | tee -i standup.txt   # live transcript, saved as it goes
-totalrecall - | ffmpeg -i - meeting.flac            # stream into any tool that reads WAV
-transcribe --language es reunion.mp3                # Spanish (or es-MX, fr, ja, ...)
+totalrecall ~/Meetings/standup.m4a                                 # mic left, everyone else right
+totalrecall --no-speaker-isolation call.m4a                        # ordinary mixed recording
+totalrecall --mic macbook call.m4a                                 # keep the Mac mic even with AirPods in
+totalrecall --no-mic webinar.m4a                                   # system audio only
+totalrecall standup.m4a --stream | transcribe - standup.txt --live # keep the audio, see and save the transcript
+totalrecall standup.m4a --stream | transcribe - standup.txt        # the same, without showing the transcript
+totalrecall - | ffmpeg -i - meeting.flac                           # stream into any tool that reads WAV
+transcribe --language es reunion.mp3                               # Spanish (or es-MX, fr, ja, ...)
 ```
 
 <details>
 <summary>All options</summary>
 
 ```sh
-totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file | ->
+totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] [--stream] <output-file>
+totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] -
 totalrecall --list-mics
 ```
 
@@ -89,11 +93,13 @@ totalrecall --list-mics
 | `--no-speaker-isolation` | Mix mic and system audio into both channels instead of left/right |
 | `--no-echo-cancellation` | Keep the raw mic signal |
 | `--force` | Overwrite an existing output file |
+| `--stream` | Also stream WAV to stdout while saving the output file |
 | `--list-mics` | List microphones; `*` marks the current system input |
-| `-` as output | Stream WAV to stdout while recording |
+| `-` as output | Only stream WAV to stdout, without saving a file |
 
 ```sh
-transcribe [--language LANG] [--mix] <audio-file | -> [<text-file>]
+transcribe [--language LANG] [--mix] [--force] <audio-file> [<text-file>]
+transcribe [--language LANG] [--mix] [--force] [--live] - [<text-file>]
 transcribe --list-languages
 ```
 
@@ -102,7 +108,10 @@ transcribe --list-languages
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
-| `<text-file>` | Write the transcript there instead of printing it |
+| `-` as input | Transcribe a live WAV stream from stdin, such as `totalrecall -` |
+| `--live` | With `-`: show the live transcript, words still being recognized included, even with a `<text-file>` |
+| `<text-file>` | Write the transcript there instead of printing it, each line as it settles |
+| `--force` | Overwrite an existing `<text-file>` |
 
 Both tools also take `--version` and `--help`.
 
@@ -113,8 +122,14 @@ Both tools also take `--version` and `--help`.
 - **Turn on Do Not Disturb.** totalrecall records *all* system audio, notification sounds included.
 - **Recording starts after a short pause.** totalrecall waits until the mic is live and it has heard about a second of
   the room. With AirPods, that takes 2–3 s.
-- **Stopping a live transcript.** Ctrl-C stops recording, and `transcribe` prints the last words before it exits. Press
-  Ctrl-C again to quit immediately. With `tee`, use `-i` so those last lines are saved too.
+- **Stopping a live transcript.** Ctrl-C stops recording, and `transcribe` writes the last words before it exits. Press
+  Ctrl-C again to quit immediately. If you pipe `transcribe` into another program, such as `tee`, make it ignore Ctrl-C
+  too (`tee -i`), or it misses those last lines.
+- **Lines come out as they settle.** `transcribe` writes each line the moment the recognizer is sure of it. With you and
+  the others on separate channels, each has its own recognizer, so a `You` line can come out before an earlier `Them`
+  line, from a file more so, as both race through it.
+- **The stream ending doesn't end the recording.** With `--stream`, if the program reading it exits, `totalrecall` says
+  so and keeps recording the file.
 - **AirPods sound lower quality.** Their Bluetooth call profile records at about 24 kHz. That's fine for transcripts,
   but the Mac mic is clearer in a quiet room.
 - **Headphones beat echo cancellation.** Echo cancellation reduces the "everyone twice" effect a lot, but not

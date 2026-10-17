@@ -8,12 +8,19 @@ final class TotalRecallProcess {
     let log: URL
     private let process = Process()
 
-    private init(output: URL, arguments: [String], standardOutput: Pipe?) throws {
+    /// Records to `output`, streams to `standardOutput`, or both with `savesFile`.
+    private init(output: URL, arguments: [String], standardOutput: Pipe?, savesFile: Bool = false) throws {
         self.output = output
         log = output.appendingPathExtension("log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         process.executableURL = TestEnvironment.totalrecall
-        process.arguments = ["--force"] + arguments + [standardOutput == nil ? output.path : "-"]
+        let destination =
+            switch (standardOutput, savesFile) {
+            case (nil, _): [output.path]
+            case (_, false): ["-"]
+            case (_, true): [output.path, "--stream"]
+            }
+        process.arguments = ["--force"] + arguments + destination
         process.standardError = try FileHandle(forWritingTo: log)
         process.standardOutput = standardOutput ?? FileHandle.nullDevice
         try process.run()
@@ -36,6 +43,19 @@ final class TotalRecallProcess {
         )
         try await streaming.waitUntilRecording()
         return streaming
+    }
+
+    /// Starts recording to `output` while streaming WAV to `pipe` (`--stream`), and waits until totalrecall says it is
+    /// recording.
+    static func recordAndStream(to output: URL, pipe: Pipe, _ arguments: String...) async throws -> TotalRecallProcess {
+        let recording = try TotalRecallProcess(
+            output: output,
+            arguments: arguments,
+            standardOutput: pipe,
+            savesFile: true
+        )
+        try await recording.waitUntilRecording()
+        return recording
     }
 
     var logText: String {

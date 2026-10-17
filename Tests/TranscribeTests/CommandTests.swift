@@ -9,10 +9,17 @@ struct CommandTests {
     }
 
     @Test func readsEveryOption() throws {
-        let command = try parse("--language", "es-MX", "--mix", "-", "call.txt")
+        let command = try parse("--language", "es-MX", "--mix", "--live", "--force", "-", "call.txt")
 
-        let options = Options(language: "es-MX", mixesChannels: true)
+        let options = Options(language: "es-MX", mixesChannels: true, showsLive: true, overwrite: true)
         #expect(command == .transcribe(inputPath: "-", textPath: "call.txt", options: options))
+    }
+
+    @Test func shortForceFlag() throws {
+        #expect(
+            try parse("-f", "call.m4a", "call.txt")
+                == .transcribe(inputPath: "call.m4a", textPath: "call.txt", options: Options(overwrite: true))
+        )
     }
 
     @Test(arguments: [
@@ -32,6 +39,8 @@ struct CommandTests {
         (["--bogus", "a.m4a"], "unexpected argument --bogus\n\(usage)"),
         (["--language"], "--language needs a language, such as es"),
         (["--language", "--mix", "a.m4a"], "--language needs a language, such as es"),
+        (["--live", "a.m4a"], "--live is for a live stream (-); a file is transcribed faster than it was spoken"),
+        (["--live"], "expected an audio file or -\n\(usage)"),
     ])
     func rejectsInvalidArguments(arguments: [String], message: String) {
         #expect {

@@ -37,13 +37,27 @@ case .version:
 case .transcribe(let input, let text, let parsedOptions):
     (inputPath, textPath, options) = (input, text, parsedOptions)
 }
-let isLive = inputPath == "-"
-let textURL = textPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+let readsStream = inputPath == "-"
+let textURL = textPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
+
+if readsStream && isatty(STDIN_FILENO) != 0 {
+    fail("nothing is piped in; - reads a live stream, e.g. totalrecall - | transcribe -")
+}
+if let textURL {
+    let directory = textURL.deletingLastPathComponent().path
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
+        fail("directory \(directory) does not exist")
+    }
+    if FileManager.default.fileExists(atPath: textURL.path) && !options.overwrite {
+        fail("\(textURL.path) already exists (use --force to overwrite)")
+    }
+}
 
 // Ctrl-C reaches every program in the pipeline, and totalrecall answers it by ending the stream. So rather than dying
-// with the last words still being recognized (and, with a <text-file>, nothing written), keep going until the stream
-// ends and finish the transcript from it. A second Ctrl-C quits right away.
-let stopSignals = isLive ? finishOnStopSignals() : []
+// with the last words still being recognized, keep going until the stream ends and finish the transcript from it. A
+// second Ctrl-C quits right away.
+let stopSignals = readsStream ? finishOnStopSignals() : []
 
 func finishOnStopSignals() -> [any DispatchSourceSignal] {
     signal(SIGPIPE, SIG_IGN)
@@ -66,7 +80,7 @@ do {
     try await installSpeechModel(for: locale)
     // Read here first, to tell the speakers apart, then by the reading task below.
     let source: any AudioSource & Sendable =
-        isLive
+        readsStream
         ? try StreamAudioSource(handle: .standardInput)
         : try FileAudioSource(url: URL(fileURLWithPath: (inputPath as NSString).expandingTildeInPath))
     var pendingChunks: [[[Float]]] = []
@@ -82,9 +96,16 @@ do {
             try await SpeakerTranscriber(speaker: .them, locale: locale, sampleRate: source.sampleRate),
         ]
         : [try await SpeakerTranscriber(speaker: nil, locale: locale, sampleRate: source.sampleRate)]
-    // Live, lines are printed as they are spoken; for a file, the recognizers race ahead independently, so the
-    // transcript is printed in time order at the end.
-    let printer = TranscriptPrinter(printsLines: isLive && textURL == nil, isLive: isLive)
+    // Created only now, once transcribing can start, so a failure before it leaves no empty file behind; from here on,
+    // whatever has been transcribed is in it, even if transcribe is stopped part way.
+    let textFile = try textURL.map(createTextFile)
+    // Each line goes out the moment it settles, in that order. For a file, the two speakers' recognizers race through
+    // it independently, so their lines can come out of time order.
+    let printer = TranscriptPrinter(
+        printsLines: textFile == nil || options.showsLive,
+        isLive: options.showsLive,
+        save: textFile.map(saveLine)
+    )
 
     try await withThrowingTaskGroup(of: Void.self) { group in
         for transcriber in transcribers {
@@ -100,11 +121,26 @@ do {
         try await group.waitForAll()
     }
     printer.finish()
-    if let textURL {
-        try printer.transcript.write(to: textURL, atomically: true, encoding: .utf8)
-    } else if !isLive {
-        print(printer.transcript, terminator: "")
-    }
+    try textFile?.close()
 } catch {
     fail(error.localizedDescription)
+}
+
+/// Creates the text file, emptying it if it exists (`--force`).
+func createTextFile(_ url: URL) throws -> FileHandle {
+    guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+        throw TranscribeError("cannot create \(url.path)")
+    }
+    return try FileHandle(forWritingTo: url)
+}
+
+/// Appends each line to the text file as it settles; a failed write ends transcribe, as the transcript is incomplete.
+func saveLine(to file: FileHandle) -> (String) -> Void {
+    { line in
+        do {
+            try file.write(contentsOf: Data(line.utf8))
+        } catch {
+            fail("cannot write the transcript: \(error.localizedDescription)")
+        }
+    }
 }

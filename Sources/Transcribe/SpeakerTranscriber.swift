@@ -1,6 +1,7 @@
 import AVFoundation
 import Accelerate
 import Foundation
+import Shared
 import Speech
 
 /// Who is speaking, from totalrecall's channel split: your microphone on the left, everyone else on the right.
@@ -30,6 +31,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
     /// The samples to convert, reused from one `append` to the next. The converted buffer goes to the recognizer, so
     /// that one is new each time.
     private var source: AVAudioPCMBuffer?
+    private let converterInput = ConverterInput()
     private let inputStream: AsyncStream<AnalyzerInput>
     private let input: AsyncStream<AnalyzerInput>.Continuation
 
@@ -95,17 +97,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
         let ratio = analyzerFormat.sampleRate / sourceFormat.sampleRate
         let capacity = AVAudioFrameCount((Double(samples.count) * ratio).rounded(.up)) + 64
         guard let output = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else { return nil }
-        var consumed = false
-        var error: NSError?
-        converter.convert(to: output, error: &error) { _, status in
-            if consumed {
-                status.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            status.pointee = .haveData
-            return source
-        }
+        let error = converterInput.convert(source, with: converter, into: output)
         return error == nil && output.frameLength > 0 ? output : nil
     }
 }

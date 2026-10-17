@@ -49,6 +49,37 @@ final class AudioFileSink: AudioSink {
     }
 }
 
+/// A file and a live stream at once (`--stream`). The file is what matters: once the program reading the stream has gone
+/// away, the stream is dropped and `onStreamClosed` called, once, and the file keeps being written.
+final class FileAndStreamSink: AudioSink {
+    var onStreamClosed: (() -> Void)?
+    private let file: any AudioSink
+    private var stream: (any AudioSink)?
+
+    init(file: any AudioSink, stream: any AudioSink) {
+        self.file = file
+        self.stream = stream
+    }
+
+    /// Throws only when writing the file fails.
+    func write(left: [Float], right: [Float], count: Int) throws {
+        try file.write(left: left, right: right, count: count)
+        guard let stream else { return }
+        do {
+            try stream.write(left: left, right: right, count: count)
+        } catch {
+            stream.close()
+            self.stream = nil
+            onStreamClosed?()
+        }
+    }
+
+    func close() {
+        file.close()
+        stream?.close()
+    }
+}
+
 /// A live WAV stream (see `WAVStream`), such as stdout for `totalrecall - | transcribe -`.
 final class WAVStreamSink: AudioSink {
     private let handle: FileHandle

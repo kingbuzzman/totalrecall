@@ -69,6 +69,57 @@ struct WAVStreamSinkTests {
     }
 }
 
+struct FileAndStreamSinkTests {
+    @Test func writesBoth() throws {
+        let (file, stream) = (CapturingSink(), CapturingSink())
+        let sink = FileAndStreamSink(file: file, stream: stream)
+
+        try sink.write(left: constant(0.5, count: 10), right: constant(-0.5, count: 10), count: 10)
+        sink.close()
+
+        #expect(file.left == constant(0.5, count: 10) && stream.left == constant(0.5, count: 10))
+        #expect(file.isClosed && stream.isClosed)
+    }
+
+    @Test func keepsWritingTheFileOnceTheStreamsReaderHasGoneAway() throws {
+        let (file, stream) = (CapturingSink(), FailingSink())
+        let sink = FileAndStreamSink(file: file, stream: stream)
+        var closings = 0
+        sink.onStreamClosed = { closings += 1 }
+
+        try sink.write(left: constant(0.5, count: 10), right: constant(0.5, count: 10), count: 10)
+        try sink.write(left: constant(0.25, count: 10), right: constant(0.25, count: 10), count: 10)
+
+        #expect(file.left == constant(0.5, count: 10) + constant(0.25, count: 10))
+        #expect(closings == 1)
+        #expect(stream.writes == 1)
+        #expect(stream.isClosed)
+    }
+
+    @Test func throwsWhenTheFileFails() {
+        let sink = FileAndStreamSink(file: FailingSink(), stream: CapturingSink())
+
+        #expect(throws: (any Error).self) {
+            try sink.write(left: constant(0.5, count: 10), right: constant(0.5, count: 10), count: 10)
+        }
+    }
+}
+
+/// A sink whose every write fails, like a stream whose reader has gone away.
+final class FailingSink: AudioSink {
+    private(set) var writes = 0
+    private(set) var isClosed = false
+
+    func write(left: [Float], right: [Float], count: Int) throws {
+        writes += 1
+        throw RecordingError("broken pipe")
+    }
+
+    func close() {
+        isClosed = true
+    }
+}
+
 extension [Float] {
     func isClose(to other: [Float], tolerance: Float = 1e-4) -> Bool {
         count == other.count && zip(self, other).allSatisfy { abs($0 - $1) <= tolerance }

@@ -2,10 +2,17 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
-## 0.2.3
+## 0.3.0
+
+Changes how `transcribe` prints, and what both tools accept; see the commands to use now below.
 
 ### totalrecall
 
+- `--stream` saves the file and streams the recording at the same time:
+  `totalrecall meeting.mp3 --stream | transcribe -`. If the program reading the stream exits, totalrecall keeps
+  recording the file. `totalrecall -` still streams without saving a file.
+- Refuses to record when stdout is a pipe but nothing would go into it, such as
+  `totalrecall meeting.mp3 | transcribe -`: add `--stream`.
 - Lighter on the audio threads: the captures allocate less per buffer, a 48 kHz microphone skips resampling
   altogether, and the echo canceller no longer warms up while holding a lock the captures wait on, which held them up
   for up to about 50 ms as each recording started. Recordings are unchanged, sample for sample.
@@ -13,6 +20,15 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ### transcribe
 
+- Prints each line the moment the recognizer settles on it, in that order, for files too (before, a file's transcript
+  came all at once at the end, sorted by time). With the You/Them split, lines can come out of time order.
+- A `<text-file>` gets each line as it settles, so a transcript cut short keeps everything up to that point. It is never
+  printed as well, unless with `--live`.
+- `--live` shows the live transcript, with the words still being recognized: `totalrecall - | transcribe - --live`.
+  Without it, `transcribe -` now prints only finished lines. With a `<text-file>`, it shows it live and saves it:
+  `transcribe - meeting.txt --live`.
+- Refuses to overwrite an existing `<text-file>` unless given `--force`, like totalrecall.
+- `transcribe -` refuses to start when nothing is piped in.
 - Reads a `totalrecall -` stream about 3 times faster, and mixes the channels for `--mix` about 7 times faster.
   Transcripts are unchanged.
 

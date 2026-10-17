@@ -22,6 +22,16 @@ struct CommandTests {
         )
     }
 
+    @Test func streamsWhileSavingAFile() throws {
+        #expect(
+            try parse("meeting.mp3", "--stream") == .record(outputPath: "meeting.mp3", options: Options(streams: true))
+        )
+    }
+
+    @Test func dashOnlyStreams() throws {
+        #expect(try parse("-") == .record(outputPath: "-", options: Options()))
+    }
+
     @Test func shortForceFlag() throws {
         #expect(try parse("-f", "out.wav") == .record(outputPath: "out.wav", options: Options(overwrite: true)))
     }
@@ -43,6 +53,10 @@ struct CommandTests {
         (["--mic"], "--mic needs a name"),
         (["--bogus", "out.wav"], "unexpected argument --bogus"),
         (["one.wav", "two.wav"], "unexpected argument two.wav"),
+        (["--stream"], "--stream needs an output file; to only stream, use -"),
+        (["-", "--stream"], "--stream is for saving a file and streaming it; - already streams"),
+        (["out.wav", "-"], "unexpected argument -; to save a file and stream it, use --stream"),
+        (["-", "out.wav"], "unexpected argument out.wav; to save a file and stream it, use --stream"),
     ])
     func rejectsInvalidArgumentsWithTheUsage(arguments: [String], problem: String) {
         #expect {

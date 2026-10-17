@@ -23,8 +23,6 @@ struct TranscribeTests {
 
         let labels = result.standardOutput.split(separator: "\n").map { $0.split(separator: " ").dropFirst().first }
         #expect(result.status == 0, "\(result.standardError)")
-        #expect(labels.first == "You:", "\(result.standardOutput)")
-        #expect(labels.last == "Them:", "\(result.standardOutput)")
         #expect(labels.allSatisfy { $0 == "You:" || $0 == "Them:" }, "\(result.standardOutput)")
         #expect(result.standardOutput.contains("You: Good morning"))
         #expect(result.standardOutput.contains("Them: Happy to be here"))
@@ -43,11 +41,32 @@ struct TranscribeTests {
     @Test func writesTheTranscriptToATextFile() async throws {
         let audio = try await Speech.file(saying: Self.them, name: "to-file.caf")
         let text = TestEnvironment.result("to-file.txt")
+        try? FileManager.default.removeItem(at: text)
 
         let result = try await transcribe(audio.path, text.path)
 
         #expect(result.status == 0, "\(result.standardError)")
         #expect(result.standardOutput.isEmpty)
+        #expect(try String(contentsOf: text, encoding: .utf8).contains("Happy to be here"))
+    }
+
+    @Test func leavesAnExistingTextFileAloneWithoutForce() async throws {
+        let audio = try await Speech.file(saying: Self.them, name: "existing.caf")
+        let text = TestEnvironment.result("existing.txt")
+        try Data("keep me".utf8).write(to: text)
+
+        let refused = try await transcribe(audio.path, text.path)
+
+        #expect(refused.status == 1)
+        #expect(
+            refused.standardError
+                == "transcribe: \(text.standardizedFileURL.path) already exists (use --force to overwrite)\n"
+        )
+        #expect(try String(contentsOf: text, encoding: .utf8) == "keep me")
+
+        let forced = try await transcribe("--force", audio.path, text.path)
+
+        #expect(forced.status == 0, "\(forced.standardError)")
         #expect(try String(contentsOf: text, encoding: .utf8).contains("Happy to be here"))
     }
 
@@ -61,6 +80,50 @@ struct TranscribeTests {
 
         #expect(result.status == 0, "\(result.standardError)")
         #expect(result.standardOutput.contains("Good morning"))
+        #expect(!result.standardOutput.contains("\u{1B}"), "only --live redraws the line being recognized")
+    }
+
+    @Test func savesALiveStreamWithoutPrinting() async throws {
+        let text = TestEnvironment.result("stream-to-file.txt")
+        try? FileManager.default.removeItem(at: text)
+
+        let result = try await ProcessResult.run(
+            TestEnvironment.transcribe,
+            ["-", text.path],
+            input: try await stream()
+        )
+
+        #expect(result.status == 0, "\(result.standardError)")
+        #expect(result.standardOutput.isEmpty)
+        #expect(try String(contentsOf: text, encoding: .utf8).contains("Good morning"))
+    }
+
+    @Test func showsTheLiveTranscriptWhileSavingItWithLive() async throws {
+        let text = TestEnvironment.result("live-to-file.txt")
+        try? FileManager.default.removeItem(at: text)
+
+        let result = try await ProcessResult.run(
+            TestEnvironment.transcribe,
+            ["--live", "-", text.path],
+            input: try await stream()
+        )
+
+        let saved = try String(contentsOf: text, encoding: .utf8)
+        #expect(result.status == 0, "\(result.standardError)")
+        #expect(result.standardOutput.contains("Good morning"))
+        #expect(result.standardOutput.contains("\r\u{1B}[K"), "the line being recognized is redrawn")
+        #expect(saved.contains("Good morning"))
+        #expect(!saved.contains("\u{1B}"), "the file gets only the settled lines")
+    }
+
+    @Test func refusesAStreamFromTheTerminal() async throws {
+        let result = try await ProcessResult.run(
+            URL(fileURLWithPath: "/usr/bin/script"),
+            ["-q", "/dev/null", TestEnvironment.transcribe.path, "-"]
+        )
+
+        #expect(result.status == 1)
+        #expect(result.standardOutput.contains("transcribe: nothing is piped in"))
     }
 
     /// Ctrl-C reaches every program in `totalrecall - | transcribe -`; transcribe finishes once totalrecall ends the stream.
@@ -113,6 +176,13 @@ struct TranscribeTests {
         #expect(try await transcribe("--version").standardOutput == "\(try #require(TestEnvironment.version))\n")
     }
 
+    /// A live stream of speech, as totalrecall streams it.
+    private func stream() async throws -> Data {
+        let speech = try await Speech.samples(saying: Self.you)
+        return WAVStream.header(sampleRate: 48_000, channelCount: 2)
+            + WAVStream.samples([speech, speech], count: speech.count)
+    }
+
     /// totalrecall's channel split: you on the left, then them on the right.
     private func conversation() async throws -> URL {
         let you = try await Speech.samples(saying: Self.you)
@@ -140,7 +210,7 @@ final class LiveTranscribe {
         let live = LiveTranscribe()
         let speech = try await Speech.samples(saying: words)
         live.process.executableURL = TestEnvironment.transcribe
-        live.process.arguments = ["-", text.path]
+        live.process.arguments = ["--force", "-", text.path]
         live.process.standardInput = live.input
         live.process.standardOutput = FileHandle.nullDevice
         live.process.standardError = FileHandle.nullDevice
