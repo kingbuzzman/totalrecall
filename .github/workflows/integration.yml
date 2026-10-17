@@ -22,7 +22,7 @@ jobs:
         run: make totalrecall tests/build/audiolab
 
       - name: Grant audio permissions
-        run: sudo tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
+        run: sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
 
       - name: Run integration tests
         run: make test

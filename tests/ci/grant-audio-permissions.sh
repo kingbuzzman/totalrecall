@@ -3,7 +3,7 @@
 # It writes the grants straight into macOS's privacy (TCC) databases, which only works where System Integrity
 # Protection is off, as on GitHub's macOS runners. It refuses to run outside CI.
 #
-# Usage: sudo tests/ci/grant-audio-permissions.sh [extra client path ...]
+# Usage: sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh [extra client path ...]
 
 set -eu
 
