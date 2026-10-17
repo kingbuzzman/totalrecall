@@ -395,7 +395,23 @@ func detectClicks(_ samples: [Float], pitches: [Double], sampleRate: Double) -> 
             index = end + refractoryHops
         }
     }
-    return clicks.sorted { $0.time < $1.time }
+    return mergingSplitClicks(clicks.sorted { $0.time < $1.time })
+}
+
+/// A device switch can land in the middle of a click, which is then part one pitch and part another and is detected
+/// once per pitch, a few milliseconds apart. Clicks are 100 ms apart, so detections this close are one click: keep the
+/// louder one.
+func mergingSplitClicks(_ clicks: [Click]) -> [Click] {
+    let sameClickSeconds = 0.02
+    var merged: [Click] = []
+    for click in clicks {
+        if let last = merged.last, click.time - last.time < sameClickSeconds {
+            if click.amplitude > last.amplitude { merged[merged.count - 1] = click }
+        } else {
+            merged.append(click)
+        }
+    }
+    return merged
 }
 
 func analyze(_ options: Options) -> Never {
