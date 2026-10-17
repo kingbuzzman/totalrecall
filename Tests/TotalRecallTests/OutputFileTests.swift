@@ -28,7 +28,11 @@ struct OutputFileTests {
     }
 
     @Test func savesNoRawAudioUnlessAsked() {
-        #expect(OutputFile(path: "meeting.m4a").rawURL == nil)
+        #expect(OutputFile(path: "/tmp/meeting.m4a", environment: [:]).rawURL == nil)
+        #expect(
+            OutputFile(path: "/tmp/meeting.m4a", environment: ["TOTALRECALL_RAW": "1"]).rawURL?.path
+                == "/tmp/meeting.m4a.raw.caf"
+        )
     }
 
     @Test func refusesAMissingDirectory() throws {

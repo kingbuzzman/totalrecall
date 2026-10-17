@@ -5,9 +5,18 @@ import CoreAudio
 /// `MicrophoneSession` that captured it.
 typealias MicrophoneAudioHandler = (_ samples: [Float], _ hostTime: UInt64, _ sessionID: Int) -> Void
 
+/// One capture of a single input device, as `MicrophoneCapture` switches between them.
+protocol MicrophoneCaptureSession: AnyObject {
+    var device: InputDevice { get }
+    var id: Int { get }
+    /// When it started, in `uptimeSeconds()`.
+    var startedAt: Double { get }
+    func stop()
+}
+
 /// One Core Audio capture of a single input device, read straight from the device so it always uses the device's
 /// current format (AirPods change sample rate when their mic turns on).
-final class MicrophoneSession {
+final class MicrophoneSession: MicrophoneCaptureSession {
     private static let deviceChangeAddresses = [
         propertyAddress(kAudioDevicePropertyNominalSampleRate),
         propertyAddress(kAudioDevicePropertyStreamConfiguration, scope: kAudioObjectPropertyScopeInput),

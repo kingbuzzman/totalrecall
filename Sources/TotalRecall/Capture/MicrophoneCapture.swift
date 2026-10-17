@@ -7,28 +7,43 @@ import Foundation
 ///
 /// Thread-safe: audio callbacks, device listeners and the writer queue share the state below under `lock`.
 final class MicrophoneCapture {
+    /// Starts capturing a device: `(device, sessionID, onSamples, onDeviceChange)`.
+    typealias SessionFactory = (
+        InputDevice, Int, @escaping MicrophoneAudioHandler, @escaping () -> Void
+    ) throws -> MicrophoneCaptureSession
+
     /// How long a pending switch keeps the capture from counting as stalled while the new device starts up.
     private static let switchTimeoutSeconds = 5.0
 
     private let preferredName: String?
     private let onSamples: MicrophoneAudioHandler
+    private let findTarget: (String?) -> InputDevice?
+    private let makeSession: SessionFactory
     private let lock = NSLock()
     /// The session being recorded.
-    private var active: MicrophoneSession?
+    private var active: MicrophoneCaptureSession?
     /// A newly started session that takes over as soon as it delivers real audio.
-    private var pending: MicrophoneSession?
+    private var pending: MicrophoneCaptureSession?
     /// Sessions switched away from; `finishSwitch()` stops them outside the audio callbacks.
-    private var replaced: [MicrophoneSession] = []
+    private var replaced: [MicrophoneCaptureSession] = []
     /// The device a switch to another device completed to, until `finishSwitch()` reports it.
     private var switchedTo: InputDevice?
     private var lastActiveAudioUptime = 0.0
     private var nextSessionID = 0
     private var deviceChanged = false
 
-    /// `onSamples` is called on a Core Audio thread, only for the session being recorded.
-    init(preferredName: String?, onSamples: @escaping MicrophoneAudioHandler) {
+    /// `onSamples` is called on a Core Audio thread, only for the session being recorded. `findTarget` and
+    /// `makeSession` default to the real devices.
+    init(
+        preferredName: String?,
+        onSamples: @escaping MicrophoneAudioHandler,
+        findTarget: @escaping (String?) -> InputDevice? = MicrophoneCapture.systemTarget,
+        makeSession: @escaping SessionFactory = MicrophoneSession.init
+    ) {
         self.preferredName = preferredName
         self.onSamples = onSamples
+        self.findTarget = findTarget
+        self.makeSession = makeSession
     }
 
     /// The device being recorded, or the one being switched to.
@@ -41,6 +56,11 @@ final class MicrophoneCapture {
     }
 
     func targetDevice() -> InputDevice? {
+        findTarget(preferredName)
+    }
+
+    /// The preferred microphone when it is present, otherwise the system input.
+    static func systemTarget(preferredName: String?) -> InputDevice? {
         if let preferredName, let preferred = InputDevice.matching(preferredName).first { return preferred }
         return InputDevice.systemInput()
     }
@@ -52,11 +72,11 @@ final class MicrophoneCapture {
             nextSessionID += 1
             return nextSessionID
         }
-        let session = try MicrophoneSession(
-            device: target,
-            id: sessionID,
-            onSamples: { [weak self] in self?.deliver($0, hostTime: $1, from: $2) },
-            onDeviceChange: { [weak self] in self?.noteDeviceChange() }
+        let session = try makeSession(
+            target,
+            sessionID,
+            { [weak self] in self?.deliver($0, hostTime: $1, from: $2) },
+            { [weak self] in self?.noteDeviceChange() }
         )
         lock.withLock {
             if let pending { replaced.append(pending) }

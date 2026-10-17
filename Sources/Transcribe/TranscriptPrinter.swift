@@ -6,14 +6,28 @@ import Foundation
 final class TranscriptPrinter: @unchecked Sendable {
     private let isLive: Bool
     private let printsLines: Bool
+    private let write: (String) -> Void
+    private let terminalWidth: () -> Int
     private let lock = NSLock()
     private var volatileText: [String: String] = [:]
     private var finals: [TranscriptUpdate] = []
 
-    /// `printsLines` prints final lines to stdout as they arrive; `isLive` also shows text still being recognized.
-    init(printsLines: Bool, isLive: Bool) {
+    /// `printsLines` prints final lines to stdout as they arrive; `isLive` also shows text still being recognized, on
+    /// a terminal.
+    init(
+        printsLines: Bool,
+        isLive: Bool,
+        isTerminal: Bool = isatty(STDOUT_FILENO) != 0,
+        terminalWidth: @escaping () -> Int = TranscriptPrinter.standardOutputWidth,
+        write: @escaping (String) -> Void = {
+            fputs($0, stdout)
+            fflush(stdout)
+        }
+    ) {
         self.printsLines = printsLines
-        self.isLive = isLive && printsLines && isatty(STDOUT_FILENO) != 0
+        self.isLive = isLive && printsLines && isTerminal
+        self.terminalWidth = terminalWidth
+        self.write = write
     }
 
     func update(_ update: TranscriptUpdate) {
@@ -27,14 +41,13 @@ final class TranscriptPrinter: @unchecked Sendable {
                     finals.append(update)
                     if printsLines {
                         clearLiveLine()
-                        print(Self.line(update))
+                        write(Self.line(update) + "\n")
                     }
                 }
             } else {
                 volatileText[key] = hasWords ? update.text : nil
             }
             drawLiveLine()
-            fflush(stdout)
         }
     }
 
@@ -44,10 +57,7 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     func finish() {
-        lock.withLock {
-            clearLiveLine()
-            fflush(stdout)
-        }
+        lock.withLock { clearLiveLine() }
     }
 
     private static func line(_ update: TranscriptUpdate) -> String {
@@ -57,7 +67,7 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     private func clearLiveLine() {
-        if isLive { print("\r\u{1B}[K", terminator: "") }
+        if isLive { write("\r\u{1B}[K") }
     }
 
     private func drawLiveLine() {
@@ -68,10 +78,10 @@ final class TranscriptPrinter: @unchecked Sendable {
         guard !parts.isEmpty else { return }
         // Keep it to one line, showing the most recent words.
         let text = "… " + parts.joined(separator: "  |  ")
-        print("\u{1B}[2m" + String(text.suffix(max(terminalWidth() - 1, 10))) + "\u{1B}[0m", terminator: "")
+        write("\u{1B}[2m" + String(text.suffix(max(terminalWidth() - 1, 10))) + "\u{1B}[0m")
     }
 
-    private func terminalWidth() -> Int {
+    static func standardOutputWidth() -> Int {
         var size = winsize()
         return ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0 ? Int(size.ws_col) : 80
     }

@@ -214,8 +214,8 @@ The tests use [Swift Testing](https://developer.apple.com/documentation/testing)
 
 | Target | Tests |
 | --- | --- |
-| `TotalRecallTests` | totalrecall's logic: options, the timeline and recorder (alignment, splicing, padding, mixing, the end at the stop), echo cancellation, output files and formats, resampling, sample-rate watching |
-| `TranscribeTests` | transcribe's logic: arguments, speaker detection, mixing, the transcript, language picking, audio sources |
+| `TotalRecallTests` | totalrecall's logic: options, the timeline and recorder (alignment, splicing, padding, mixing, the end at the stop), echo cancellation, output files and formats, resampling, sample-rate watching, make-before-break mic switching and capture restarts (with fake sessions), the status line, stop signals, input-device lookup |
+| `TranscribeTests` | transcribe's logic: arguments, speaker detection, mixing, the transcript and its live line, language picking, audio sources |
 | `SharedTests` | The WAV stream writer and reader, including malformed streams |
 | `AudioLabTests` | The click-track analysis the end-to-end tests rely on |
 | `IntegrationTests` | The release binaries end to end: totalrecall's command line, transcribe on speech from `say`, and totalrecall recording through fake audio devices |
@@ -239,7 +239,7 @@ to the test devices and restores them afterwards. Recordings and logs are kept i
 
 `make coverage` builds the tools and the tests once with coverage instrumentation, runs the tests with the end-to-end
 ones on those builds, prints line coverage per file, writes an HTML report to `.build/coverage/html`, and fails if
-coverage drops below `COVERAGE_MIN` percent (set in the `Makefile`). Without the test devices the coverage is partial,
+coverage drops below `COVERAGE_MIN` percent (75, set in the `Makefile`). Without the test devices the coverage is partial,
 and the minimum is not checked.
 
 CI (`.github/workflows/integration.yml`) runs `make test` and `make coverage` on GitHub's macOS runners, shows the

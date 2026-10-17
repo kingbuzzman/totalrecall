@@ -17,8 +17,23 @@ struct CommandLineTests {
         #expect(result.standardOutput.contains("usage: totalrecall"))
     }
 
-    @Test func listsTheMicrophones() async throws {
-        #expect(try await totalrecall("--list-mics").status == 0)
+    @Test func listsTheMicrophonesMarkingTheSystemInput() async throws {
+        let result = try await totalrecall("--list-mics")
+
+        let lines = result.standardOutput.split(separator: "\n")
+        #expect(result.status == 0)
+        #expect(lines.allSatisfy { $0.hasPrefix("* ") || $0.hasPrefix("  ") }, "\(result.standardOutput)")
+        #expect(lines.count { $0.hasPrefix("* ") } <= 1, "\(result.standardOutput)")
+    }
+
+    @Test func refusesToWriteAudioToATerminal() async throws {
+        let result = try await ProcessResult.run(
+            URL(fileURLWithPath: "/usr/bin/script"),
+            ["-q", "/dev/null", TestEnvironment.totalrecall.path, "-"]
+        )
+
+        #expect(result.status == 1)
+        #expect(result.standardOutput.contains("totalrecall: refusing to write audio to the terminal"))
     }
 
     @Test func needsAnOutputFile() async throws {

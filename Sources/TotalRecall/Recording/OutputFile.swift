@@ -26,10 +26,10 @@ struct OutputFile {
     /// debugging aid for tuning the processing against real recordings.
     let rawURL: URL?
 
-    init(path: String) {
+    init(path: String, environment: [String: String] = ProcessInfo.processInfo.environment) {
         url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         partialURL = url.appendingPathExtension("partial.caf")
-        let savesRaw = ProcessInfo.processInfo.environment["TOTALRECALL_RAW"] == "1"
+        let savesRaw = environment["TOTALRECALL_RAW"] == "1"
         rawURL = savesRaw ? url.appendingPathExtension("raw.caf") : nil
     }
 

@@ -10,13 +10,21 @@ struct StatusLine {
     private static let meterFloorDecibels: Float = -60
 
     let recorder: Recorder
-    private let isTerminal = isatty(STDERR_FILENO) != 0
+    private let isTerminal: Bool
     private let showsMeter: Bool
+    private let write: (String) -> Void
 
     /// The meter is only shown on a terminal, and not while streaming: the other program writes to the same terminal,
     /// and a line redrawn in place would garble its output.
-    init(recorder: Recorder, isStreaming: Bool) {
+    init(
+        recorder: Recorder,
+        isStreaming: Bool,
+        isTerminal: Bool = isatty(STDERR_FILENO) != 0,
+        write: @escaping (String) -> Void = { fputs($0, stderr) }
+    ) {
         self.recorder = recorder
+        self.isTerminal = isTerminal
+        self.write = write
         showsMeter = !isStreaming && isTerminal
     }
 
@@ -40,16 +48,16 @@ struct StatusLine {
 
     /// Prints `text` on a line of its own.
     func say(_ text: String) {
-        fputs("\(clearLine)\(text)\n", stderr)
+        write("\(clearLine)\(text)\n")
     }
 
     func showLevels(_ levels: LevelSnapshot) {
         guard showsMeter else { return }
         let microphoneMeter = recorder.includesMicrophone ? "  mic \(Self.meter(levels.microphonePeak))" : ""
-        fputs("\r\u{1B}[K● \(elapsed)\(microphoneMeter)  system \(Self.meter(levels.systemPeak))", stderr)
+        write("\r\u{1B}[K● \(elapsed)\(microphoneMeter)  system \(Self.meter(levels.systemPeak))")
     }
 
-    private static func meter(_ peak: Float) -> String {
+    static func meter(_ peak: Float) -> String {
         let decibels = 20 * log10(max(peak, 1e-6))
         let level = ((decibels - meterFloorDecibels) / -meterFloorDecibels * Float(meterWidth)).rounded()
         let filled = min(max(Int(level), 0), meterWidth)

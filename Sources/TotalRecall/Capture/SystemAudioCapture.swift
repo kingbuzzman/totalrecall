@@ -4,8 +4,14 @@ import CoreAudio
 /// Receives each captured buffer, resampled to mono, with the host time of its first frame.
 typealias SystemAudioHandler = (_ samples: [Float], _ hostTime: UInt64) -> Void
 
+/// A capture that `CaptureSupervisor` can restart.
+protocol RestartableCapture: AnyObject {
+    func start() throws
+    func stop()
+}
+
 /// Taps the mixed output of every process via a Core Audio process tap (macOS 14.2+), so no loopback driver is needed.
-final class SystemAudioCapture {
+final class SystemAudioCapture: RestartableCapture {
     private let onSamples: SystemAudioHandler
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)

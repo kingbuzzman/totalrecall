@@ -146,6 +146,19 @@ struct RecorderTests {
         #expect(sink.left == ramp(4_800))
     }
 
+    @Test func padsATrackThatFellMoreThanASecondBehind() throws {
+        let recorder = makeRecorder()
+        recorder.appendSystem(ramp(96_000), hostTime: clock.at(milliseconds: 0))
+        recorder.appendMicrophone(ramp(4_800), hostTime: clock.at(milliseconds: 0), session: 1)
+        recorder.startRecording(at: clock.at(milliseconds: 0))
+
+        try recorder.writeAvailable()
+
+        let written = 96_000 / EchoCanceller.frameSize * EchoCanceller.frameSize
+        #expect(sink.right == ramp(written))
+        #expect(sink.left == ramp(4_800) + silence(written - 4_800))
+    }
+
     @Test func savesTheUnprocessedAudioIncludingThePreRollToTheRawSink() throws {
         let raw = CapturingSink()
         let recorder = makeRecorder(isolation: false, rawSink: raw)

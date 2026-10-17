@@ -21,7 +21,7 @@ INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker
 COVERAGE_FLAGS := -c release --build-path .build/coverage -Xswiftc -enable-testing \
 	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall)
 # Lowest line coverage, in percent, that make coverage accepts.
-COVERAGE_MIN ?= 0
+COVERAGE_MIN ?= 75
 
 all: totalrecall transcribe
 

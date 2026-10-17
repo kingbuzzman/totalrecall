@@ -63,6 +63,31 @@ struct TranscribeTests {
         #expect(result.standardOutput.contains("Good morning"))
     }
 
+    /// Ctrl-C reaches every program in `totalrecall - | transcribe -`; transcribe finishes once totalrecall ends the stream.
+    @Test(.timeLimit(.minutes(1)))
+    func finishesTheTranscriptWhenInterruptedBeforeTheStreamEnds() async throws {
+        let text = TestEnvironment.result("interrupted.txt")
+        let transcribe = try await LiveTranscribe.start(writingTo: text, saying: Self.you)
+
+        transcribe.interrupt()
+        transcribe.endStream()
+
+        #expect(await transcribe.exitStatus() == 0)
+        #expect(try String(contentsOf: text, encoding: .utf8).contains("Good morning"))
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func quitsAtOnceOnASecondInterrupt() async throws {
+        let transcribe = try await LiveTranscribe.start(writingTo: TestEnvironment.result("quit.txt"), saying: Self.you)
+
+        transcribe.interrupt()
+        try await Task.sleep(for: .milliseconds(100))
+        transcribe.interrupt()
+
+        #expect(await transcribe.exitStatus() == 128 + SIGINT)
+        transcribe.endStream()
+    }
+
     @Test func reportsAFileItCannotRead() async throws {
         let result = try await transcribe(TestEnvironment.result("no-such-file.m4a").path)
 
@@ -100,6 +125,49 @@ struct TranscribeTests {
 
     private func transcribe(_ arguments: String...) async throws -> ProcessResult {
         try await ProcessResult.run(TestEnvironment.transcribe, arguments)
+    }
+}
+
+/// `transcribe - <text-file>` reading a stream that is still open.
+final class LiveTranscribe {
+    private let process = Process()
+    private let input = Pipe()
+
+    private init() {}
+
+    /// Starts it and streams it the speech, returning once it has read all of it.
+    static func start(writingTo text: URL, saying words: String) async throws -> LiveTranscribe {
+        let live = LiveTranscribe()
+        let speech = try await Speech.samples(saying: words)
+        live.process.executableURL = TestEnvironment.transcribe
+        live.process.arguments = ["-", text.path]
+        live.process.standardInput = live.input
+        live.process.standardOutput = FileHandle.nullDevice
+        live.process.standardError = FileHandle.nullDevice
+        try live.process.run()
+        let stream =
+            WAVStream.header(sampleRate: 48_000, channelCount: 1) + WAVStream.samples([speech], count: speech.count)
+        await withCheckedContinuation { continuation in
+            Thread {
+                try? live.input.fileHandleForWriting.write(contentsOf: stream)
+                continuation.resume()
+            }
+            .start()
+        }
+        return live
+    }
+
+    func interrupt() {
+        kill(process.processIdentifier, SIGINT)
+    }
+
+    func endStream() {
+        try? input.fileHandleForWriting.close()
+    }
+
+    func exitStatus() async -> Int32 {
+        while process.isRunning { try? await Task.sleep(for: .milliseconds(20)) }
+        return process.terminationStatus
     }
 }
 
