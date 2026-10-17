@@ -9,6 +9,7 @@ let startupGraceSeconds = 2.0
 let maxLagFrames = Int(sampleRate * 1.0)
 let maxStartOffsetFrames = Int(sampleRate * 5.0)
 let gapFillThresholdFrames = Int(sampleRate * 0.1)
+let maxSwitchOverlapFrames = Int(sampleRate * 0.5)
 let echoTailSeconds = 0.12
 let captureStallSeconds = 0.6
 let switchTimeoutSeconds = 5.0
@@ -313,7 +314,7 @@ final class MicrophoneSession {
 /// switch Bluetooth into their call profile.
 final class MicrophoneCapture {
     private let preferredName: String?
-    private let onSamples: ([Float], UInt64) -> Void
+    private let onSamples: ([Float], UInt64, Int) -> Void
     private let onDeviceChange: () -> Void
     private let lock = NSLock()
     private var active: MicrophoneSession?
@@ -323,7 +324,8 @@ final class MicrophoneCapture {
     private var lastActiveAudioUptime = 0.0
     private var nextSessionID = 0
 
-    init(preferredName: String?, onSamples: @escaping ([Float], UInt64) -> Void, onDeviceChange: @escaping () -> Void) {
+    /// `onSamples` receives each buffer with its host time and the ID of the session that captured it.
+    init(preferredName: String?, onSamples: @escaping ([Float], UInt64, Int) -> Void, onDeviceChange: @escaping () -> Void) {
         self.preferredName = preferredName
         self.onSamples = onSamples
         self.onDeviceChange = onDeviceChange
@@ -406,7 +408,7 @@ final class MicrophoneCapture {
             lastActiveAudioUptime = now
             return true
         }
-        if shouldRecord { onSamples(samples, hostTime) }
+        if shouldRecord { onSamples(samples, hostTime, sessionID) }
     }
 }
 
@@ -435,22 +437,36 @@ final class Track {
     var hasHeardSound = false
     var lastBufferUptime = uptimeSeconds()
     private var timelineFrames = 0
+    private var source: Int?
+    private var endNanos: UInt64 = 0
 
     /// Appends samples at the position their host time implies, filling any gap (such as a device switch) with silence.
-    func append(_ newSamples: [Float], hostTime: UInt64) {
-        if let startHostTime {
+    /// When a new source (capture session) takes over, its audio is spliced in exactly where the old source's ended:
+    /// a gap becomes silence and audio both sources captured is kept only once, so nothing is repeated or shifted.
+    func append(_ newSamples: [Float], hostTime: UInt64, source newSource: Int = 0) {
+        let startNanos = AudioConvertHostTimeToNanos(hostTime)
+        let spliceOffset = Int(((Double(startNanos) - Double(endNanos)) / 1e9 * sampleRate).rounded())
+        var kept = newSamples[...]
+        if let source, newSource != source, spliceOffset > -maxSwitchOverlapFrames {
+            if spliceOffset > 0 { appendSilence(spliceOffset) }
+            kept = kept.dropFirst(max(-spliceOffset, 0))
+            // Entirely audio the old source already delivered; splice on the next buffer.
+            guard !kept.isEmpty else { return }
+        } else if let startHostTime {
             if hostTime > startHostTime {
-                let elapsedNanos = AudioConvertHostTimeToNanos(hostTime) - AudioConvertHostTimeToNanos(startHostTime)
+                let elapsedNanos = startNanos - AudioConvertHostTimeToNanos(startHostTime)
                 let gap = Int(Double(elapsedNanos) / 1e9 * sampleRate) - timelineFrames
                 if gap > gapFillThresholdFrames { appendSilence(gap) }
             }
         } else {
             startHostTime = hostTime
         }
-        samples.append(contentsOf: newSamples)
-        timelineFrames += newSamples.count
+        source = newSource
+        endNanos = startNanos + UInt64((Double(newSamples.count) / sampleRate * 1e9).rounded())
+        samples.append(contentsOf: kept)
+        timelineFrames += kept.count
         lastBufferUptime = uptimeSeconds()
-        let newPeak = newSamples.reduce(0) { max($0, abs($1)) }
+        let newPeak = kept.reduce(0) { max($0, abs($1)) }
         peak = max(peak, newPeak)
         if newPeak > 0 { hasHeardSound = true }
     }
@@ -474,7 +490,9 @@ final class Track {
 /// Removes the system audio that the microphone picks up from the speakers, using the captured system audio as the
 /// echo reference (speexdsp acoustic echo canceller plus residual echo suppression).
 final class EchoCanceller {
-    static let frameSize = Int(sampleRate / 100)
+    // Speex needs a power-of-two frame: with 480 (10 ms) its filter diverges and resets every few seconds, cancelling
+    // almost nothing; 1024 (21 ms) converges within about 3 s.
+    static let frameSize = 1024
     private let echoState: OpaquePointer
     private let preprocessState: OpaquePointer
     private var microphoneFrame = [Int16](repeating: 0, count: frameSize)
@@ -542,8 +560,8 @@ final class Recorder {
         file = try AVAudioFile(forWriting: url, settings: pcmSettings(bigEndian: false), commonFormat: .pcmFormatFloat32, interleaved: false)
     }
 
-    func appendMicrophone(_ samples: [Float], hostTime: UInt64) {
-        lock.withLock { microphone.append(samples, hostTime: hostTime) }
+    func appendMicrophone(_ samples: [Float], hostTime: UInt64, session: Int) {
+        lock.withLock { microphone.append(samples, hostTime: hostTime, source: session) }
     }
 
     func appendSystem(_ samples: [Float], hostTime: UInt64) {
