@@ -52,12 +52,12 @@ final class MicrophoneSession: MicrophoneCaptureSession {
         }
         let resampler = try Resampler(from: firstChannelFormat)
         let rateWatch = RateWatch(expectedRate: streamFormat.mSampleRate)
+        let firstChannel = FirstChannel(format: firstChannelFormat)
         let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
-            guard
-                rateWatch.isOnRate(at: inputTime.pointee),
-                let firstChannel = Self.firstChannel(of: inputData, format: firstChannelFormat)
-            else { return }
-            onSamples(resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime, id)
+            guard rateWatch.isOnRate(at: inputTime.pointee), let buffer = firstChannel.copy(from: inputData) else {
+                return
+            }
+            onSamples(resampler.monoSamples(from: buffer), inputTime.pointee.mHostTime, id)
         }
         var procID: AudioDeviceIOProcID?
         try ensure(AudioDeviceCreateIOProcIDWithBlock(&procID, device.id, nil, ioBlock), "listening to \(device.name)")
@@ -89,30 +89,40 @@ final class MicrophoneSession: MicrophoneCaptureSession {
         }
         ioProcID = nil
     }
+}
 
-    /// Copies channel 0 out of the device's interleaved buffer. Built-in mic arrays deliver several interleaved
-    /// channels; channel 0 is a complete microphone signal.
-    private static func firstChannel(
-        of inputData: UnsafePointer<AudioBufferList>,
-        format: AVAudioFormat
-    ) -> AVAudioPCMBuffer? {
+/// Copies channel 0 out of the device's interleaved buffer. Built-in mic arrays deliver several interleaved channels;
+/// channel 0 is a complete microphone signal. Used only on the session's audio thread, so it reuses one buffer.
+private final class FirstChannel {
+    private let format: AVAudioFormat
+    private var buffer: AVAudioPCMBuffer?
+
+    init(format: AVAudioFormat) {
+        self.format = format
+    }
+
+    /// Valid until the next call.
+    func copy(from inputData: UnsafePointer<AudioBufferList>) -> AVAudioPCMBuffer? {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
         guard let firstBuffer = buffers.first, let data = firstBuffer.mData, firstBuffer.mNumberChannels > 0 else {
             return nil
         }
         let channelCount = Int(firstBuffer.mNumberChannels)
         let frameCount = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
-        guard
-            frameCount > 0,
-            let firstChannel = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
-        else {
-            return nil
+        guard frameCount > 0 else { return nil }
+        if buffer.map({ $0.frameCapacity < frameCount }) ?? true {
+            buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
         }
-        firstChannel.frameLength = AVAudioFrameCount(frameCount)
+        guard let buffer else { return nil }
+        buffer.frameLength = AVAudioFrameCount(frameCount)
         let interleaved = data.assumingMemoryBound(to: Float.self)
-        let destination = firstChannel.floatChannelData![0]
-        for frame in 0..<frameCount { destination[frame] = interleaved[frame * channelCount] }
-        return firstChannel
+        let destination = buffer.floatChannelData![0]
+        if channelCount == 1 {
+            destination.update(from: interleaved, count: frameCount)
+        } else {
+            for frame in 0..<frameCount { destination[frame] = interleaved[frame * channelCount] }
+        }
+        return buffer
     }
 }
 

@@ -12,6 +12,8 @@ protocol AudioSink: AnyObject {
 /// A 16-bit PCM CAF file, which stays readable if the process dies.
 final class AudioFileSink: AudioSink {
     private var file: AVAudioFile?
+    /// Reused from one write to the next.
+    private var buffer: AVAudioPCMBuffer?
 
     init(url: URL) throws {
         file = try AVAudioFile(
@@ -24,19 +26,26 @@ final class AudioFileSink: AudioSink {
 
     func write(left: [Float], right: [Float], count: Int) throws {
         guard let file else { return }
-        let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(count))!
-        buffer.frameLength = AVAudioFrameCount(count)
-        for (channel, samples) in [left, right].enumerated() {
-            let destination = buffer.floatChannelData![channel]
-            destination.update(repeating: 0, count: count)
-            destination.update(from: samples, count: min(samples.count, count))
+        if buffer.map({ $0.frameCapacity < count }) ?? true {
+            buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(count))
         }
+        let buffer = buffer!
+        buffer.frameLength = AVAudioFrameCount(count)
+        copy(left, count: count, to: buffer.floatChannelData![0])
+        copy(right, count: count, to: buffer.floatChannelData![1])
         try file.write(from: buffer)
     }
 
     func close() {
         file?.close()
         file = nil
+        buffer = nil
+    }
+
+    private func copy(_ samples: [Float], count: Int, to destination: UnsafeMutablePointer<Float>) {
+        let copied = min(samples.count, count)
+        destination.update(from: samples, count: copied)
+        (destination + copied).update(repeating: 0, count: count - copied)
     }
 }
 

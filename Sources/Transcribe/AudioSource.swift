@@ -13,6 +13,8 @@ protocol AudioSource {
 /// Any audio file macOS can read (.m4a, .mp3, .wav, .caf, ...).
 final class FileAudioSource: AudioSource {
     private let file: AVAudioFile
+    /// Reused from one read to the next; each read copies what it read out of it.
+    private var buffer: AVAudioPCMBuffer?
 
     var sampleRate: Double { file.processingFormat.sampleRate }
     var channelCount: Int { Int(file.processingFormat.channelCount) }
@@ -23,7 +25,10 @@ final class FileAudioSource: AudioSource {
 
     func read(maxFrames: Int) throws -> [[Float]]? {
         guard file.framePosition < file.length else { return nil }
-        let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(maxFrames))!
+        if buffer?.frameCapacity != AVAudioFrameCount(maxFrames) {
+            buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(maxFrames))
+        }
+        let buffer = buffer!
         try file.read(into: buffer)
         guard buffer.frameLength > 0 else { return nil }
         return (0..<channelCount).map { channel in

@@ -1,3 +1,4 @@
+import Accelerate
 import CSpeexDSP
 
 /// Removes the system audio that the microphone picks up from the speakers, using the captured system audio as the
@@ -19,6 +20,8 @@ final class EchoCanceller {
     private var microphoneFrame = [Int16](repeating: 0, count: frameSize)
     private var speakerFrame = [Int16](repeating: 0, count: frameSize)
     private var cleanedFrame = [Int16](repeating: 0, count: frameSize)
+    /// Scratch space for converting a frame to 16-bit.
+    private var scaledFrame = [Float](repeating: 0, count: frameSize)
     private var hasHeardMicrophone = false
 
     init() {
@@ -72,19 +75,21 @@ final class EchoCanceller {
 
     /// Both inputs must be the same length, a multiple of `frameSize`, and aligned in time.
     func cancel(microphone: [Float], speaker: [Float]) -> [Float] {
-        var cleaned = [Float]()
-        cleaned.reserveCapacity(microphone.count)
+        var cleaned = [Float](repeating: 0, count: microphone.count)
         for frameStart in stride(from: 0, to: microphone.count, by: Self.frameSize) {
             cancelEcho(microphone, speaker, frameAt: frameStart, using: echoState)
             // Silence before the microphone's first sound (a microphone that started after the recording) skips the
-            // noise suppressor, which would learn that the background is silent and undo the warm-up.
-            if !hasHeardMicrophone && isSilent(microphone, frameAt: frameStart) {
-                cleaned.append(contentsOf: repeatElement(0, count: Self.frameSize))
-                continue
-            }
+            // noise suppressor, which would learn that the background is silent and undo the warm-up. That frame of
+            // `cleaned` stays silent.
+            if !hasHeardMicrophone && isSilent(microphone, frameAt: frameStart) { continue }
             hasHeardMicrophone = true
             speex_preprocess_run(preprocessState, &cleanedFrame)
-            cleaned.append(contentsOf: cleanedFrame.map { Float($0) / Float(Int16.max) })
+            // A plain loop rather than vDSP_vsdiv, which is not correctly rounded; the compiler vectorizes it.
+            cleaned.withUnsafeMutableBufferPointer { cleaned in
+                for offset in 0..<Self.frameSize {
+                    cleaned[frameStart + offset] = Float(cleanedFrame[offset]) / Float(Int16.max)
+                }
+            }
         }
         return cleaned
     }
@@ -96,10 +101,8 @@ final class EchoCanceller {
         frameAt frameStart: Int,
         using state: OpaquePointer
     ) {
-        for offset in 0..<Self.frameSize {
-            microphoneFrame[offset] = pcm16(microphone[frameStart + offset])
-            speakerFrame[offset] = pcm16(speaker[frameStart + offset])
-        }
+        pcm16(microphone, frameAt: frameStart, into: &microphoneFrame)
+        pcm16(speaker, frameAt: frameStart, into: &speakerFrame)
         speex_echo_cancellation(state, microphoneFrame, speakerFrame, &cleanedFrame)
     }
 
@@ -116,10 +119,18 @@ final class EchoCanceller {
     }
 
     private func isSilent(_ microphone: [Float], frameAt frameStart: Int) -> Bool {
-        !microphone[frameStart..<(frameStart + Self.frameSize)].contains { $0 != 0 }
+        vDSP.maximumMagnitude(microphone[frameStart..<(frameStart + Self.frameSize)]) == 0
     }
 
-    private func pcm16(_ sample: Float) -> Int16 {
-        Int16(min(max(sample, -1), 1) * Float(Int16.max))
+    /// One frame of `samples`, clipped and scaled to 16-bit, truncating toward zero.
+    private func pcm16(_ samples: [Float], frameAt frameStart: Int, into frame: inout [Int16]) {
+        precondition(frameStart + Self.frameSize <= samples.count)
+        var (low, high, fullScale): (Float, Float, Float) = (-1, 1, Float(Int16.max))
+        let count = vDSP_Length(Self.frameSize)
+        samples.withUnsafeBufferPointer { samples in
+            vDSP_vclip(samples.baseAddress! + frameStart, 1, &low, &high, &scaledFrame, 1, count)
+        }
+        vDSP_vsmul(scaledFrame, 1, &fullScale, &scaledFrame, 1, count)
+        vDSP_vfix16(scaledFrame, 1, &frame, 1, count)
     }
 }

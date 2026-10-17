@@ -1,3 +1,4 @@
+import Accelerate
 import CoreAudio
 
 /// The not-yet-written samples of one channel, laid out on a timeline derived from the captures' host times.
@@ -48,7 +49,7 @@ final class Track {
         samples.append(contentsOf: kept)
         timelineFrames += kept.count
         lastBufferUptime = uptimeSeconds()
-        peak = max(peak, kept.reduce(0) { max($0, abs($1)) })
+        if !kept.isEmpty { peak = max(peak, vDSP.maximumMagnitude(kept)) }
     }
 
     func take(_ count: Int) -> [Float] {

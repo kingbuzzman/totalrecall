@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// The live audio stream between `totalrecall -` and `transcribe -`: WAV of unknown length, the way streaming tools
@@ -25,13 +26,21 @@ package enum WAVStream {
         return data
     }
 
-    /// Interleaved 16-bit samples for `count` frames of the given channels.
+    /// Interleaved 16-bit samples for `count` frames of the given channels; a channel shorter than `count` is silence
+    /// after its end. Written in the host's byte order, which on every Mac is little-endian.
     package static func samples(_ channels: [[Float]], count: Int) -> Data {
-        var data = Data(capacity: count * channels.count * 2)
-        for frame in 0..<count {
-            for channel in channels {
-                let sample = frame < channel.count ? channel[frame] : 0
-                data.appendLittleEndian(UInt16(bitPattern: Int16(min(max(sample, -1), 1) * Float(Int16.max))))
+        var data = Data(count: count * channels.count * 2)
+        var scaled = [Float](repeating: 0, count: count)
+        var (low, high, fullScale): (Float, Float, Float) = (-1, 1, Float(Int16.max))
+        data.withUnsafeMutableBytes { bytes in
+            let pcm = bytes.bindMemory(to: Int16.self)
+            for (index, channel) in channels.enumerated() {
+                let frameCount = vDSP_Length(min(channel.count, count))
+                guard frameCount > 0 else { continue }
+                // Clipped, scaled and truncated toward zero, written to every channels.count-th sample.
+                vDSP_vclip(channel, 1, &low, &high, &scaled, 1, frameCount)
+                vDSP_vsmul(scaled, 1, &fullScale, &scaled, 1, frameCount)
+                vDSP_vfix16(scaled, 1, pcm.baseAddress! + index, vDSP_Stride(channels.count), frameCount)
             }
         }
         return data
@@ -89,27 +98,30 @@ package final class WAVStreamReader {
         guard wanted > 0, let data = try Self.read(wanted, from: handle) else { return nil }
         remainingBytes = remainingBytes.map { $0 - data.count }
         let frameCount = data.count / bytesPerFrame
-        var channels = [[Float]](repeating: [Float](repeating: 0, count: frameCount), count: channelCount)
-        data.withUnsafeBytes { bytes in
-            for frame in 0..<frameCount {
-                for channel in 0..<channelCount {
-                    let offset = frame * bytesPerFrame + channel * bytesPerSample
-                    channels[channel][frame] =
-                        switch sampleFormat {
-                        case .int16:
-                            Float(Int16(littleEndian: bytes.loadUnaligned(fromByteOffset: offset, as: Int16.self)))
-                                / Float(Int16.max)
-                        case .float32:
-                            Float(
-                                bitPattern: UInt32(
-                                    littleEndian: bytes.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
-                                )
-                            )
+        guard frameCount > 0 else { return nil }
+        let sampleFormat = sampleFormat
+        return data.withUnsafeBytes { bytes in
+            (0..<channelCount).map { channel in
+                [Float](unsafeUninitializedCapacity: frameCount) { samples, initializedCount in
+                    var offset = channel * bytesPerSample
+                    switch sampleFormat {
+                    case .int16:
+                        for frame in 0..<frameCount {
+                            let sample = bytes.loadUnaligned(fromByteOffset: offset, as: Int16.self)
+                            samples[frame] = Float(Int16(littleEndian: sample)) / Float(Int16.max)
+                            offset += bytesPerFrame
                         }
+                    case .float32:
+                        for frame in 0..<frameCount {
+                            let bits = bytes.loadUnaligned(fromByteOffset: offset, as: UInt32.self)
+                            samples[frame] = Float(bitPattern: UInt32(littleEndian: bits))
+                            offset += bytesPerFrame
+                        }
+                    }
+                    initializedCount = frameCount
                 }
             }
         }
-        return frameCount > 0 ? channels : nil
     }
 
     private static func parseFormat(_ body: Data) throws -> (SampleFormat, Int, Double) {

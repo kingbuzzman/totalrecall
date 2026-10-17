@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Foundation
 
 struct LevelSnapshot {
@@ -33,7 +34,7 @@ final class Recorder {
     let includesMicrophone: Bool
     let isolatesSpeakers: Bool
     private let echoCanceller: EchoCanceller?
-    private let lock = NSLock()
+    private let lock = UnfairLock()
     private let microphone = Track()
     private let system = Track()
     private let startedAt = Date()
@@ -50,6 +51,9 @@ final class Recorder {
     private var isClosed = false
     /// Raw audio taken off the tracks under the lock, written by `writeAvailable()` outside it.
     private var pendingRaw: [(microphone: [Float], system: [Float])] = []
+    /// The pre-roll taken off the tracks under the lock, which `writeAvailable()` warms the echo canceller up on
+    /// outside it: that runs the canceller over seconds of audio, which the audio callbacks must not wait for.
+    private var pendingWarmUp: (microphone: [Float], speaker: [Float])?
 
     init(
         writingTo sink: AudioSink,
@@ -143,16 +147,20 @@ final class Recorder {
     /// Writes the audio that both tracks have; with `final`, writes everything up to the end of the recording.
     func writeAvailable(final: Bool = false) throws {
         guard !isClosed else { return }
-        let (microphoneSamples, systemSamples, frameCount, raw) = lock.withLock {
+        let (microphoneSamples, systemSamples, frameCount, raw, warmUp) = lock.withLock {
             let taken = takeTracks(final: final)
             if rawSink != nil, taken.frameCount > 0 {
                 pendingRaw.append(
                     (Array(taken.microphone.prefix(taken.frameCount)), Array(taken.system.prefix(taken.frameCount)))
                 )
             }
-            defer { pendingRaw.removeAll() }
-            return (taken.microphone, taken.system, taken.frameCount, pendingRaw)
+            defer {
+                pendingRaw.removeAll()
+                pendingWarmUp = nil
+            }
+            return (taken.microphone, taken.system, taken.frameCount, pendingRaw, pendingWarmUp)
         }
+        if let warmUp { echoCanceller?.warmUp(microphone: warmUp.microphone, speaker: warmUp.speaker) }
         if let rawSink {
             for (microphone, system) in raw {
                 try rawSink.write(left: microphone, right: system, count: system.count)
@@ -202,7 +210,7 @@ final class Recorder {
             echoCanceller?.cancel(microphone: microphoneSamples, speaker: systemSamples)
             ?? microphoneSamples
         guard isolatesSpeakers else {
-            let mixed = zip(cleanedMicrophone, systemSamples).map { min(max($0 + $1, -1), 1) }
+            let mixed = vDSP.clip(vDSP.add(cleanedMicrophone, systemSamples), to: -1...1)
             return (mixed, mixed)
         }
         return (cleanedMicrophone, systemSamples)
@@ -275,7 +283,7 @@ final class Recorder {
         if rawSink != nil {
             pendingRaw.append(includesMicrophone ? (preRoll[0], preRoll[1]) : ([], preRoll[0]))
         }
-        if includesMicrophone { echoCanceller?.warmUp(microphone: preRoll[0], speaker: preRoll[1]) }
+        if includesMicrophone, echoCanceller != nil { pendingWarmUp = (preRoll[0], preRoll[1]) }
     }
 
     /// Pads or cuts the tracks so the file ends exactly at `stopRecording()`.

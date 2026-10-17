@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Foundation
 import Speech
 
@@ -26,6 +27,9 @@ final class SpeakerTranscriber: @unchecked Sendable {
     private let sourceFormat: AVAudioFormat
     private let analyzerFormat: AVAudioFormat
     private let converter: AVAudioConverter
+    /// The samples to convert, reused from one `append` to the next. The converted buffer goes to the recognizer, so
+    /// that one is new each time.
+    private var source: AVAudioPCMBuffer?
     private let inputStream: AsyncStream<AnalyzerInput>
     private let input: AsyncStream<AnalyzerInput>.Continuation
 
@@ -82,8 +86,10 @@ final class SpeakerTranscriber: @unchecked Sendable {
     }
 
     private func convert(_ samples: [Float]) -> AVAudioPCMBuffer? {
-        guard let source = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
-        else { return nil }
+        if self.source.map({ $0.frameCapacity < samples.count }) ?? true {
+            self.source = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
+        }
+        guard let source = self.source else { return nil }
         source.frameLength = AVAudioFrameCount(samples.count)
         source.floatChannelData![0].update(from: samples, count: samples.count)
         let ratio = analyzerFormat.sampleRate / sourceFormat.sampleRate
@@ -116,7 +122,14 @@ func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
 /// The average of the channels.
 func mixDown(_ chunk: [[Float]]) -> [Float] {
     guard chunk.count > 1 else { return chunk.first ?? [] }
-    return (0..<chunk[0].count).map { frame in chunk.reduce(0) { $0 + $1[frame] } / Float(chunk.count) }
+    var sum = chunk[0]
+    for channel in chunk.dropFirst() { vDSP.add(sum, channel, result: &sum) }
+    // Not vDSP.divide, which is not correctly rounded.
+    let channelCount = Float(chunk.count)
+    sum.withUnsafeMutableBufferPointer { sum in
+        for frame in sum.indices { sum[frame] /= channelCount }
+    }
+    return sum
 }
 
 /// The recognizer's locale for a `--language` value such as `es` or `es-MX`. A language without a region is

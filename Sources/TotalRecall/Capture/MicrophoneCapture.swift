@@ -19,7 +19,7 @@ final class MicrophoneCapture {
     private let onSamples: MicrophoneAudioHandler
     private let findTarget: (String?) -> InputDevice?
     private let makeSession: SessionFactory
-    private let lock = NSLock()
+    private let lock = UnfairLock()
     /// The session being recorded.
     private var active: MicrophoneCaptureSession?
     /// A newly started session that takes over as soon as it delivers real audio.
