@@ -1,3 +1,5 @@
+import CSpeexDSP
+
 /// Removes the system audio that the microphone picks up from the speakers, using the captured system audio as the
 /// echo reference (speexdsp acoustic echo canceller plus residual echo and noise suppression).
 final class EchoCanceller {

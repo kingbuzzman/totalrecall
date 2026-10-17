@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Shared
 
 /// Where `Recorder` writes the recording: left and right channels, `count` frames at `sampleRate`.
 protocol AudioSink: AnyObject {

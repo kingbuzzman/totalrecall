@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Shared
 
 /// Audio to transcribe, read in chunks of float samples, one array per channel.
 protocol AudioSource {

@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 // The only place that ends the process: everything below main.swift reports failures by throwing.
 

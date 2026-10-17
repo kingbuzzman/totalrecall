@@ -110,23 +110,33 @@ func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
         for (transcriber, channel) in zip(transcribers, chunk) { transcriber.append(channel) }
         return
     }
-    let mixed =
-        chunk.count == 1
-        ? chunk[0]
-        : (0..<chunk[0].count).map { frame in chunk.reduce(0) { $0 + $1[frame] } / Float(chunk.count) }
-    transcribers[0].append(mixed)
+    transcribers[0].append(mixDown(chunk))
+}
+
+/// The average of the channels.
+func mixDown(_ chunk: [[Float]]) -> [Float] {
+    guard chunk.count > 1 else { return chunk.first ?? [] }
+    return (0..<chunk[0].count).map { frame in chunk.reduce(0) { $0 + $1[frame] } / Float(chunk.count) }
 }
 
 /// The recognizer's locale for a `--language` value such as `es` or `es-MX`. A language without a region is
 /// recognized with the Mac's region if the recognizer has it (`es` on a US Mac is es-US), else the language's main
 /// region (es-ES), else any region it has for the language.
 func speechLocale(for identifier: String) async throws -> Locale {
+    try speechLocale(
+        for: identifier,
+        among: await SpeechTranscriber.supportedLocales,
+        currentRegion: Locale.current.region
+    )
+}
+
+func speechLocale(for identifier: String, among supported: [Locale], currentRegion: Locale.Region?) throws -> Locale {
     let wanted = Locale.Language(identifier: identifier)
-    let supported = await SpeechTranscriber.supportedLocales.sorted { $0.identifier < $1.identifier }
-    let sameLanguage = supported.filter { $0.language.languageCode == wanted.languageCode }
+    let sameLanguage = supported.sorted { $0.identifier < $1.identifier }
+        .filter { $0.language.languageCode == wanted.languageCode }
     let regions =
         wanted.region.map { [$0] }
-        ?? [Locale.current.region, Locale.Language(identifier: wanted.maximalIdentifier).region].compactMap { $0 }
+        ?? [currentRegion, Locale.Language(identifier: wanted.maximalIdentifier).region].compactMap { $0 }
     for region in regions {
         if let locale = sameLanguage.first(where: { $0.region == region }) { return locale }
     }

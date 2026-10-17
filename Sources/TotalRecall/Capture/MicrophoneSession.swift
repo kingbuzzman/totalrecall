@@ -114,7 +114,7 @@ final class MicrophoneSession {
 /// `MicrophoneCapture` replaces the session, and the timeline fills the short gap with silence.
 ///
 /// Used only on the session's audio thread.
-private final class RateWatch {
+final class RateWatch {
     /// Timestamps jitter by far less than this; a real switch, such as 44.1 to 48 kHz, is 9%.
     private static let tolerance = 0.03
     /// Off-rate buffers in a row before the session is given up on. One odd timestamp throws off two measurements, the

@@ -8,6 +8,7 @@
 *.aiff
 *.caf
 *.flac
-/tests/build/
+/.build/
+/Tests/build/
 /transcribe
 /build/

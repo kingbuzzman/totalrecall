@@ -3,10 +3,10 @@ import Foundation
 /// The live audio stream between `totalrecall -` and `transcribe -`: WAV of unknown length, the way streaming tools
 /// such as ffmpeg and sox write it (RIFF and data sizes of 0xFFFFFFFF), followed by interleaved 16-bit little-endian
 /// PCM. Shared by both tools.
-enum WAVStream {
-    static let unknownSize: UInt32 = 0xFFFF_FFFF
+package enum WAVStream {
+    package static let unknownSize: UInt32 = 0xFFFF_FFFF
 
-    static func header(sampleRate: Int, channelCount: Int) -> Data {
+    package static func header(sampleRate: Int, channelCount: Int) -> Data {
         let bytesPerFrame = channelCount * 2
         var data = Data()
         data.append(contentsOf: Array("RIFF".utf8))
@@ -26,7 +26,7 @@ enum WAVStream {
     }
 
     /// Interleaved 16-bit samples for `count` frames of the given channels.
-    static func samples(_ channels: [[Float]], count: Int) -> Data {
+    package static func samples(_ channels: [[Float]], count: Int) -> Data {
         var data = Data(capacity: count * channels.count * 2)
         for frame in 0..<count {
             for channel in channels {
@@ -40,20 +40,20 @@ enum WAVStream {
 
 /// Reads WAV from a stream that cannot seek, such as stdin, as float samples per channel. Accepts 16-bit and 32-bit
 /// float PCM, with the data size either exact or unknown (streamed).
-final class WAVStreamReader {
+package final class WAVStreamReader {
     private enum SampleFormat {
         case int16
         case float32
     }
 
-    let sampleRate: Double
-    let channelCount: Int
+    package let sampleRate: Double
+    package let channelCount: Int
     private let sampleFormat: SampleFormat
     private let handle: FileHandle
     /// Bytes of audio left, or nil for a stream that runs until its end.
     private var remainingBytes: Int?
 
-    init(handle: FileHandle) throws {
+    package init(handle: FileHandle) throws {
         self.handle = handle
         guard let riff = try Self.read(12, from: handle), riff.ascii(0..<4) == "RIFF", riff.ascii(8..<12) == "WAVE"
         else {
@@ -81,7 +81,7 @@ final class WAVStreamReader {
     }
 
     /// Up to `maxFrames` frames, one array per channel, or nil at the end of the stream.
-    func read(maxFrames: Int) throws -> [[Float]]? {
+    package func read(maxFrames: Int) throws -> [[Float]]? {
         let bytesPerSample = sampleFormat == .int16 ? 2 : 4
         let bytesPerFrame = bytesPerSample * channelCount
         var wanted = maxFrames * bytesPerFrame
@@ -139,10 +139,10 @@ final class WAVStreamReader {
         return data.isEmpty && count > 0 ? nil : data
     }
 
-    struct ReaderError: LocalizedError {
-        let errorDescription: String?
+    package struct ReaderError: LocalizedError {
+        package let errorDescription: String?
 
-        init(_ description: String) {
+        package init(_ description: String) {
             errorDescription = description
         }
     }

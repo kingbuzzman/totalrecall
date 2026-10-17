@@ -41,7 +41,7 @@ jobs:
       # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here, and the
       # build instrumented for coverage.
       - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" release tests/build/audiolab tests/build/coverage/totalrecall
+        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
 
       - name: Check the versions
         run: |
@@ -49,10 +49,14 @@ jobs:
           test "$(./totalrecall --version)" = "$version"
           test "$(./transcribe --version)" = "$version"
 
+      # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions
         run: |
-          sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh \
-            "$PWD/totalrecall" "$PWD/tests/build/audiolab" "$PWD/tests/build/coverage/totalrecall"
+          toolchain=$(dirname "$(xcrun --find swift)")
+          sudo --preserve-env=CI .github/scripts/grant-audio-permissions.sh \
+            "$PWD/totalrecall" "$(make -s coverage-bin)/totalrecall" \
+            "$toolchain/swift-test" "$(cd "$toolchain/../libexec/swift/pm" && pwd)/swiftpm-testing-helper" \
+            "$(xcrun --find xctest)"
 
       - name: Wait for ffmpeg
         timeout-minutes: 10
@@ -61,12 +65,12 @@ jobs:
           cat "$RUNNER_TEMP/ffmpeg.log"
           exit "$(cat "$RUNNER_TEMP/ffmpeg.status")"
 
-      - name: Run integration tests
+      - name: Run the tests
         run: make test
 
       # Runs the tests again on the instrumented build: the binaries released stay the uninstrumented ones tested above.
       - name: Check coverage
-        run: RESULTS="$PWD/tests/build/results/coverage" make coverage
+        run: RESULTS="$PWD/.build/test-results/coverage" make coverage
 
       - name: Diagnostics
         if: failure()
@@ -87,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage
-          path: tests/build/coverage/html
+          path: .build/coverage/html
           if-no-files-found: ignore
           retention-days: 1
 
@@ -96,6 +100,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-recordings
-          path: tests/build/results
+          path: .build/test-results
           if-no-files-found: ignore
           retention-days: 1

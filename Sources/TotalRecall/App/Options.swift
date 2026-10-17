@@ -19,7 +19,7 @@ let usage = """
       --force                   overwrite <output-file> if it exists
     """
 
-struct Options {
+struct Options: Equatable {
     var microphoneQuery: String?
     var includesMicrophone = true
     var isolatesSpeakers = true
@@ -34,7 +34,7 @@ struct UsageError: LocalizedError {
     var errorDescription: String? { "\(problem)\n\(usage)" }
 }
 
-enum Command {
+enum Command: Equatable {
     case record(outputPath: String, options: Options)
     case listMicrophones
     case help
