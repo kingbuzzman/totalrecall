@@ -2,6 +2,15 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## 0.2.2
+
+### transcribe
+
+- Ctrl-C on `totalrecall - | transcribe -` no longer drops the last words: transcribe waits for totalrecall to end the
+  stream and finishes the transcript, so `transcribe - meeting.txt` writes the file (before, it wrote nothing) and
+  `| tee -i meeting.txt` gets every line, for a live transcript that is also saved as it goes. A second Ctrl-C quits
+  right away.
+
 ## 0.2.1
 
 ### totalrecall

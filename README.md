@@ -126,10 +126,11 @@ transcribe --list-languages
 ```
 
 ```sh
-totalrecall - | transcribe -               # live: text appears as people speak
-transcribe ~/Meetings/standup.mp3          # a finished recording, printed in time order
-transcribe standup.mp3 standup.txt         # ... or written to a file
-transcribe --language es reunion.mp3       # in Spanish
+totalrecall - | transcribe -                        # live: text appears as people speak
+transcribe ~/Meetings/standup.mp3                   # a finished recording, printed in time order
+transcribe standup.mp3 standup.txt                  # ... or written to a file
+transcribe --language es reunion.mp3                # in Spanish
+totalrecall - | transcribe - | tee -i standup.txt   # live on screen and saved to a file as it goes
 ```
 
 The default language is US English. `--language` takes a language (`es`) or a language and region (`es-MX`); a
@@ -147,6 +148,11 @@ the right:
 Mixed recordings (`--no-speaker-isolation`, `--no-mic`) and `--mix` give one unlabeled transcript. Live on a terminal,
 the words still being recognized show on the last line, and each line is printed about a second after it is spoken.
 The first run in each language downloads Apple's speech model for it.
+
+Ctrl-C on a live pipeline stops totalrecall, which ends the stream; `transcribe` finishes the words it has already
+heard, prints them, and only then exits (press Ctrl-C again to quit at once). With `tee`, use `-i` so that `tee` keeps
+running for those last lines too. Through `tee` the output is not a terminal, so only finished lines are shown, not the
+words still being recognized.
 
 ## Permissions
 

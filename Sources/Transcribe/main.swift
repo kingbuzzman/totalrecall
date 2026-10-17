@@ -86,6 +86,27 @@ guard (1...2).contains(paths.count) else { fail("expected an audio file or -\n\(
 let isLive = paths[0] == "-"
 let textURL = paths.count == 2 ? URL(fileURLWithPath: (paths[1] as NSString).expandingTildeInPath) : nil
 
+// Ctrl-C reaches every program in the pipeline, and totalrecall answers it by ending the stream. So rather than dying
+// with the last words still being recognized (and, with a <text-file>, nothing written), keep going until the stream
+// ends and finish the transcript from it. A second Ctrl-C quits right away.
+let stopSignals = isLive ? finishOnStopSignals() : []
+
+func finishOnStopSignals() -> [DispatchSourceSignal] {
+    signal(SIGPIPE, SIG_IGN)
+    let queue = DispatchQueue(label: "transcribe.signals")
+    nonisolated(unsafe) var isStopping = false  // only touched on `queue`
+    return [SIGINT, SIGTERM, SIGHUP].map { signalNumber in
+        signal(signalNumber, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: queue)
+        source.setEventHandler {
+            if isStopping { exit(128 + signalNumber) }
+            isStopping = true
+        }
+        source.resume()
+        return source
+    }
+}
+
 do {
     let locale = try await speechLocale(for: language)
     try await installSpeechModel(for: locale)
