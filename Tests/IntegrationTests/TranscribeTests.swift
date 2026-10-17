@@ -236,7 +236,14 @@ final class LiveTranscribe {
         try? input.fileHandleForWriting.close()
     }
 
-    func exitStatus() async -> Int32 {
+    func exitStatus(sourceLocation: SourceLocation = #_sourceLocation) async -> Int32 {
+        let watchdog = killIfRunning(
+            process.processIdentifier,
+            after: .seconds(60),
+            "transcribe - <text-file>",
+            sourceLocation: sourceLocation
+        )
+        defer { watchdog.cancel() }
         while process.isRunning { try? await Task.sleep(for: .milliseconds(20)) }
         return process.terminationStatus
     }

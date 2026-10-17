@@ -1,8 +1,12 @@
 import Foundation
+import Testing
 
 /// A running `totalrecall`, its stderr kept next to the recording as `<output>.log`.
 final class TotalRecallProcess {
     private static let startupTimeout = Duration.seconds(10)
+    /// Saving takes a few seconds at most, converting with ffmpeg included; a totalrecall still running after this long
+    /// is hung.
+    private static let exitTimeout = Duration.seconds(30)
 
     let output: URL
     let log: URL
@@ -63,13 +67,27 @@ final class TotalRecallProcess {
     }
 
     /// Sends `signal` and returns the exit status, or the signal that killed it.
-    func stop(_ signal: Int32 = SIGINT) async -> Int32 {
+    func stop(_ signal: Int32 = SIGINT, sourceLocation: SourceLocation = #_sourceLocation) async -> Int32 {
         kill(process.processIdentifier, signal)
-        return await waitForExit()
+        return await waitForExit(sourceLocation: sourceLocation)
     }
 
-    func waitForExit() async -> Int32 {
-        while process.isRunning { try? await Task.sleep(for: .milliseconds(20)) }
+    /// The exit status, or the signal that killed it. A totalrecall that has not exited within `exitTimeout` is hung: it
+    /// is killed and the test fails with its log, rather than the whole run stalling until CI gives up.
+    func waitForExit(sourceLocation: SourceLocation = #_sourceLocation) async -> Int32 {
+        let deadline = ContinuousClock.now + Self.exitTimeout
+        while process.isRunning {
+            if ContinuousClock.now >= deadline {
+                Issue.record(
+                    "totalrecall did not exit within \(Self.exitTimeout), so it was killed: \(logText)",
+                    sourceLocation: sourceLocation
+                )
+                kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         return process.terminationStatus
     }
 

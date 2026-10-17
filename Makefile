@@ -34,6 +34,9 @@ COVERAGE_MIN ?= 75
 COVERAGE_REPORT := $(BUILD)/coverage
 # Every build goes through it: a single warning, from any tool, fails the build.
 STRICT := scripts/no-warnings.sh
+# Runs the tests under a pseudo-terminal, so their progress is printed as it happens: into a pipe, such as CI's log, it
+# is buffered, and a run that hangs shows nothing of the tests since the last flush.
+UNBUFFERED := script -q /dev/null
 
 all: $(TOOLS)
 
@@ -83,12 +86,12 @@ $(RELEASE): $(TOOLS) README.md
 # Tests that need the BlackHole test devices are skipped without them, except on CI.
 test: $(TOOLS) $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build $(SWIFTPM) --build-tests
-	swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)')
+	$(UNBUFFERED) swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)') </dev/null
 
 # The tests again, on the build instrumented for coverage; fails below COVERAGE_MIN. Takes TESTS like make test.
 coverage: coverage-build
 	COVERAGE_MIN=$(COVERAGE_MIN) COVERAGE_REPORT=$(COVERAGE_REPORT) scripts/coverage.sh "$$($(MAKE) -s coverage-bin)" \
-		swift test --skip-build $(COVERAGE_FLAGS) $(if $(TESTS),--filter '$(TESTS)')
+		$(UNBUFFERED) swift test --skip-build $(COVERAGE_FLAGS) $(if $(TESTS),--filter '$(TESTS)') </dev/null
 
 coverage-build: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build --build-tests $(COVERAGE_FLAGS)
