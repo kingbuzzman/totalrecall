@@ -226,6 +226,13 @@ CI runs the same suite on GitHub's macOS runners (`.github/workflows/integration
 `tests/ci/grant-audio-permissions.sh` grants the microphone and system-audio permissions nobody can click "Allow"
 for; it refuses to run outside CI.
 
+`make coverage` runs the suite against a build of totalrecall instrumented for coverage (it takes `TESTS` like
+`make test`), prints line coverage per file, writes an HTML report to `tests/build/coverage/html`, and fails if
+coverage drops below `COVERAGE_MIN` percent (set in the `Makefile`). Without the BlackHole devices it runs only
+the scenarios that need none and reports that partial coverage without checking the minimum. CI runs it after `make test`, shows the
+report in the job summary, and uploads the HTML as the `coverage` artifact. The released binaries are the
+uninstrumented ones.
+
 Known limit: totalrecall's system-audio capture also hears the fake mics' playback, so echo cancellation sees the
 "voice" in its reference signal. The echo scenario therefore checks only that echo is reduced, not that the voice is
 untouched.

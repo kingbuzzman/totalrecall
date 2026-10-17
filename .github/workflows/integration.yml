@@ -38,9 +38,10 @@ jobs:
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
 
-      # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here.
+      # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here, and the
+      # build instrumented for coverage.
       - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" release tests/build/audiolab
+        run: make -j"$(sysctl -n hw.ncpu)" release tests/build/audiolab tests/build/coverage/totalrecall
 
       - name: Check the versions
         run: |
@@ -49,7 +50,9 @@ jobs:
           test "$(./transcribe --version)" = "$version"
 
       - name: Grant audio permissions
-        run: sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh "$PWD/totalrecall" "$PWD/tests/build/audiolab"
+        run: |
+          sudo --preserve-env=CI tests/ci/grant-audio-permissions.sh \
+            "$PWD/totalrecall" "$PWD/tests/build/audiolab" "$PWD/tests/build/coverage/totalrecall"
 
       - name: Wait for ffmpeg
         timeout-minutes: 10
@@ -60,6 +63,10 @@ jobs:
 
       - name: Run integration tests
         run: make test
+
+      # Runs the tests again on the instrumented build: the binaries released stay the uninstrumented ones tested above.
+      - name: Check coverage
+        run: RESULTS="$PWD/tests/build/results/coverage" make coverage
 
       - name: Diagnostics
         if: failure()
@@ -75,6 +82,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: tests/build/coverage/html
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Upload recordings and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,3 +98,4 @@ jobs:
           name: integration-recordings
           path: tests/build/results
           if-no-files-found: ignore
+          retention-days: 1

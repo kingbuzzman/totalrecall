@@ -3,6 +3,9 @@ VERSION := $(shell cat VERSION)
 ARCH := $(shell uname -m)
 BUILD := build
 AUDIOLAB := tests/build/audiolab
+COVERAGE_BINARY := tests/build/coverage/totalrecall
+# Lowest line coverage, in percent, that make coverage accepts from the integration tests.
+COVERAGE_MIN ?= 0
 RELEASE := $(BUILD)/totalrecall-$(VERSION)-macos-$(ARCH).tar.gz
 # Oldest macOS the tools run on; older versions refuse to launch them.
 MACOS_MIN := 26.0
@@ -15,14 +18,21 @@ SPEEXDSP := $(CURDIR)/$(BUILD)/speexdsp/$(SPEEXDSP_VERSION)-macos$(MACOS_MIN)
 SHARED_SOURCES := $(shell find Sources/Shared -name '*.swift')
 TOTALRECALL_SOURCES := $(shell find Sources/TotalRecall -name '*.swift') $(SHARED_SOURCES)
 TRANSCRIBE_SOURCES := $(shell find Sources/Transcribe -name '*.swift') $(SHARED_SOURCES)
+TOTALRECALL_INPUTS := $(TOTALRECALL_SOURCES) Sources/TotalRecall/bridging.h $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+TOTALRECALL_FLAGS := -O -wmo -target $(ARCH)-apple-macos$(MACOS_MIN) $(TOTALRECALL_SOURCES) \
+	-import-objc-header Sources/TotalRecall/bridging.h \
+	-Xcc -I$(SPEEXDSP)/include $(SPEEXDSP)/lib/libspeexdsp.a \
+	-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(BUILD)/TotalRecall/Info.plist
 
 all: totalrecall transcribe
 
-totalrecall: $(TOTALRECALL_SOURCES) Sources/TotalRecall/bridging.h $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	swiftc -O -wmo -target $(ARCH)-apple-macos$(MACOS_MIN) -o $@ $(TOTALRECALL_SOURCES) \
-		-import-objc-header Sources/TotalRecall/bridging.h \
-		-Xcc -I$(SPEEXDSP)/include $(SPEEXDSP)/lib/libspeexdsp.a \
-		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(BUILD)/TotalRecall/Info.plist
+totalrecall: $(TOTALRECALL_INPUTS)
+	swiftc $(TOTALRECALL_FLAGS) -o $@
+
+# The same build, instrumented to count which lines run, for make coverage.
+$(COVERAGE_BINARY): $(TOTALRECALL_INPUTS)
+	mkdir -p $(dir $@)
+	swiftc $(TOTALRECALL_FLAGS) -profile-generate -profile-coverage-mapping -o $@
 
 transcribe: $(TRANSCRIBE_SOURCES) $(BUILD)/Transcribe/Info.plist
 	swiftc -O -wmo -target $(ARCH)-apple-macos$(MACOS_MIN) -o $@ $(TRANSCRIBE_SOURCES) \
@@ -57,6 +67,10 @@ $(AUDIOLAB): tests/audiolab/main.swift
 test: totalrecall $(AUDIOLAB)
 	tests/run.sh $(TESTS)
 
+# The integration tests against the instrumented build; fails below COVERAGE_MIN. Takes TESTS like make test.
+coverage: $(COVERAGE_BINARY) $(AUDIOLAB)
+	COVERAGE_MIN=$(COVERAGE_MIN) tests/coverage.sh $(CURDIR)/$(COVERAGE_BINARY) $(TESTS)
+
 format:
 	swift format --recursive --in-place Sources
 
@@ -69,7 +83,7 @@ install: totalrecall transcribe
 	ln -sf $(CURDIR)/transcribe $(PREFIX)/bin/transcribe
 
 clean:
-	rm -f totalrecall transcribe $(AUDIOLAB)
+	rm -f totalrecall transcribe $(AUDIOLAB) $(COVERAGE_BINARY)
 	rm -rf $(BUILD)
 
-.PHONY: all release test format lint install clean
+.PHONY: all release test coverage format lint install clean

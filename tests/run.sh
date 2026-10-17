@@ -7,6 +7,9 @@
 #
 # Usage: tests/run.sh [scenario ...]     (default: all; LONG=1 adds the long-running drift test)
 #
+# Without the devices it fails, unless SKIP_MISSING_DEVICES=1: then it runs only the scenarios that need none and,
+# if they pass, exits 3 to say the others were skipped.
+#
 # While it runs, the system input and output are switched to the test devices; both are restored on exit.
 
 set -u
@@ -35,6 +38,7 @@ recorder_pid=""
 failures=0
 scenario_failed=0
 failed_scenarios=()
+skipped_scenarios=()
 
 log() { printf '%s\n' "$*"; }
 
@@ -368,6 +372,8 @@ all_scenarios=(
     mixes_channels_without_isolation
 )
 if [ "${LONG:-0}" = 1 ]; then all_scenarios+=(long_recording_stays_in_sync); fi
+# totalrecall rejects these before it touches an audio device.
+device_free_scenarios=(rejects_bad_usage)
 
 # MARK: - Setup and teardown
 
@@ -390,25 +396,30 @@ for required in "$totalrecall" "$audiolab"; do
         exit 2
     fi
 done
+missing_devices=()
 for device in "$mic_a_loopback" "$mic_b_loopback" "$speakers"; do
-    if ! "$audiolab" has-device "$device"; then
-        log "missing audio device \"$device\"; install the test devices with:"
-        log "  brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch"
-        exit 2
-    fi
+    if ! "$audiolab" has-device "$device"; then missing_devices+=("$device"); fi
 done
+if [ ${#missing_devices[@]} -gt 0 ]; then
+    log "missing audio devices: ${missing_devices[*]}; install the test devices with:"
+    log "  brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch"
+    if [ "${SKIP_MISSING_DEVICES:-0}" != 1 ]; then exit 2; fi
+    log "running only the scenarios that need no devices: ${device_free_scenarios[*]}"
+fi
 
 mkdir -p "$results"
 trap teardown EXIT
 trap 'exit 130' INT TERM
 
 "$audiolab" cleanup
-original_input=$("$audiolab" default-input)
-original_output=$("$audiolab" default-output)
-"$audiolab" set-output "$speakers" || exit 2
-start_background "$results/system-clicks.log" "$audiolab" play --device "$speakers" --pitch "$pitch_system" --offset "$system_offset_ms"
-start_fake_mic "$mic_a" "$mic_a_loopback" "$pitch_a" || exit 2
-"$audiolab" set-input "$mic_a" || exit 2
+if [ ${#missing_devices[@]} -eq 0 ]; then
+    original_input=$("$audiolab" default-input)
+    original_output=$("$audiolab" default-output)
+    "$audiolab" set-output "$speakers" || exit 2
+    start_background "$results/system-clicks.log" "$audiolab" play --device "$speakers" --pitch "$pitch_system" --offset "$system_offset_ms"
+    start_fake_mic "$mic_a" "$mic_a_loopback" "$pitch_a" || exit 2
+    "$audiolab" set-input "$mic_a" || exit 2
+fi
 
 selected_scenarios=("$@")
 if [ ${#selected_scenarios[@]} -eq 0 ]; then selected_scenarios=("${all_scenarios[@]}"); fi
@@ -417,6 +428,10 @@ for scenario in "${selected_scenarios[@]}"; do
     if ! declare -F "scenario_$scenario" >/dev/null; then
         log "unknown scenario: $scenario (available: ${all_scenarios[*]} long_recording_stays_in_sync)"
         exit 2
+    fi
+    if [ ${#missing_devices[@]} -gt 0 ] && [[ " ${device_free_scenarios[*]} " != *" $scenario "* ]]; then
+        skipped_scenarios+=("$scenario")
+        continue
     fi
     log "▶ $scenario"
     scenario_failed=0
@@ -428,9 +443,13 @@ for scenario in "${selected_scenarios[@]}"; do
 done
 
 log ""
-if [ "$failures" -eq 0 ]; then
-    log "all ${#selected_scenarios[@]} scenarios passed (recordings in $results)"
-else
-    log "$failures of ${#selected_scenarios[@]} scenarios failed: ${failed_scenarios[*]} (recordings and logs in $results)"
+ran=$((${#selected_scenarios[@]} - ${#skipped_scenarios[@]}))
+if [ ${#skipped_scenarios[@]} -gt 0 ]; then
+    log "skipped ${#skipped_scenarios[@]} scenarios that need the test devices: ${skipped_scenarios[*]}"
+fi
+if [ "$failures" -ne 0 ]; then
+    log "$failures of $ran scenarios failed: ${failed_scenarios[*]} (recordings and logs in $results)"
     exit 1
 fi
+log "all $ran scenarios passed (recordings in $results)"
+if [ ${#skipped_scenarios[@]} -gt 0 ]; then exit 3; fi
