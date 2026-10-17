@@ -5,14 +5,14 @@
 Needs macOS 26 or later and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
-make            # builds ./totalrecall and ./transcribe
+make            # builds build/bin/totalrecall and build/bin/transcribe
 make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/dir)
 ```
 
 The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
 [speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs
 nothing installed, and embeds each tool's `Info.plist` with the version from `VERSION`. Make sure `~/.local/bin` is on
-your `PATH`.
+your `PATH`. Everything a build makes goes in `build/`, which `make clean` deletes.
 
 ## How it works
 
@@ -101,10 +101,10 @@ in a recording and report lost audio, silence, which mic was recorded when, and 
 milliseconds. The tests cover recording, switching to a new or slow-starting input, sample-rate changes, a preferred
 `--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills, every output
 format, mixed channels, system audio only, and streaming to stdout. Each test switches the system input and output
-to the test devices and restores them afterwards. Recordings and logs are kept in `.build/test-results`.
+to the test devices and restores them afterwards. Recordings and logs are kept in `build/test-results`.
 
 `make coverage` builds the tools and the tests once with coverage instrumentation, runs the tests with the end-to-end
-ones on those builds, prints line coverage per file, writes an HTML report to `.build/coverage/html`, and fails if
+ones on those builds, prints line coverage per file, writes an HTML report to `build/coverage/html`, and fails if
 coverage drops below `COVERAGE_MIN` percent (75, set in the `Makefile`). Without the test devices the coverage is partial,
 and the minimum is not checked.
 

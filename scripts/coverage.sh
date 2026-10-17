@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs a test command on a build instrumented for coverage (make coverage builds it) and reports the line coverage of
 # Sources: the profiles of the test bundles plus those of the totalrecall and transcribe binaries the end-to-end tests
-# run. Writes the report to .build/coverage/report.txt and .build/coverage/html, and fails below COVERAGE_MIN percent,
+# run. Writes the report to COVERAGE_REPORT (build/coverage): report.txt and html. Fails below COVERAGE_MIN percent,
 # unless the tests that need the BlackHole test devices were skipped, which leaves the coverage partial.
 #
 # Usage: scripts/coverage.sh PRODUCTS-DIRECTORY TEST-COMMAND...
@@ -10,7 +10,7 @@ set -u
 
 products="$1"
 shift
-report=.build/coverage
+report="${COVERAGE_REPORT:-build/coverage}"
 minimum="${COVERAGE_MIN:-0}"
 mkdir -p "$report"
 
@@ -29,7 +29,7 @@ fi
 xcrun llvm-profdata merge -sparse -o "$report/coverage.profdata" "$profiles"/*.profraw || exit 2
 objects=("$products/totalrecall")
 for binary in "$products/transcribe" "$products"/*.xctest/Contents/MacOS/*; do objects+=(-object "$binary"); done
-options=(-instr-profile="$report/coverage.profdata" -ignore-filename-regex='/(Tests|\.build)/' "${objects[@]}")
+options=(-instr-profile="$report/coverage.profdata" -ignore-filename-regex='/(Tests|build|\.build)/' "${objects[@]}")
 
 xcrun llvm-cov report "${options[@]}" | tee "$report/report.txt"
 xcrun llvm-cov show "${options[@]}" -format=html -output-dir="$report/html" -show-line-counts-or-regions \

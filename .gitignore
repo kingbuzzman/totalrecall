@@ -1,6 +1,3 @@
-/totalrecall
-/transcribe
-
 .DS_Store
 *.txt
 *.mp3
@@ -10,6 +7,4 @@
 *.aiff
 *.caf
 *.flac
-/.build/
-/Tests/build/
 /build/

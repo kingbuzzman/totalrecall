@@ -1,7 +1,13 @@
 PREFIX ?= $(HOME)/.local
 VERSION := $(shell cat VERSION)
 ARCH := $(shell uname -m)
+# Everything a build makes goes in BUILD, so make clean deletes just that: the tools (bin), SwiftPM's builds (swiftpm and
+# swiftpm-coverage), speexdsp, the Info.plists, the release tarball, the test results and the coverage report.
 BUILD := build
+BIN := $(BUILD)/bin
+TOOLS := $(BIN)/totalrecall $(BIN)/transcribe
+# Every swift command takes it, so SwiftPM builds in BUILD rather than its default .build.
+SWIFTPM := --scratch-path $(BUILD)/swiftpm
 RELEASE := $(BUILD)/totalrecall-$(VERSION)-macos-$(ARCH).tar.gz
 # Oldest macOS the tools run on, as in Package.swift; older versions refuse to launch them.
 MACOS_MIN := 26.0
@@ -21,22 +27,31 @@ INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker
 # One build of the tools and the tests, instrumented for coverage. The tests need -enable-testing, and the tools must
 # come from the same build for their coverage to add up with the tests'. Both tools get totalrecall's Info.plist, which
 # only matters for their version.
-COVERAGE_FLAGS := -c release --build-path .build/coverage -Xswiftc -enable-testing \
+COVERAGE_FLAGS := -c release --scratch-path $(BUILD)/swiftpm-coverage -Xswiftc -enable-testing \
 	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall)
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75
+COVERAGE_REPORT := $(BUILD)/coverage
 # Every build goes through it: a single warning, from any tool, fails the build.
 STRICT := scripts/no-warnings.sh
 
-all: totalrecall transcribe
+all: $(TOOLS)
 
-totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,TotalRecall)
-	cp "$$(swift build -c release --show-bin-path)/$@" $@
+# make totalrecall or make transcribe builds just that one.
+totalrecall transcribe: %: $(BIN)/%
 
-transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,Transcribe)
-	cp "$$(swift build -c release --show-bin-path)/$@" $@
+# Each tool from the release build, copied into BIN.
+$(BIN)/totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+	$(STRICT) swift build $(SWIFTPM) -c release --product totalrecall $(call INFO_PLIST,TotalRecall)
+	mkdir -p $(BIN)
+	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/totalrecall" $@
+
+# transcribe does not use speexdsp, but SwiftPM looks for its pkg-config file while loading the package, and warns when
+# it is missing; under make -j, that would race speexdsp's build.
+$(BIN)/transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+	$(STRICT) swift build $(SWIFTPM) -c release --product transcribe $(call INFO_PLIST,Transcribe)
+	mkdir -p $(BIN)
+	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/transcribe" $@
 
 # Only the library, its headers and its pkg-config file, with warnings as errors: speexdsp's own test programs have
 # warnings of their own. lt_cv_apple_cc_single_mod=no skips libtool's check of -single_module, which ld warns is obsolete.
@@ -60,19 +75,19 @@ $(BUILD)/%/Info.plist: Sources/%/Info.plist VERSION
 # Both tools and the README, as published by .github/workflows/release.yml.
 release: $(RELEASE)
 
-$(RELEASE): totalrecall transcribe README.md
-	tar -czf $@ totalrecall transcribe README.md
+$(RELEASE): $(TOOLS) README.md
+	tar -czf $@ -C $(BIN) totalrecall transcribe -C $(CURDIR) README.md
 	cd $(dir $@) && shasum -a 256 $(notdir $@) > $(notdir $@).sha256
 
 # Unit and end-to-end tests, the latter against the release builds; run a subset with: make test TESTS=RecorderTests
 # Tests that need the BlackHole test devices are skipped without them, except on CI.
-test: totalrecall transcribe $(SPEEXDSP)/lib/libspeexdsp.a
-	$(STRICT) swift build --build-tests
-	swift test --skip-build $(if $(TESTS),--filter '$(TESTS)')
+test: $(TOOLS) $(SPEEXDSP)/lib/libspeexdsp.a
+	$(STRICT) swift build $(SWIFTPM) --build-tests
+	swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)')
 
 # The tests again, on the build instrumented for coverage; fails below COVERAGE_MIN. Takes TESTS like make test.
 coverage: coverage-build
-	COVERAGE_MIN=$(COVERAGE_MIN) scripts/coverage.sh "$$($(MAKE) -s coverage-bin)" \
+	COVERAGE_MIN=$(COVERAGE_MIN) COVERAGE_REPORT=$(COVERAGE_REPORT) scripts/coverage.sh "$$($(MAKE) -s coverage-bin)" \
 		swift test --skip-build $(COVERAGE_FLAGS) $(if $(TESTS),--filter '$(TESTS)')
 
 coverage-build: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
@@ -88,13 +103,12 @@ format:
 lint:
 	swift format lint --recursive --strict Package.swift Sources Tests
 
-install: totalrecall transcribe
+install: $(TOOLS)
 	mkdir -p $(PREFIX)/bin
-	ln -sf $(CURDIR)/totalrecall $(PREFIX)/bin/totalrecall
-	ln -sf $(CURDIR)/transcribe $(PREFIX)/bin/transcribe
+	ln -sf $(CURDIR)/$(BIN)/totalrecall $(PREFIX)/bin/totalrecall
+	ln -sf $(CURDIR)/$(BIN)/transcribe $(PREFIX)/bin/transcribe
 
 clean:
-	rm -f totalrecall transcribe
-	rm -rf $(BUILD) .build
+	rm -rf $(BUILD)
 
-.PHONY: all release test coverage coverage-build coverage-bin format lint install clean
+.PHONY: all totalrecall transcribe release test coverage coverage-build coverage-bin format lint install clean
