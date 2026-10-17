@@ -5,10 +5,15 @@ import Foundation
 struct OutputFile {
     let url: URL
     let partialURL: URL
+    /// With `TOTALRECALL_RAW=1` in the environment, where the unprocessed audio is saved as well (`<output>.raw.caf`), a
+    /// debugging aid for tuning the processing against real recordings.
+    let rawURL: URL?
 
     init(path: String) {
         url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         partialURL = url.appendingPathExtension("partial.caf")
+        let savesRaw = ProcessInfo.processInfo.environment["TOTALRECALL_RAW"] == "1"
+        rawURL = savesRaw ? url.appendingPathExtension("raw.caf") : nil
     }
 
     /// Throws unless the directory exists and, without `overwrite`, neither file exists yet.

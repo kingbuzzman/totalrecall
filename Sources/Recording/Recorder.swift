@@ -14,6 +14,9 @@ struct LevelSnapshot {
 /// recording started and asks it to stop. The captures start earlier: the ambient sound they deliver before the
 /// recording starts is the echo canceller's baseline, and is not written.
 ///
+/// With a `rawURL`, the unprocessed microphone (left) and system audio (right), pre-roll included, are also written
+/// there, for tuning the processing against real recordings.
+///
 /// The append methods are called from audio callbacks; everything else runs on the writer queue.
 final class Recorder {
     enum Input {
@@ -44,12 +47,26 @@ final class Recorder {
     private var framesTaken = 0
     private var isAligned = false
     private var file: AVAudioFile?
+    private var rawFile: AVAudioFile?
+    /// Raw audio taken off the tracks under the lock, written by `writeAvailable()` outside it.
+    private var pendingRaw: [(microphone: [Float], system: [Float])] = []
 
-    init(writingTo url: URL, includesMicrophone: Bool, isolatesSpeakers: Bool, cancelsEcho: Bool) throws {
+    init(
+        writingTo url: URL,
+        rawURL: URL? = nil,
+        includesMicrophone: Bool,
+        isolatesSpeakers: Bool,
+        cancelsEcho: Bool
+    ) throws {
         self.includesMicrophone = includesMicrophone
         self.isolatesSpeakers = isolatesSpeakers
         echoCanceller = includesMicrophone && cancelsEcho ? EchoCanceller() : nil
-        file = try AVAudioFile(
+        file = try Self.makeFile(url)
+        rawFile = try rawURL.map(Self.makeFile)
+    }
+
+    private static func makeFile(_ url: URL) throws -> AVAudioFile {
+        try AVAudioFile(
             forWriting: url,
             settings: pcmSettings(bigEndian: false),
             commonFormat: .pcmFormatFloat32,
@@ -135,23 +152,47 @@ final class Recorder {
 
     /// Writes the audio that both tracks have; with `final`, writes everything up to the end of the recording.
     func writeAvailable(final: Bool = false) throws {
-        let (microphoneSamples, systemSamples, frameCount) = lock.withLock { takeTracks(final: final) }
+        let (microphoneSamples, systemSamples, frameCount, raw) = lock.withLock {
+            let taken = takeTracks(final: final)
+            if rawFile != nil, taken.frameCount > 0 {
+                pendingRaw.append(
+                    (Array(taken.microphone.prefix(taken.frameCount)), Array(taken.system.prefix(taken.frameCount)))
+                )
+            }
+            defer { pendingRaw.removeAll() }
+            return (taken.microphone, taken.system, taken.frameCount, pendingRaw)
+        }
+        if let rawFile {
+            for (microphone, system) in raw {
+                try Self.write(left: microphone, right: system, count: system.count, to: rawFile)
+            }
+        }
         guard frameCount > 0, let file else { return }
         let (left, right) = channels(microphone: microphoneSamples, system: systemSamples)
-        let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(frameCount))!
-        buffer.frameLength = AVAudioFrameCount(frameCount)
-        buffer.floatChannelData![0].update(from: left, count: frameCount)
-        buffer.floatChannelData![1].update(from: right, count: frameCount)
-        try file.write(from: buffer)
+        try Self.write(left: left, right: right, count: frameCount, to: file)
     }
 
-    /// Writes the remaining audio up to `stopRecording()` and closes the file, even when that last write fails.
+    /// Writes the remaining audio up to `stopRecording()` and closes the files, even when that last write fails.
     func close() throws {
         defer {
             file?.close()
             file = nil
+            rawFile?.close()
+            rawFile = nil
         }
         try writeAvailable(final: true)
+    }
+
+    /// Writes `count` frames; a missing or short channel (no microphone) is written as silence.
+    private static func write(left: [Float], right: [Float], count: Int, to file: AVAudioFile) throws {
+        let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(count))!
+        buffer.frameLength = AVAudioFrameCount(count)
+        for (channel, samples) in [left, right].enumerated() {
+            let destination = buffer.floatChannelData![channel]
+            destination.update(repeating: 0, count: count)
+            destination.update(from: samples, count: min(samples.count, count))
+        }
+        try file.write(from: buffer)
     }
 
     /// The part of a buffer before `stopRecording()`, or nil when none of it is.
@@ -253,7 +294,10 @@ final class Recorder {
             track.padWithSilence(toCount: preRollFrames)
             return track.take(preRollFrames)
         }
-        echoCanceller?.warmUp(microphone: preRoll[0], speaker: preRoll[1])
+        if rawFile != nil {
+            pendingRaw.append(includesMicrophone ? (preRoll[0], preRoll[1]) : ([], preRoll[0]))
+        }
+        if includesMicrophone { echoCanceller?.warmUp(microphone: preRoll[0], speaker: preRoll[1]) }
     }
 
     /// Pads or cuts the tracks so the file ends exactly at `stopRecording()`.

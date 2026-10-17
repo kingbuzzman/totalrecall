@@ -36,6 +36,7 @@ final class RecordingSession {
     init(options: Options, output: OutputFile) throws {
         let recorder = try Recorder(
             writingTo: output.partialURL,
+            rawURL: output.rawURL,
             includesMicrophone: options.includesMicrophone,
             isolatesSpeakers: options.isolatesSpeakers,
             cancelsEcho: options.cancelsEcho
