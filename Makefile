@@ -34,7 +34,7 @@ totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeex
 	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,TotalRecall)
 	cp "$$(swift build -c release --show-bin-path)/$@" $@
 
-transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist
+transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build -c release --product $@ $(call INFO_PLIST,Transcribe)
 	cp "$$(swift build -c release --show-bin-path)/$@" $@
 
