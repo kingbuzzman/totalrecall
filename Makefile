@@ -16,6 +16,12 @@ $(AUDIOLAB): tests/audiolab/main.swift
 test: totalrecall $(AUDIOLAB)
 	tests/run.sh $(TESTS)
 
+format:
+	swift format --recursive --in-place Sources
+
+lint:
+	swift format lint --recursive --strict Sources
+
 install: totalrecall
 	mkdir -p $(PREFIX)/bin
 	ln -sf $(CURDIR)/totalrecall $(PREFIX)/bin/totalrecall
@@ -23,4 +29,4 @@ install: totalrecall
 clean:
 	rm -f totalrecall $(AUDIOLAB)
 
-.PHONY: test install clean
+.PHONY: test format lint install clean
