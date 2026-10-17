@@ -1,6 +1,5 @@
 import AVFoundation
 import CoreAudio
-import Synchronization
 
 /// Receives each captured buffer, resampled to mono, with the host time of its first frame and the ID of the
 /// `MicrophoneSession` that captured it.
@@ -18,11 +17,6 @@ final class MicrophoneSession {
     let device: InputDevice
     let id: Int
     let startedAt = uptimeSeconds()
-    /// Set once the device no longer runs at the sample rate this session converts from, or has gone away. From then
-    /// on its audio is dropped: converted as if it were still at the old rate, it would come out stretched or squeezed
-    /// in time and shift everything after it. `MicrophoneCapture` replaces the session, and the timeline fills the
-    /// short gap with silence.
-    private let isStale = StaleFlag()
     private var ioProcID: AudioDeviceIOProcID?
     private var deviceListener: AudioObjectPropertyListenerBlock?
 
@@ -48,10 +42,10 @@ final class MicrophoneSession {
             throw RecordingError("unsupported \(device.name) format")
         }
         let resampler = try Resampler(from: firstChannelFormat)
-        let isStale = isStale
+        let rateWatch = RateWatch(expectedRate: streamFormat.mSampleRate)
         let ioBlock: AudioDeviceIOBlock = { _, inputData, inputTime, _, _ in
             guard
-                !isStale.isSet,
+                rateWatch.isOnRate(at: inputTime.pointee),
                 let firstChannel = Self.firstChannel(of: inputData, format: firstChannelFormat)
             else { return }
             onSamples(resampler.monoSamples(from: firstChannel), inputTime.pointee.mHostTime, id)
@@ -66,11 +60,7 @@ final class MicrophoneSession {
             throw error
         }
         ioProcID = procID
-        let sampleRate = streamFormat.mSampleRate
-        let deviceListener: AudioObjectPropertyListenerBlock = { _, _ in
-            if !Self.isRunning(device.id, at: sampleRate) { isStale.set() }
-            onDeviceChange()
-        }
+        let deviceListener: AudioObjectPropertyListenerBlock = { _, _ in onDeviceChange() }
         for var address in Self.deviceChangeAddresses {
             AudioObjectAddPropertyListenerBlock(device.id, &address, nil, deviceListener)
         }
@@ -89,21 +79,6 @@ final class MicrophoneSession {
             AudioDeviceDestroyIOProcID(device.id, ioProcID)
         }
         ioProcID = nil
-    }
-
-    /// Whether the device is still there and running at `sampleRate`.
-    private static func isRunning(_ deviceID: AudioDeviceID, at sampleRate: Double) -> Bool {
-        let rate = try? readProperty(
-            deviceID,
-            propertyAddress(kAudioDevicePropertyNominalSampleRate),
-            initialValue: 0.0
-        )
-        let isAlive = try? readProperty(
-            deviceID,
-            propertyAddress(kAudioDevicePropertyDeviceIsAlive),
-            initialValue: 0 as UInt32
-        )
-        return rate == sampleRate && isAlive == 1
     }
 
     /// Copies channel 0 out of the device's interleaved buffer. Built-in mic arrays deliver several interleaved
@@ -132,13 +107,37 @@ final class MicrophoneSession {
     }
 }
 
-/// A flag set from a Core Audio notification thread and read on the audio thread, without locking.
-private final class StaleFlag: Sendable {
-    private let value = Atomic<Bool>(false)
+/// Measures the rate a device actually delivers at, from its buffers' timestamps, and reports when it no longer matches
+/// the rate the session converts from. A device can switch rates under a running session (AirPods do when their mic
+/// turns on, so does any device whose rate is changed); that session's audio, converted as if it were still at the old
+/// rate, would come out stretched or squeezed in time and shift everything after it. Its audio is dropped instead;
+/// `MicrophoneCapture` replaces the session, and the timeline fills the short gap with silence.
+///
+/// Used only on the session's audio thread.
+private final class RateWatch {
+    /// Timestamps jitter by far less than this; a real switch, such as 44.1 to 48 kHz, is 9%.
+    private static let tolerance = 0.03
+    /// Off-rate buffers in a row before the session is given up on. One odd timestamp throws off two measurements, the
+    /// one into it and the one out of it; after a real switch, every measurement is off.
+    private static let mismatchesToGiveUp = 3
 
-    var isSet: Bool { value.load(ordering: .relaxed) }
+    private let expectedRate: Double
+    private var previous: (sampleTime: Double, nanos: UInt64)?
+    private var mismatches = 0
 
-    func set() {
-        value.store(true, ordering: .relaxed)
+    init(expectedRate: Double) {
+        self.expectedRate = expectedRate
+    }
+
+    /// Whether the device still delivers at the expected rate; once it has not, false for good.
+    func isOnRate(at time: AudioTimeStamp) -> Bool {
+        guard mismatches < Self.mismatchesToGiveUp else { return false }
+        guard time.mFlags.contains([.sampleTimeValid, .hostTimeValid]) else { return true }
+        let nanos = AudioConvertHostTimeToNanos(time.mHostTime)
+        defer { previous = (time.mSampleTime, nanos) }
+        guard let previous, nanos > previous.nanos, time.mSampleTime > previous.sampleTime else { return true }
+        let rate = (time.mSampleTime - previous.sampleTime) / (Double(nanos - previous.nanos) / 1e9)
+        mismatches = abs(rate / expectedRate - 1) > Self.tolerance ? mismatches + 1 : 0
+        return mismatches < Self.mismatchesToGiveUp
     }
 }
