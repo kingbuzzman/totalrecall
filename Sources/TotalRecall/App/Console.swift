@@ -6,7 +6,14 @@ struct StatusLine {
     private static let meterFloorDecibels: Float = -60
 
     let recorder: Recorder
-    private let showsMeter = isatty(STDERR_FILENO) != 0
+    private let showsMeter: Bool
+
+    /// The meter is only shown on a terminal, and not when `allowsMeter` is false: when the recording streams to
+    /// another program that writes to the same terminal, a line redrawn in place would garble its output.
+    init(recorder: Recorder, allowsMeter: Bool) {
+        self.recorder = recorder
+        showsMeter = allowsMeter && isatty(STDERR_FILENO) != 0
+    }
 
     /// Length of the recording so far, as HH:MM:SS.
     var elapsed: String {

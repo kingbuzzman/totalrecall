@@ -1,13 +1,22 @@
 PREFIX ?= $(HOME)/.local
 SPEEXDSP := $(shell brew --prefix speexdsp)
 AUDIOLAB := tests/build/audiolab
-SOURCES := $(shell find Sources -name '*.swift')
+SHARED_SOURCES := $(shell find Sources/Shared -name '*.swift')
+TOTALRECALL_SOURCES := $(shell find Sources/TotalRecall -name '*.swift') $(SHARED_SOURCES)
+TRANSCRIBE_SOURCES := $(shell find Sources/Transcribe -name '*.swift') $(SHARED_SOURCES)
 
-totalrecall: $(SOURCES) Sources/bridging.h Info.plist
-	swiftc -O -wmo -o $@ $(SOURCES) \
-		-import-objc-header Sources/bridging.h \
+all: totalrecall transcribe
+
+totalrecall: $(TOTALRECALL_SOURCES) Sources/TotalRecall/bridging.h Sources/TotalRecall/Info.plist
+	swiftc -O -wmo -o $@ $(TOTALRECALL_SOURCES) \
+		-import-objc-header Sources/TotalRecall/bridging.h \
 		-Xcc -I$(SPEEXDSP)/include -L$(SPEEXDSP)/lib -lspeexdsp \
-		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist
+		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Sources/TotalRecall/Info.plist
+
+# Needs macOS 26 or later (on-device SpeechAnalyzer).
+transcribe: $(TRANSCRIBE_SOURCES) Sources/Transcribe/Info.plist
+	swiftc -O -wmo -o $@ $(TRANSCRIBE_SOURCES) \
+		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Sources/Transcribe/Info.plist
 
 $(AUDIOLAB): tests/audiolab/main.swift
 	mkdir -p $(dir $@)
@@ -23,11 +32,12 @@ format:
 lint:
 	swift format lint --recursive --strict Sources
 
-install: totalrecall
+install: totalrecall transcribe
 	mkdir -p $(PREFIX)/bin
 	ln -sf $(CURDIR)/totalrecall $(PREFIX)/bin/totalrecall
+	ln -sf $(CURDIR)/transcribe $(PREFIX)/bin/transcribe
 
 clean:
-	rm -f totalrecall $(AUDIOLAB)
+	rm -f totalrecall transcribe $(AUDIOLAB)
 
-.PHONY: test format lint install clean
+.PHONY: all test format lint install clean

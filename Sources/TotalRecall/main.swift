@@ -39,11 +39,18 @@ if let microphoneQuery = options.microphoneQuery, InputDevice.matching(microphon
     fail("no microphone matches \"\(microphoneQuery)\"; available:\n\(available)")
 }
 
-let output = OutputFile(path: outputPath)
-do {
-    try output.checkCanCreate(overwrite: options.overwrite)
-} catch {
-    fail(error.localizedDescription)
+let destination = Destination(path: outputPath)
+switch destination {
+case .file(let output):
+    do {
+        try output.checkCanCreate(overwrite: options.overwrite)
+    } catch {
+        fail(error.localizedDescription)
+    }
+case .standardOutput:
+    if isatty(STDOUT_FILENO) != 0 {
+        fail("refusing to write audio to the terminal; pipe it into another program, e.g. totalrecall - | transcribe -")
+    }
 }
 if options.includesMicrophone && !requestMicrophoneAccess() {
     fail(
@@ -54,22 +61,21 @@ if options.includesMicrophone && !requestMicrophoneAccess() {
 
 let session: RecordingSession
 do {
-    session = try RecordingSession(options: options, output: output)
+    session = try RecordingSession(options: options, destination: destination)
 } catch {
-    fail("cannot create \(output.partialURL.path): \(error.localizedDescription)")
-}
-do {
-    try session.start()
-} catch {
-    fail(error.localizedDescription)
+    switch destination {
+    case .file(let output): fail("cannot create \(output.partialURL.path): \(error.localizedDescription)")
+    case .standardOutput: fail("cannot write to stdout: \(error.localizedDescription)")
+    }
 }
 
-let stopSignals = handleStopSignals {
+func stopAndExit() -> Never {
     do {
         try session.stopAndSave()
     } catch let error as StoppedBeforeRecording {
         fail(error.localizedDescription)
     } catch {
+        guard case .file(let output) = destination else { fail(error.localizedDescription) }
         fail(
             "could not save \(output.url.path): \(error.localizedDescription); "
                 + "the raw recording is kept at \(output.partialURL.path)"
@@ -77,4 +83,12 @@ let stopSignals = handleStopSignals {
     }
     exit(0)
 }
+
+session.onOutputClosed = { DispatchQueue.main.async { stopAndExit() } }
+do {
+    try session.start()
+} catch {
+    fail(error.localizedDescription)
+}
+let stopSignals = handleStopSignals { stopAndExit() }
 dispatchMain()

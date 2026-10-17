@@ -1,6 +1,23 @@
 import AVFoundation
 import Foundation
 
+/// Where the recording goes: a file, or a live WAV stream on stdout (`-`) for another program such as `transcribe -`.
+enum Destination {
+    case file(OutputFile)
+    case standardOutput
+
+    init(path: String) {
+        self = path == "-" ? .standardOutput : .file(OutputFile(path: path))
+    }
+
+    var description: String {
+        switch self {
+        case .file(let output): output.url.path
+        case .standardOutput: "stdout"
+        }
+    }
+}
+
 /// The file the user asked for, plus the crash-safe `.partial.caf` next to it that is recorded into until saving.
 struct OutputFile {
     let url: URL

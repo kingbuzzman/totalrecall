@@ -1,8 +1,5 @@
 import Foundation
 
-/// CFBundleShortVersionString from Info.plist, which the Makefile embeds in the binary.
-let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-
 let usage = """
     usage: totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file>
            totalrecall --list-mics
@@ -12,6 +9,7 @@ let usage = """
     By default your microphone goes to the left channel and everyone else (system audio) to the right.
     The microphone follows the system input, so plugging in or removing AirPods switches it mid-recording.
     Format follows the extension: .m4a .wav .aiff .caf natively, anything else (.mp3, .flac, ...) via ffmpeg.
+    Use - as <output-file> to stream WAV to stdout instead, e.g. totalrecall - | transcribe -
 
       --mic NAME                prefer this microphone whenever it is available (case-insensitive substring of a
                                 --list-mics name); falls back to the system input when it is not
@@ -68,7 +66,7 @@ enum Command {
             case "--version":
                 return .version
             default:
-                guard !argument.hasPrefix("-"), outputPath == nil else {
+                guard argument == "-" || !argument.hasPrefix("-"), outputPath == nil else {
                     throw UsageError(problem: "unexpected argument \(argument)")
                 }
                 outputPath = argument

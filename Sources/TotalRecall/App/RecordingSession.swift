@@ -7,7 +7,7 @@ struct StoppedBeforeRecording: LocalizedError {
 }
 
 /// One recording from start to save: starts the captures, starts the recording once they deliver audio and the echo
-/// canceller has a baseline of ambient sound, writes the partial file on a timer while the supervisor keeps the
+/// canceller has a baseline of ambient sound, writes to the destination on a timer while the supervisor keeps the
 /// captures alive, shows levels, and saves the output file when stopped.
 final class RecordingSession {
     private static let tickSeconds = 0.25
@@ -18,7 +18,9 @@ final class RecordingSession {
     /// Longest to wait for the recording to be able to start, such as with a muted microphone, before starting anyway.
     private static let maxStartupWaitSeconds = 6.0
 
-    private let output: OutputFile
+    /// Called on the writer queue when streaming to stdout and the program reading it has gone away.
+    var onOutputClosed: (() -> Void)?
+    private let destination: Destination
     private let recorder: Recorder
     private let systemCapture: SystemAudioCapture
     private let microphoneCapture: MicrophoneCapture?
@@ -29,14 +31,24 @@ final class RecordingSession {
     private let writerTimer: DispatchSourceTimer
     /// Whether the recording started; used only on the writer queue.
     private var hasStarted = false
+    private var isOutputClosed = false
     private var ticks = 0
     private var hasWarnedAboutSilence = false
 
-    /// Creates the partial recording; throws if it cannot be created.
-    init(options: Options, output: OutputFile) throws {
-        let recorder = try Recorder(
-            writingTo: output.partialURL,
-            rawURL: output.rawURL,
+    /// Creates the partial recording or starts the stream; throws if that fails.
+    init(options: Options, destination: Destination) throws {
+        let sink: AudioSink
+        var rawSink: AudioSink?
+        switch destination {
+        case .file(let output):
+            sink = try AudioFileSink(url: output.partialURL)
+            rawSink = try output.rawURL.map(AudioFileSink.init)
+        case .standardOutput:
+            sink = try WAVStreamSink(handle: .standardOutput)
+        }
+        let recorder = Recorder(
+            writingTo: sink,
+            rawSink: rawSink,
             includesMicrophone: options.includesMicrophone,
             isolatesSpeakers: options.isolatesSpeakers,
             cancelsEcho: options.cancelsEcho
@@ -46,9 +58,10 @@ final class RecordingSession {
             options.includesMicrophone
             ? MicrophoneCapture(preferredName: options.microphoneQuery, onSamples: recorder.appendMicrophone)
             : nil
-        let status = StatusLine(recorder: recorder)
+        let isFile = if case .file = destination { true } else { false }
+        let status = StatusLine(recorder: recorder, allowsMeter: isFile)
         let writerQueue = DispatchQueue(label: "totalrecall.writer")
-        self.output = output
+        self.destination = destination
         self.recorder = recorder
         self.systemCapture = systemCapture
         self.microphoneCapture = microphoneCapture
@@ -71,7 +84,7 @@ final class RecordingSession {
             try systemCapture.start()
             try microphoneCapture?.start()
         } catch {
-            try? FileManager.default.removeItem(at: output.partialURL)
+            removePartialRecording()
             throw error
         }
         onSystemDeviceChange(queue: writerQueue) { [supervisor] in supervisor.systemDevicesChanged() }
@@ -86,9 +99,9 @@ final class RecordingSession {
         startupTimer.resume()
     }
 
-    /// Ends the recording now, stops the captures, finishes the partial recording and converts it to the output file.
-    /// If saving fails, the partial recording is kept. Throws `StoppedBeforeRecording` if the recording had not
-    /// started yet.
+    /// Ends the recording now, stops the captures, finishes the recording and, for a file, converts the partial
+    /// recording to the output file; if that fails, the partial recording is kept. Throws `StoppedBeforeRecording` if
+    /// the recording had not started yet.
     func stopAndSave() throws {
         let stopTime = AudioGetCurrentHostTime()
         let hadStarted = writerQueue.sync {
@@ -102,17 +115,28 @@ final class RecordingSession {
             do {
                 try recorder.close()
             } catch {
-                status.reportWriteFailure(error)
+                // A stream's reader usually exits at the same time: Ctrl-C stops every program in the pipeline.
+                if case .file = destination { status.reportWriteFailure(error) }
             }
             return hasStarted
         }
         guard hadStarted else {
-            try? FileManager.default.removeItem(at: output.partialURL)
+            removePartialRecording()
             throw StoppedBeforeRecording()
         }
-        fputs("\nSaving \(status.elapsed) of audio...\n", stderr)
-        try output.save()
-        fputs("Saved \(output.url.path)\n", stderr)
+        switch destination {
+        case .file(let output):
+            fputs("\nSaving \(status.elapsed) of audio...\n", stderr)
+            try output.save()
+            fputs("Saved \(output.url.path)\n", stderr)
+        case .standardOutput:
+            let reason = isOutputClosed ? " (the program reading it exited)" : ""
+            fputs("\nStreamed \(status.elapsed) of audio\(reason).\n", stderr)
+        }
+    }
+
+    private func removePartialRecording() {
+        if case .file(let output) = destination { try? FileManager.default.removeItem(at: output.partialURL) }
     }
 
     /// Starts the recording at the moment it tells the user so. Runs on the writer queue.
@@ -124,7 +148,7 @@ final class RecordingSession {
         let source =
             microphoneCapture?.device.map { "system audio + mic \"\($0.name)\"\(channelLayout)" }
             ?? "system audio"
-        fputs("Recording \(source) -> \(output.url.path)\nPress Ctrl-C to stop and save.\n", stderr)
+        fputs("Recording \(source) -> \(destination.description)\nPress Ctrl-C to stop and save.\n", stderr)
         if !isReady {
             status.announce("no sound from the mic or system audio yet; recording anyway")
         }
@@ -141,13 +165,25 @@ final class RecordingSession {
         do {
             try recorder.writeAvailable()
         } catch {
-            status.reportWriteFailure(error)
+            handleWriteFailure(error)
         }
+        guard !isOutputClosed else { return }
         ticks += 1
         guard ticks % Self.ticksPerLevelUpdate == 0 else { return }
         let levels = recorder.levels()
         warnIfSystemAudioIsSilent(levels)
         status.showLevels(levels)
+    }
+
+    /// A failed write to stdout means the program reading the stream has exited, which ends the recording.
+    private func handleWriteFailure(_ error: Error) {
+        guard case .standardOutput = destination else {
+            status.reportWriteFailure(error)
+            return
+        }
+        guard !isOutputClosed else { return }
+        isOutputClosed = true
+        onOutputClosed?()
     }
 
     /// Usually means the terminal lacks the system audio recording permission, which fails silently.

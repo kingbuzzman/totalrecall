@@ -7,14 +7,14 @@ struct LevelSnapshot {
     let systemHasHeardSound: Bool
 }
 
-/// Writes the microphone (left) and system audio (right), or their mix on both channels, to a 16-bit PCM CAF,
-/// which stays readable if the process dies.
+/// Writes the microphone (left) and system audio (right), or their mix on both channels, to its sink: a crash-safe
+/// file or a live stream.
 ///
-/// The file covers exactly the span from `startRecording()` to `stopRecording()`, the moments the user is told the
-/// recording started and asks it to stop. The captures start earlier: the ambient sound they deliver before the
-/// recording starts is the echo canceller's baseline, and is not written.
+/// The recording covers exactly the span from `startRecording()` to `stopRecording()`, the moments the user is told
+/// it started and asks it to stop. The captures start earlier: the ambient sound they deliver before the recording
+/// starts is the echo canceller's baseline, and is not written.
 ///
-/// With a `rawURL`, the unprocessed microphone (left) and system audio (right), pre-roll included, are also written
+/// With a `rawSink`, the unprocessed microphone (left) and system audio (right), pre-roll included, are also written
 /// there, for tuning the processing against real recordings.
 ///
 /// The append methods are called from audio callbacks; everything else runs on the writer queue.
@@ -46,32 +46,24 @@ final class Recorder {
     /// Frames taken from the tracks for the file so far, which is the file's timeline position.
     private var framesTaken = 0
     private var isAligned = false
-    private var file: AVAudioFile?
-    private var rawFile: AVAudioFile?
+    private let sink: AudioSink
+    private let rawSink: AudioSink?
+    private var isClosed = false
     /// Raw audio taken off the tracks under the lock, written by `writeAvailable()` outside it.
     private var pendingRaw: [(microphone: [Float], system: [Float])] = []
 
     init(
-        writingTo url: URL,
-        rawURL: URL? = nil,
+        writingTo sink: AudioSink,
+        rawSink: AudioSink? = nil,
         includesMicrophone: Bool,
         isolatesSpeakers: Bool,
         cancelsEcho: Bool
-    ) throws {
+    ) {
+        self.sink = sink
+        self.rawSink = rawSink
         self.includesMicrophone = includesMicrophone
         self.isolatesSpeakers = isolatesSpeakers
         echoCanceller = includesMicrophone && cancelsEcho ? EchoCanceller() : nil
-        file = try Self.makeFile(url)
-        rawFile = try rawURL.map(Self.makeFile)
-    }
-
-    private static func makeFile(_ url: URL) throws -> AVAudioFile {
-        try AVAudioFile(
-            forWriting: url,
-            settings: pcmSettings(bigEndian: false),
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
     }
 
     /// Whether the recording can start: the captures deliver audio (the microphone actual sound, which it may not for
@@ -152,9 +144,10 @@ final class Recorder {
 
     /// Writes the audio that both tracks have; with `final`, writes everything up to the end of the recording.
     func writeAvailable(final: Bool = false) throws {
+        guard !isClosed else { return }
         let (microphoneSamples, systemSamples, frameCount, raw) = lock.withLock {
             let taken = takeTracks(final: final)
-            if rawFile != nil, taken.frameCount > 0 {
+            if rawSink != nil, taken.frameCount > 0 {
                 pendingRaw.append(
                     (Array(taken.microphone.prefix(taken.frameCount)), Array(taken.system.prefix(taken.frameCount)))
                 )
@@ -162,37 +155,24 @@ final class Recorder {
             defer { pendingRaw.removeAll() }
             return (taken.microphone, taken.system, taken.frameCount, pendingRaw)
         }
-        if let rawFile {
+        if let rawSink {
             for (microphone, system) in raw {
-                try Self.write(left: microphone, right: system, count: system.count, to: rawFile)
+                try rawSink.write(left: microphone, right: system, count: system.count)
             }
         }
-        guard frameCount > 0, let file else { return }
+        guard frameCount > 0 else { return }
         let (left, right) = channels(microphone: microphoneSamples, system: systemSamples)
-        try Self.write(left: left, right: right, count: frameCount, to: file)
+        try sink.write(left: left, right: right, count: frameCount)
     }
 
-    /// Writes the remaining audio up to `stopRecording()` and closes the files, even when that last write fails.
+    /// Writes the remaining audio up to `stopRecording()` and closes the sinks, even when that last write fails.
     func close() throws {
         defer {
-            file?.close()
-            file = nil
-            rawFile?.close()
-            rawFile = nil
+            isClosed = true
+            sink.close()
+            rawSink?.close()
         }
         try writeAvailable(final: true)
-    }
-
-    /// Writes `count` frames; a missing or short channel (no microphone) is written as silence.
-    private static func write(left: [Float], right: [Float], count: Int, to file: AVAudioFile) throws {
-        let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(count))!
-        buffer.frameLength = AVAudioFrameCount(count)
-        for (channel, samples) in [left, right].enumerated() {
-            let destination = buffer.floatChannelData![channel]
-            destination.update(repeating: 0, count: count)
-            destination.update(from: samples, count: min(samples.count, count))
-        }
-        try file.write(from: buffer)
     }
 
     /// The part of a buffer before `stopRecording()`, or nil when none of it is.
@@ -294,7 +274,7 @@ final class Recorder {
             track.padWithSilence(toCount: preRollFrames)
             return track.take(preRollFrames)
         }
-        if rawFile != nil {
+        if rawSink != nil {
             pendingRaw.append(includesMicrophone ? (preRoll[0], preRoll[1]) : ([], preRoll[0]))
         }
         if includesMicrophone { echoCanceller?.warmUp(microphone: preRoll[0], speaker: preRoll[1]) }
