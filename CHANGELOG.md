@@ -2,15 +2,6 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
-## Unreleased
-
-### transcribe
-
-- `--language LANG` transcribes other languages than English, such as `--language es` or `--language es-MX`;
-  `--list-languages` lists the ones Apple's recognizer supports. The default stays US English.
-- Fixed: transcribing with a speech model that was not downloaded yet failed with "the speech recognizer cannot take
-  ... Hz audio" instead of downloading it.
-
 ## 0.2.1
 
 ### totalrecall
@@ -20,6 +11,13 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - All messages, such as mic switches, read `totalrecall: mic -> ...` on stderr, never with a timestamp, which looked
   like a line of the transcript. Errors that end the program also start on a clean line.
 - No more `mic -> <same mic>` announcements when the microphone capture restarts without changing device.
+
+### transcribe
+
+- `--language LANG` transcribes other languages than English, such as `--language es` or `--language es-MX`;
+  `--list-languages` lists the ones Apple's recognizer supports. The default stays US English.
+- Fixed: transcribing with a speech model that was not downloaded yet failed with "the speech recognizer cannot take
+  ... Hz audio" instead of downloading it.
 
 ## 0.2.0
 
