@@ -1,8 +1,12 @@
 import Foundation
 
+/// CFBundleShortVersionString from Info.plist, which the Makefile embeds in the binary.
+let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+
 let usage = """
     usage: totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file>
            totalrecall --list-mics
+           totalrecall --version
 
     Records all system audio plus a microphone until Ctrl-C, then saves <output-file>.
     By default your microphone goes to the left channel and everyone else (system audio) to the right.
@@ -36,8 +40,10 @@ enum Command {
     case record(outputPath: String, options: Options)
     case listMicrophones
     case help
+    case version
 
-    /// Parses the arguments after the program name. `--list-mics` and `--help` win over anything after them.
+    /// Parses the arguments after the program name. `--list-mics`, `--help` and `--version` win over anything
+    /// after them.
     static func parse(_ arguments: ArraySlice<String>) throws -> Command {
         var arguments = arguments
         var options = Options()
@@ -59,6 +65,8 @@ enum Command {
                 options.overwrite = true
             case "-h", "--help":
                 return .help
+            case "--version":
+                return .version
             default:
                 guard !argument.hasPrefix("-"), outputPath == nil else {
                     throw UsageError(problem: "unexpected argument \(argument)")

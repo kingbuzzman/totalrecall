@@ -24,7 +24,10 @@ case .listMicrophones:
     }
     exit(0)
 case .help:
-    print(usage)
+    print("totalrecall \(version)\n\n\(usage)")
+    exit(0)
+case .version:
+    print("totalrecall \(version)")
     exit(0)
 case .record(let path, let parsedOptions):
     outputPath = path

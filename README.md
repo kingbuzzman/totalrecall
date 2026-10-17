@@ -58,6 +58,7 @@ Make sure `~/.local/bin` is on your `PATH`.
 ```sh
 totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force] <output-file>
 totalrecall --list-mics
+totalrecall --version
 ```
 
 | Option | Effect |
@@ -68,6 +69,7 @@ totalrecall --list-mics
 | `--no-echo-cancellation` | Keep the raw mic signal |
 | `--force` | Overwrite an existing output file |
 | `--list-mics` | List microphones; `*` marks the current system input |
+| `--version` | Print the version (also shown at the top of `--help`) |
 
 The output format follows the extension: `.m4a` (AAC), `.wav`, `.aiff` and `.caf` are written natively; anything
 else is converted with ffmpeg.
