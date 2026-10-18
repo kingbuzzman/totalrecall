@@ -29,5 +29,22 @@ do {
 }
 print("playing")
 fflush(stdout)
+// EXPERIMENT (speaker-dropouts.yml): with SPEAKER_DROPOUTS=1, one line a second on stderr: the IOProc callbacks in
+// that second.
+if ProcessInfo.processInfo.environment["SPEAKER_DROPOUTS"] == "1" {
+    let device = arguments[0]
+    nonisolated(unsafe) let callbacks = player.callbacks  // read racily; diagnostics only
+    Thread {
+        var previous = 0
+        while true {
+            Thread.sleep(forTimeInterval: 1)
+            let now = callbacks.pointee
+            let time = Date().formatted(.iso8601.time(includingFractionalSeconds: true))
+            fputs("AudioLabPlayer stats \(time) [\(device)] callbacks/s=\(now - previous)\n", stderr)
+            previous = now
+        }
+    }
+    .start()
+}
 _ = FileHandle.standardInput.readDataToEndOfFile()
 player.stop()

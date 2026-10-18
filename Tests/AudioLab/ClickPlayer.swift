@@ -48,6 +48,8 @@ package struct ClickTrack: Sendable {
 package final class ClickPlayer: @unchecked Sendable {
     private let device: AudioDeviceID
     private let sampleRate: UnsafeMutablePointer<Double>
+    /// EXPERIMENT: IOProc callbacks so far, read racily by the player tool's stats.
+    package let callbacks = UnsafeMutablePointer<Int>.allocate(capacity: 1)
     private var ioProcID: AudioDeviceIOProcID?
     private var rateListener: AudioObjectPropertyListenerBlock?
 
@@ -57,6 +59,8 @@ package final class ClickPlayer: @unchecked Sendable {
         let sampleRate = UnsafeMutablePointer<Double>.allocate(capacity: 1)
         sampleRate.pointee = AudioDevices.nominalSampleRate(device)
         self.sampleRate = sampleRate
+        let callbacks = callbacks
+        callbacks.pointee = 0
 
         let rateListener: AudioObjectPropertyListenerBlock = { _, _ in
             sampleRate.pointee = AudioDevices.nominalSampleRate(device)
@@ -67,6 +71,7 @@ package final class ClickPlayer: @unchecked Sendable {
 
         try AudioDevices.check(
             AudioDeviceCreateIOProcIDWithBlock(&ioProcID, device, nil) { _, _, _, outputData, outputTime in
+                callbacks.pointee += 1
                 let startSeconds = hostSeconds(outputTime.pointee.mHostTime)
                 let rate = sampleRate.pointee
                 for buffer in UnsafeMutableAudioBufferListPointer(outputData) {
