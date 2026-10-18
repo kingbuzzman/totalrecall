@@ -13,8 +13,9 @@ enum Pitch {
 /// afterwards.
 final class AudioRig: @unchecked Sendable {
     static let micALoopback = device("MIC_A_LOOPBACK", default: "BlackHole 2ch")
-    static let micBLoopback = device("MIC_B_LOOPBACK", default: "BlackHole 16ch")
-    static let speakersDevice = device("SPEAKERS", default: "BlackHole 64ch")
+    static let micBLoopback = device("MIC_B_LOOPBACK", default: "BlackHole 64ch")
+    /// Not BlackHole 64ch: on CI the system-audio tap kept losing a long-running player there for seconds at a time.
+    static let speakersDevice = device("SPEAKERS", default: "BlackHole 16ch")
     static let systemOffsetMilliseconds = 50.0
     /// A device switch that cannot overlap (the old device is gone or restarting) may lose this much audio.
     static let restartGapMilliseconds = 500.0

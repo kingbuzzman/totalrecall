@@ -88,6 +88,12 @@ package final class ClickPlayer: @unchecked Sendable {
             },
             "playing on \(name)"
         )
+        // A deep buffer of this process's own (totalrecall's reads keep theirs), so a loaded CI machine that runs the
+        // player late costs nothing instead of a cycle of silence, which would drop a click. Best effort: a device
+        // that refuses it keeps its default.
+        var bufferFrames: UInt32 = 2048
+        var bufferAddress = AudioDevices.propertyAddress(kAudioDevicePropertyBufferFrameSize)
+        AudioObjectSetPropertyData(device, &bufferAddress, 0, nil, UInt32(MemoryLayout<UInt32>.size), &bufferFrames)
         try AudioDevices.check(AudioDeviceStart(device, ioProcID), "starting \(name)")
     }
 
