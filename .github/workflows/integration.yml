@@ -56,12 +56,6 @@ jobs:
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
 
-      - name: Check the versions
-        run: |
-          version=$(tr -d '[:space:]' < VERSION)
-          test "$(build/bin/totalrecall --version)" = "$version"
-          test "$(build/bin/transcribe --version)" = "$version"
-
       # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions
         run: |

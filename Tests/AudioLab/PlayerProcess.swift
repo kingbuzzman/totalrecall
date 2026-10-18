@@ -1,4 +1,4 @@
-import Foundation
+package import Foundation
 
 /// A `ClickPlayer` in a process of its own: the player tool (`Tests/AudioLabPlayer`), started for one device and stopped
 /// by closing its stdin, so it also stops if the tests die. totalrecall records system audio through a tap of what every
@@ -61,6 +61,19 @@ package final class PlayerProcess: @unchecked Sendable {
             kill(process.processIdentifier, SIGKILL)
             process.waitUntilExit()
         }
+    }
+}
+
+extension FileHandle {
+    /// A pipe that delivers `data` and then ends, like stdin from a program that exited.
+    package static func reading(_ data: Data) -> FileHandle {
+        let pipe = Pipe()
+        Thread {
+            try? pipe.fileHandleForWriting.write(contentsOf: data)
+            try? pipe.fileHandleForWriting.close()
+        }
+        .start()
+        return pipe.fileHandleForReading
     }
 }
 

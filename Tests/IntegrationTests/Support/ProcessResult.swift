@@ -1,3 +1,4 @@
+import AudioLab
 import Foundation
 import Testing
 
@@ -19,10 +20,10 @@ struct ProcessResult {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
-        let (output, error, stdin) = (Pipe(), Pipe(), Pipe())
+        let (output, error) = (Pipe(), Pipe())
         process.standardOutput = output
         process.standardError = error
-        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
+        process.standardInput = input.map(FileHandle.reading) ?? FileHandle.nullDevice
         try process.run()
         let watchdog = killIfRunning(
             process.processIdentifier,
@@ -32,13 +33,6 @@ struct ProcessResult {
         )
         defer { watchdog.cancel() }
 
-        if let input {
-            Thread {
-                try? stdin.fileHandleForWriting.write(contentsOf: input)
-                try? stdin.fileHandleForWriting.close()
-            }
-            .start()
-        }
         async let outputData = output.fileHandleForReading.readAll()
         async let errorData = error.fileHandleForReading.readAll()
         let (standardOutput, standardError) = await (outputData, errorData)
@@ -59,17 +53,6 @@ extension FileHandle {
         await withCheckedContinuation { continuation in
             Thread { continuation.resume(returning: self.readDataToEndOfFile()) }.start()
         }
-    }
-
-    /// A pipe that delivers `data` and then ends, like stdin from a program that exited.
-    static func reading(_ data: Data) -> FileHandle {
-        let pipe = Pipe()
-        Thread {
-            try? pipe.fileHandleForWriting.write(contentsOf: data)
-            try? pipe.fileHandleForWriting.close()
-        }
-        .start()
-        return pipe.fileHandleForReading
     }
 }
 

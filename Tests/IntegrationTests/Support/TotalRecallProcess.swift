@@ -33,33 +33,20 @@ final class TotalRecallProcess {
 
     /// Starts recording to `output` and waits until totalrecall says it is recording.
     static func record(to output: URL, _ arguments: String...) async throws -> TotalRecallProcess {
-        let recording = try TotalRecallProcess(output: output, arguments: arguments, standardOutput: nil)
-        try await recording.waitUntilRecording()
-        return recording
+        try await TotalRecallProcess(output: output, arguments: arguments, standardOutput: nil).recording()
     }
 
     /// Starts streaming WAV to `pipe` and waits until totalrecall says it is recording.
     static func stream(to pipe: Pipe, logTo log: URL, _ arguments: String...) async throws -> TotalRecallProcess {
-        let streaming = try TotalRecallProcess(
-            output: log.deletingPathExtension(),
-            arguments: arguments,
-            standardOutput: pipe
-        )
-        try await streaming.waitUntilRecording()
-        return streaming
+        try await TotalRecallProcess(output: log.deletingPathExtension(), arguments: arguments, standardOutput: pipe)
+            .recording()
     }
 
     /// Starts recording to `output` while streaming WAV to `pipe` (`--stream`), and waits until totalrecall says it is
     /// recording.
     static func recordAndStream(to output: URL, pipe: Pipe, _ arguments: String...) async throws -> TotalRecallProcess {
-        let recording = try TotalRecallProcess(
-            output: output,
-            arguments: arguments,
-            standardOutput: pipe,
-            savesFile: true
-        )
-        try await recording.waitUntilRecording()
-        return recording
+        try await TotalRecallProcess(output: output, arguments: arguments, standardOutput: pipe, savesFile: true)
+            .recording()
     }
 
     var logText: String {
@@ -91,7 +78,8 @@ final class TotalRecallProcess {
         return process.terminationStatus
     }
 
-    private func waitUntilRecording() async throws {
+    /// Itself, once totalrecall says it is recording.
+    private func recording() async throws -> TotalRecallProcess {
         let deadline = ContinuousClock.now + Self.startupTimeout
         while !logText.contains("Press Ctrl-C") {
             guard process.isRunning, ContinuousClock.now < deadline else {
@@ -100,6 +88,7 @@ final class TotalRecallProcess {
             }
             try await Task.sleep(for: .milliseconds(100))
         }
+        return self
     }
 }
 

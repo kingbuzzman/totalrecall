@@ -48,8 +48,8 @@ package enum WAVStream {
 }
 
 /// Reads WAV from a stream that cannot seek, such as stdin, as float samples per channel. Accepts 16-bit and 32-bit
-/// float PCM, with the data size either exact or unknown (streamed).
-package final class WAVStreamReader {
+/// float PCM, with the data size either exact or unknown (streamed). Read by one task at a time.
+package final class WAVStreamReader: @unchecked Sendable {
     private enum SampleFormat {
         case int16
         case float32

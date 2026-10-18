@@ -1,5 +1,5 @@
-import AVFoundation
-import Shared
+import AudioLab
+import Foundation
 import Testing
 
 @testable import Transcribe
@@ -10,7 +10,7 @@ struct FileAudioSourceTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("mono.caf")
-        try writeFile(url, samples: (0..<250).map { Float($0) / 1_000 }, sampleRate: 16_000)
+        try writeAudioFile([(0..<250).map { Float($0) / 1_000 }], sampleRate: 16_000, to: url)
 
         let source = try FileAudioSource(url: url)
         var chunks: [[[Float]]] = []
@@ -26,47 +26,5 @@ struct FileAudioSourceTests {
         #expect(throws: (any Error).self) {
             try FileAudioSource(url: URL(fileURLWithPath: #filePath))
         }
-    }
-
-    private func writeFile(_ url: URL, samples: [Float], sampleRate: Double) throws {
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-        ]
-        let file = try AVAudioFile(
-            forWriting: url,
-            settings: settings,
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
-        let buffer = AVAudioPCMBuffer(
-            pcmFormat: file.processingFormat,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        )!
-        buffer.frameLength = buffer.frameCapacity
-        buffer.floatChannelData![0].update(from: samples, count: samples.count)
-        try file.write(from: buffer)
-    }
-}
-
-struct StreamAudioSourceTests {
-    @Test func readsALiveWAVStream() throws {
-        let pipe = Pipe()
-        try pipe.fileHandleForWriting.write(
-            contentsOf: WAVStream.header(sampleRate: 48_000, channelCount: 2)
-                + WAVStream.samples([[0.5, 0.5], [-0.5, -0.5]], count: 2)
-        )
-        try pipe.fileHandleForWriting.close()
-
-        let source = try StreamAudioSource(handle: pipe.fileHandleForReading)
-        let chunk = try #require(try source.read(maxFrames: 10))
-
-        #expect(source.sampleRate == 48_000)
-        #expect(source.channelCount == 2)
-        #expect(chunk.map(\.count) == [2, 2])
-        #expect(try source.read(maxFrames: 10) == nil)
     }
 }

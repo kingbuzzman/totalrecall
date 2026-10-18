@@ -83,7 +83,7 @@ do {
     // Read here first, to tell the speakers apart, then by the reading task below.
     let source: any AudioSource & Sendable =
         readsStream
-        ? try StreamAudioSource(handle: .standardInput)
+        ? try WAVStreamReader(handle: .standardInput)
         : try FileAudioSource(url: URL(fileURLWithPath: (inputPath as NSString).expandingTildeInPath))
     var pendingChunks: [[[Float]]] = []
     var separatesSpeakers = false

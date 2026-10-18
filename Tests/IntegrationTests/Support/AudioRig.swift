@@ -26,12 +26,13 @@ final class AudioRig: @unchecked Sendable {
     @TaskLocal static var current: AudioRig?
 
     let micA: FakeMicrophone
-    private let speakers: Speakers
+    /// Plays the "system audio" every recording should capture.
+    private let speakers: PlayerProcess
     private let originalInput: String?
     private let originalOutput: String?
     private var microphones: [FakeMicrophone] = []
 
-    private init(micA: FakeMicrophone, speakers: Speakers, originalInput: String?, originalOutput: String?) {
+    private init(micA: FakeMicrophone, speakers: PlayerProcess, originalInput: String?, originalOutput: String?) {
         self.micA = micA
         self.speakers = speakers
         self.originalInput = originalInput
@@ -48,9 +49,9 @@ final class AudioRig: @unchecked Sendable {
         AudioDevices.removeFakeMicrophones()
         let (originalInput, originalOutput) = (AudioDevices.defaultInput, AudioDevices.defaultOutput)
         try AudioDevices.setDefaultOutput(speakersDevice)
-        let speakers = try await Speakers(
+        let speakers = try await PlayerProcess(
             deviceNamed: speakersDevice,
-            track: ClickTrack(pitch: Pitch.system, offsetMilliseconds: systemOffsetMilliseconds)
+            tracks: [ClickTrack(pitch: Pitch.system, offsetMilliseconds: systemOffsetMilliseconds)]
         )
         do {
             let micA = try await FakeMicrophone(

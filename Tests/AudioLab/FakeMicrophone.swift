@@ -48,16 +48,3 @@ package final class FakeMicrophone: @unchecked Sendable {
         try await AudioDevices.waitUntilGone(name)
     }
 }
-
-/// Plays a click track on an output device, the "system audio" every recording should capture.
-package final class Speakers: @unchecked Sendable {
-    private let player: PlayerProcess
-
-    package init(deviceNamed name: String, track: ClickTrack) async throws {
-        player = try await PlayerProcess(deviceNamed: name, tracks: [track])
-    }
-
-    package func stop() {
-        player.stop()
-    }
-}

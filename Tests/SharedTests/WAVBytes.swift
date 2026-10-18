@@ -81,16 +81,3 @@ extension Data {
         stride(from: 0, to: count, by: 2).map { Int16(bitPattern: uint16(at: $0)) }
     }
 }
-
-extension FileHandle {
-    /// A pipe that delivers `data` and then ends, like stdin from a program that exited.
-    static func reading(_ data: Data) -> FileHandle {
-        let pipe = Pipe()
-        Thread {
-            try? pipe.fileHandleForWriting.write(contentsOf: data)
-            try? pipe.fileHandleForWriting.close()
-        }
-        .start()
-        return pipe.fileHandleForReading
-    }
-}

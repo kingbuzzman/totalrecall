@@ -37,18 +37,5 @@ final class FileAudioSource: AudioSource, @unchecked Sendable {
     }
 }
 
-/// A live WAV stream, such as `totalrecall -` on stdin. Read by one task at a time.
-final class StreamAudioSource: AudioSource, @unchecked Sendable {
-    private let reader: WAVStreamReader
-
-    var sampleRate: Double { reader.sampleRate }
-    var channelCount: Int { reader.channelCount }
-
-    init(handle: FileHandle) throws {
-        reader = try WAVStreamReader(handle: handle)
-    }
-
-    func read(maxFrames: Int) throws -> [[Float]]? {
-        try reader.read(maxFrames: maxFrames)
-    }
-}
+/// A live WAV stream, such as `totalrecall -` on stdin.
+extension WAVStreamReader: AudioSource {}

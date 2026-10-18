@@ -26,15 +26,6 @@ struct Options: Equatable {
     var overwrite = false
 }
 
-/// Invalid command-line arguments.
-struct UsageError: LocalizedError {
-    let errorDescription: String?
-
-    init(_ description: String) {
-        errorDescription = description
-    }
-}
-
 enum Command: Equatable {
     case transcribe(inputPath: String, textPath: String?, options: Options)
     case listLanguages
@@ -57,7 +48,7 @@ enum Command: Equatable {
                 options.overwrite = true
             case "--language":
                 guard let value = arguments.popFirst(), !value.hasPrefix("-") else {
-                    throw UsageError("--language needs a language, such as es")
+                    throw TranscribeError("--language needs a language, such as es")
                 }
                 options.language = value
             case "--list-languages":
@@ -68,14 +59,14 @@ enum Command: Equatable {
                 return .version
             default:
                 guard argument == "-" || !argument.hasPrefix("-") else {
-                    throw UsageError("unexpected argument \(argument)\n\(usage)")
+                    throw TranscribeError("unexpected argument \(argument)\n\(usage)")
                 }
                 paths.append(argument)
             }
         }
-        guard (1...2).contains(paths.count) else { throw UsageError("expected an audio file or -\n\(usage)") }
+        guard (1...2).contains(paths.count) else { throw TranscribeError("expected an audio file or -\n\(usage)") }
         if options.showsLive && paths[0] != "-" {
-            throw UsageError("--live is for a live stream (-); a file is transcribed faster than it was spoken")
+            throw TranscribeError("--live is for a live stream (-); a file is transcribed faster than it was spoken")
         }
         return .transcribe(inputPath: paths[0], textPath: paths.count == 2 ? paths[1] : nil, options: options)
     }
