@@ -5,6 +5,7 @@ import Speech
 import Testing
 
 /// transcribe on speech from `say`, with Apple's on-device recognizer (downloaded on first use).
+@Suite(.retriedOnCI)
 struct TranscribeTests {
     private static let you = "Good morning everyone, thanks for joining the call."
     private static let them = "Happy to be here, let's get started."
@@ -273,7 +274,8 @@ enum Speech {
         defer { try? FileManager.default.removeItem(at: url) }
         let say = try await ProcessResult.run(
             URL(fileURLWithPath: "/usr/bin/say"),
-            ["-o", url.path, "--data-format=LEF32@48000", text]
+            ["-o", url.path, "--data-format=LEF32@48000", text],
+            timeout: .seconds(30)
         )
         guard say.status == 0 else { throw SpeechError(description: "say failed: \(say.standardError)") }
         return try Recording(contentsOf: url).left

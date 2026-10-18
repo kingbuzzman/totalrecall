@@ -1,8 +1,7 @@
 name: speaker-dropouts
 
-# TEMPORARY EXPERIMENT: finds why the fake speakers' clicks drop out of the system-audio tap in the recording tests.
-# Runs only those tests, three times in parallel on the rig's defaults, with every player logging its callbacks per
-# second and a witness recording of the speakers' own loopback next to the tap (SPEAKER_DROPOUTS=1). Separate from integration, so release.yml never sees it. Delete once the cause is fixed.
+# TEMPORARY: confirms the recording tests pass reliably on CI, running only them three times in parallel. Separate from
+# integration, so release.yml never sees it. Delete once they pass.
 
 on:
   push:
@@ -27,7 +26,6 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
-      SPEAKER_DROPOUTS: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

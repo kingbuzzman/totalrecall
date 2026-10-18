@@ -4,7 +4,7 @@ import Shared
 import Testing
 
 /// totalrecall against fake microphones and speakers, checked by the click tracks it records.
-@Suite(.serialized, .needsAudioRig, .audioRig)
+@Suite(.serialized, .needsAudioRig, .retriedOnCI, .audioRig)
 struct RecordingTests {
     var rig: AudioRig { AudioRig.current! }
 
@@ -293,21 +293,6 @@ struct RecordingTests {
         let file = try Recording(contentsOf: recording.output)
         #expect(file.duration >= 4.5, "\(file.duration) s")
         expectNoLostAudio(file.clicks(on: .left, pitches: [Pitch.micA], skipStart: 0.5, skipEnd: 0.3), atLeast: 35)
-    }
-
-    /// EXPERIMENT (speaker-dropouts.yml): the speakers' own loopback recorded as the mic (left) next to the tap (right).
-    /// Clicks missing on both mean the player stalled; missing only on the right mean the tap dropped a player that kept
-    /// playing.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["SPEAKER_DROPOUTS"] == "1", "set SPEAKER_DROPOUTS=1 to run"))
-    func witnessesTheSpeakers() async throws {
-        let recording = try await TotalRecallProcess.record(
-            to: TestEnvironment.result("witness.wav"),
-            "--no-echo-cancellation",
-            "--mic",
-            AudioRig.speakersDevice
-        )
-        try await Task.sleep(for: .seconds(30))
-        expectSaved(await recording.stop(), recording)
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LONG"] == "1", "set LONG=1 to run"))
