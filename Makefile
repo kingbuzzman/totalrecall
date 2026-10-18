@@ -1,5 +1,15 @@
 PREFIX ?= $(HOME)/.local
 VERSION := $(shell cat VERSION)
+# What the tools report: VERSION as is with FINAL=1, which the integration workflow sets only when building what
+# release.yml will publish; VERSION-dev<commit> in any other CI build; VERSION-devYYYYMMDD.HHMMSS, the local time of the
+# build, anywhere else.
+ifeq ($(FINAL),1)
+BUILD_VERSION := $(VERSION)
+else ifeq ($(CI),true)
+BUILD_VERSION := $(VERSION)-dev$(shell git rev-parse --short HEAD)
+else
+BUILD_VERSION := $(VERSION)-dev$(shell date +%Y%m%d.%H%M%S)
+endif
 ARCH := $(shell uname -m)
 # Everything a build makes goes in BUILD, so make clean deletes just that: the tools (bin), SwiftPM's builds (swiftpm and
 # swiftpm-coverage), speexdsp, the Info.plists, the release tarball, the test results and the coverage report.
@@ -71,11 +81,12 @@ $(SPEEXDSP)/lib/libspeexdsp.a:
 		&& $(MAKE) --quiet -C libspeexdsp CFLAGS="$(SPEEXDSP_CFLAGS) -Werror" install-libLTLIBRARIES \
 		&& $(MAKE) --quiet -C include install && $(MAKE) --quiet install-pkgconfigDATA'
 
-# Each tool's Info.plist, with the version from VERSION.
-$(BUILD)/%/Info.plist: Sources/%/Info.plist VERSION
+# Each tool's Info.plist, with BUILD_VERSION. Written afresh whenever the sources or the build change, as the tools are
+# then rebuilt, so a local build carries the time it was made.
+$(BUILD)/%/Info.plist: Sources/%/Info.plist $(SOURCES) VERSION Makefile
 	mkdir -p $(dir $@)
 	cp $< $@
-	plutil -replace CFBundleShortVersionString -string "$(VERSION)" $@
+	plutil -replace CFBundleShortVersionString -string "$(BUILD_VERSION)" $@
 
 # Both tools and the README, as published by .github/workflows/release.yml.
 release: $(RELEASE)

@@ -10,9 +10,11 @@ make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/di
 ```
 
 The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
-[speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs
-nothing installed, and embeds each tool's `Info.plist` with the version from `VERSION`. Make sure `~/.local/bin` is on
-your `PATH`. Everything a build makes goes in `build/`, which `make clean` deletes.
+[speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs nothing
+installed, and embeds each tool's `Info.plist` with the version from `VERSION` as `<VERSION>-devYYYYMMDD.HHMMSS`, the
+local time of the build; a CI build reports `<VERSION>-dev<commit>`, and only a release build (`make FINAL=1`) reports
+`VERSION` as is. Make sure `~/.local/bin` is on your `PATH`. Everything a build makes goes in `build/`, which `make
+clean` deletes.
 
 ## How it works
 
@@ -124,6 +126,8 @@ untouched.
 
 The version lives in `VERSION`; the build writes it into both tools. To release, add a `## <version>` section to
 `CHANGELOG.md`, bump `VERSION` and push to `master`. The integration workflow builds both tools on macOS 26 and tests
-them; only if the tests pass does `.github/workflows/release.yml` check that `v<VERSION>` has no tag yet and publish
-a GitHub release with the tag, that section as its notes, and the `totalrecall-<VERSION>-macos-arm64.tar.gz` that
-integration built. `make release` builds the same tarball locally, in `build/`.
+them, as the final version (`FINAL=1`) only on a push to `master` whose `VERSION` has no tag yet, and as
+`<VERSION>-dev<commit>` everywhere else; only if the tests pass does `.github/workflows/release.yml` check that
+`v<VERSION>` has no tag yet and publish a GitHub release with the tag, that section as its notes, and the
+`totalrecall-<VERSION>-macos-arm64.tar.gz` that integration built, after checking that both tools in it are the final
+version. `make release FINAL=1` builds the same tarball locally, in `build/`.

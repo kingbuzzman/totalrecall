@@ -76,6 +76,14 @@ jobs:
           cd build
           ls totalrecall-"$VERSION"-macos-*.tar.gz > /dev/null
           shasum -a 256 -c totalrecall-"$VERSION"-macos-*.tar.gz.sha256
+          # Built as the final version, not a -dev one: each binary embeds its Info.plist, version included, as text.
+          tar -xzf totalrecall-"$VERSION"-macos-*.tar.gz totalrecall transcribe
+          for tool in totalrecall transcribe; do
+            if ! grep -q -a -F "<string>$VERSION</string>" "$tool"; then
+              echo "::error::$tool in the tarball is not built as $VERSION"
+              exit 1
+            fi
+          done
 
       - name: Create the release and tag
         if: steps.version.outputs.is-new == 'true'

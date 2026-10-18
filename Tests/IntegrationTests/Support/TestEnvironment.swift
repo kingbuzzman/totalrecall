@@ -17,6 +17,9 @@ enum TestEnvironment {
 
     static let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
 
+    /// Whether the binaries are built as the final version (`make FINAL=1`), as for a release.
+    static let isFinal = ProcessInfo.processInfo.environment["FINAL"] == "1"
+
     /// Recordings and logs, kept after the run (CI uploads them).
     static let results: URL = {
         let path = ProcessInfo.processInfo.environment["RESULTS"]

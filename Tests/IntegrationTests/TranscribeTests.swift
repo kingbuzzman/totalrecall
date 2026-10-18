@@ -191,7 +191,7 @@ struct TranscribeTests {
     }
 
     @Test func printsItsVersion() async throws {
-        #expect(try await transcribe("--version").standardOutput == "\(try #require(TestEnvironment.version))\n")
+        try expectVersion(try await transcribe("--version").standardOutput)
     }
 
     /// A live stream of speech, as totalrecall streams it.

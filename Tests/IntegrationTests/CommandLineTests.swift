@@ -7,7 +7,7 @@ struct CommandLineTests {
         let result = try await totalrecall("--version")
 
         #expect(result.status == 0)
-        #expect(result.standardOutput == "\(try #require(TestEnvironment.version))\n")
+        try expectVersion(result.standardOutput)
     }
 
     @Test func printsTheUsage() async throws {

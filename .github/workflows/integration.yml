@@ -29,6 +29,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # Only a push to master whose VERSION has no release yet builds the final version, which release.yml then
+      # publishes; every other build reports VERSION-dev<commit>.
+      - name: Decide the version
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          if ! git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "Building the final $version for release."
+            echo "FINAL=1" >> "$GITHUB_ENV"
+          fi
+
       - name: Lint
         run: make lint
 
