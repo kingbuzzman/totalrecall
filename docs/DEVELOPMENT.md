@@ -84,7 +84,7 @@ The tests use [Swift Testing](https://developer.apple.com/documentation/testing)
 | `TotalRecallTests` | totalrecall's logic: options, the timeline and recorder (alignment, splicing, padding, mixing, the end at the stop), echo cancellation, output files and formats, resampling, sample-rate watching, make-before-break mic switching and capture restarts (with fake sessions), the status line, stop signals, input-device lookup |
 | `TranscribeTests` | transcribe's logic: arguments, speaker detection, mixing, the transcript and its live line, language picking, audio sources |
 | `SharedTests` | The WAV stream writer and reader, including malformed streams |
-| `AudioLabTests` | The click-track analysis the end-to-end tests rely on |
+| `AudioLabTests` | The click-track analysis the end-to-end tests rely on, and the player tool's failures |
 | `IntegrationTests` | The release binaries end to end: totalrecall's command line, transcribe on speech from `say`, and totalrecall recording through fake audio devices |
 
 The recording tests need no microphone or speakers, only three BlackHole loopback devices, so they run the same way
@@ -94,15 +94,17 @@ locally and on headless CI machines:
 brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
 ```
 
-Without them those tests are skipped, except on CI, where they fail. `Tests/AudioLab` creates fake microphones, each
-a temporary aggregate device wrapping a BlackHole device that the tests play a click track into. Fake mics can appear,
-disappear, become the system input, change sample rate, or stay silent for a while before delivering audio, which is
-how AirPods look to totalrecall. Every click track is locked to the system clock, so the analysis can find every click
-in a recording and report lost audio, silence, which mic was recorded when, and drift between the channels, in
-milliseconds. The tests cover recording, switching to a new or slow-starting input, sample-rate changes, a preferred
+Without them those tests are skipped, except on CI, where they fail. `Tests/AudioLab` creates fake microphones, each a
+temporary aggregate device wrapping a BlackHole device that the tests play a click track into. Every click track, the
+speakers' included, plays from a process of its own (`Tests/AudioLabPlayer`): totalrecall's system-audio tap, which
+records what every process plays, lost the speakers' clicks when they all played from the test process. Fake mics can
+appear, disappear, become the system input, change sample rate, or stay silent for a while before delivering audio,
+which is how AirPods look to totalrecall. Every click track is locked to the system clock, so the analysis can find
+every click in a recording and report lost audio, silence, which mic was recorded when, and drift between the channels,
+in milliseconds. The tests cover recording, switching to a new or slow-starting input, sample-rate changes, a preferred
 `--mic` disappearing and returning, rapid switching, echo cancellation, every stop signal, hard kills, every output
-format, mixed channels, system audio only, and streaming to stdout. Each test switches the system input and output
-to the test devices and restores them afterwards. Recordings and logs are kept in `build/test-results`.
+format, mixed channels, system audio only, and streaming to stdout. Each test switches the system input and output to
+the test devices and restores them afterwards. Recordings and logs are kept in `build/test-results`.
 
 `make coverage` builds the tools and the tests once with coverage instrumentation, runs the tests with the end-to-end
 ones on those builds, prints line coverage per file, writes an HTML report to `build/coverage/html`, and fails if

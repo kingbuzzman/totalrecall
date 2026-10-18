@@ -44,6 +44,14 @@ let package = Package(
             linkerSettings: strictLinking
         ),
         .target(name: "AudioLab", path: "Tests/AudioLab", swiftSettings: strict),
+        // Plays the integration tests' fake speakers and microphones, each in a process of its own.
+        .executableTarget(
+            name: "AudioLabPlayer",
+            dependencies: ["AudioLab"],
+            path: "Tests/AudioLabPlayer",
+            swiftSettings: strict,
+            linkerSettings: strictLinking
+        ),
         .testTarget(
             name: "SharedTests",
             dependencies: ["Shared"],
@@ -70,7 +78,7 @@ let package = Package(
         ),
         .testTarget(
             name: "IntegrationTests",
-            dependencies: ["AudioLab", "Shared"],
+            dependencies: ["AudioLab", "AudioLabPlayer", "Shared"],
             swiftSettings: strict,
             linkerSettings: strictLinking
         ),

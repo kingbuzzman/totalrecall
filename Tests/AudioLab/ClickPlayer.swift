@@ -17,6 +17,23 @@ package struct ClickTrack: Sendable {
         amplitude = Float(pow(10, gainDecibels / 20))
     }
 
+    /// The track as one command-line argument, `pitch,offset-seconds,amplitude`, for the player tool; exact, as Swift
+    /// prints the shortest digits that read back as the same value.
+    package var argument: String {
+        "\(pitch),\(offsetSeconds),\(amplitude)"
+    }
+
+    /// A track from its `argument`.
+    package init?(argument: String) {
+        let parts = argument.split(separator: ",")
+        guard parts.count == 3, let pitch = Double(parts[0]), let offset = Double(parts[1]),
+            let amplitude = Float(parts[2])
+        else { return nil }
+        self.pitch = pitch
+        offsetSeconds = offset
+        self.amplitude = amplitude
+    }
+
     func sample(at seconds: Double) -> Float {
         let phase = (seconds - offsetSeconds).truncatingRemainder(dividingBy: Self.intervalSeconds)
         let positivePhase = phase < 0 ? phase + Self.intervalSeconds : phase
@@ -26,14 +43,15 @@ package struct ClickTrack: Sendable {
 }
 
 /// Plays click tracks on one device. Each buffer is filled for the host time it will be heard at, at the device's
-/// current sample rate, so the grid holds through latency and rate changes.
-final class ClickPlayer: @unchecked Sendable {
+/// current sample rate, so the grid holds through latency and rate changes. The tests run each in a process of its own
+/// (see `PlayerProcess`); the player tool is what runs it in-process.
+package final class ClickPlayer: @unchecked Sendable {
     private let device: AudioDeviceID
     private let sampleRate: UnsafeMutablePointer<Double>
     private var ioProcID: AudioDeviceIOProcID?
     private var rateListener: AudioObjectPropertyListenerBlock?
 
-    init(deviceNamed name: String, tracks: [ClickTrack], silentUntil: Double = 0) throws {
+    package init(deviceNamed name: String, tracks: [ClickTrack], silentUntil: Double = 0) throws {
         let device = try AudioDevices.requireDevice(named: name)
         self.device = device
         let sampleRate = UnsafeMutablePointer<Double>.allocate(capacity: 1)
@@ -68,7 +86,7 @@ final class ClickPlayer: @unchecked Sendable {
         try AudioDevices.check(AudioDeviceStart(device, ioProcID), "starting \(name)")
     }
 
-    func stop() {
+    package func stop() {
         if let ioProcID {
             AudioDeviceStop(device, ioProcID)
             AudioDeviceDestroyIOProcID(device, ioProcID)

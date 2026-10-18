@@ -48,7 +48,7 @@ final class AudioRig: @unchecked Sendable {
         AudioDevices.removeFakeMicrophones()
         let (originalInput, originalOutput) = (AudioDevices.defaultInput, AudioDevices.defaultOutput)
         try AudioDevices.setDefaultOutput(speakersDevice)
-        let speakers = try Speakers(
+        let speakers = try await Speakers(
             deviceNamed: speakersDevice,
             track: ClickTrack(pitch: Pitch.system, offsetMilliseconds: systemOffsetMilliseconds)
         )

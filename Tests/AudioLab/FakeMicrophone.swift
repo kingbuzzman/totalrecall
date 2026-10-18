@@ -6,7 +6,7 @@ import Foundation
 /// become the system input, change sample rate, and appear and disappear, the way AirPods do.
 package final class FakeMicrophone: @unchecked Sendable {
     package let name: String
-    private let player: ClickPlayer
+    private let player: PlayerProcess
     private var aggregate: AudioObjectID
 
     /// With `silentFor`, it delivers silence at first, like AirPods while they switch to their call profile.
@@ -16,7 +16,7 @@ package final class FakeMicrophone: @unchecked Sendable {
             throw AudioLabError("cannot read the UID of \(loopback)")
         }
         let silentUntil = hostSeconds(AudioGetCurrentHostTime()) + silentFor
-        player = try ClickPlayer(deviceNamed: loopback, tracks: tracks, silentUntil: silentUntil)
+        player = try await PlayerProcess(deviceNamed: loopback, tracks: tracks, silentUntil: silentUntil)
 
         let description: [String: Any] = [
             kAudioAggregateDeviceNameKey: name,
@@ -51,10 +51,10 @@ package final class FakeMicrophone: @unchecked Sendable {
 
 /// Plays a click track on an output device, the "system audio" every recording should capture.
 package final class Speakers: @unchecked Sendable {
-    private let player: ClickPlayer
+    private let player: PlayerProcess
 
-    package init(deviceNamed name: String, track: ClickTrack) throws {
-        player = try ClickPlayer(deviceNamed: name, tracks: [track])
+    package init(deviceNamed name: String, track: ClickTrack) async throws {
+        player = try await PlayerProcess(deviceNamed: name, tracks: [track])
     }
 
     package func stop() {
