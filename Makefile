@@ -34,10 +34,11 @@ SPEEXDSP_CFLAGS := -O2 -mmacosx-version-min=$(MACOS_MIN)
 export PKG_CONFIG_PATH := $(SPEEXDSP)/lib/pkgconfig
 SOURCES := Package.swift $(shell find Sources -type f)
 INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(CURDIR)/$(BUILD)/$(1)/Info.plist
-# One build of the tools and the tests, instrumented for coverage. The tests need -enable-testing, and the tools must
-# come from the same build for their coverage to add up with the tests'. Both tools get totalrecall's Info.plist, which
-# only matters for their version.
-COVERAGE_FLAGS := -c release --scratch-path $(BUILD)/swiftpm-coverage -Xswiftc -enable-testing \
+# One build of the tools and the tests, instrumented for coverage. A debug build, the only kind in which SwiftPM gives the
+# tests' @testable imports of the tools their own entry point (in a release build with -enable-testing, Xcode 26's test
+# runner starts transcribe instead of the tests); the tools must come from the same build for their coverage to add up
+# with the tests'. Both tools get totalrecall's Info.plist, which only matters for their version.
+COVERAGE_FLAGS := -c debug --scratch-path $(BUILD)/swiftpm-coverage \
 	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall)
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75

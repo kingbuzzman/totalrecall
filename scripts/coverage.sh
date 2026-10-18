@@ -28,7 +28,10 @@ if ! ls "$profiles"/*.profraw >/dev/null 2>&1; then
 fi
 xcrun llvm-profdata merge -sparse -o "$report/coverage.profdata" "$profiles"/*.profraw || exit 2
 objects=("$products/totalrecall")
-for binary in "$products/transcribe" "$products"/*.xctest/Contents/MacOS/*; do objects+=(-object "$binary"); done
+# Only files: a bundle's Contents/MacOS can also hold its .dSYM folder.
+for binary in "$products/transcribe" "$products"/*.xctest/Contents/MacOS/*; do
+    if [ -f "$binary" ]; then objects+=(-object "$binary"); fi
+done
 options=(-instr-profile="$report/coverage.profdata" -ignore-filename-regex='/(Tests|build|\.build)/' "${objects[@]}")
 
 xcrun llvm-cov report "${options[@]}" | tee "$report/report.txt"
