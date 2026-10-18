@@ -1,46 +1,31 @@
 name: release
 
-# Publishes a GitHub release when VERSION on master names a version that has no tag yet. It runs only after the
-# integration workflow passes on master, and publishes the tarball that run built and tested: it creates the
-# v<VERSION> tag on that commit and a release with the tarball attached, its notes taken from the version's section of
-# CHANGELOG.md. To release, add that section, bump VERSION and push. To retry, re-run this workflow's run, or run the
-# integration workflow on master.
-
-# workflow_run runs with write access whatever triggered it, which is why zizmor flags it. Here the job only acts on
-# integration runs of pushes to master (never pull requests), runs nothing from them but the shell below, and publishes
-# the tarball they built and tested.
-on: # zizmor: ignore[dangerous-triggers]
-  workflow_run:
-    workflows: [integration]
-    types: [completed]
-    branches: [master]
+# Publishes a GitHub release when VERSION on master names a version that has no tag yet. It never runs on its own: the
+# integration workflow runs it as its last job, only after its tests pass on a push to master that built the final
+# version, and it publishes the tarball that run built and tested: it creates the v<VERSION> tag on that commit and a
+# release with the tarball attached, its notes taken from the version's section of CHANGELOG.md. To release, add that
+# section, bump VERSION and push. To retry, re-run the integration run's failed jobs.
+on:
+  workflow_call:
 
 # None by default; the job below asks for only what it needs.
 permissions: {}
-
-# Two runs in a row must not race to create the same release.
-concurrency:
-  group: release
-  cancel-in-progress: false
 
 jobs:
   release:
     name: release
     permissions:
       contents: write # to create the release and its tag
-      actions: read # to download the tarball from the integration run
-    # A pull request from a fork's master branch also counts as master here; only release what was pushed.
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request'
+    # Two runs in a row must not race to create the same release.
+    concurrency:
+      group: release
+      cancel-in-progress: false
     # Nothing is built here, so any runner will do.
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # The commit integration tested; github.sha is master's latest commit, which may be newer.
-      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - name: Check for a new version
@@ -65,8 +50,6 @@ jobs:
         with:
           name: release
           path: build
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ github.token }}
 
       - name: Check the tarball
         if: steps.version.outputs.is-new == 'true'
@@ -101,4 +84,4 @@ jobs:
             notes=(--generate-notes)
           fi
           gh release create "v$VERSION" build/totalrecall-"$VERSION"-macos-*.tar.gz* \
-            --target "$SHA" --title "totalrecall $VERSION" "${notes[@]}"
+            --target "$GITHUB_SHA" --title "totalrecall $VERSION" "${notes[@]}"

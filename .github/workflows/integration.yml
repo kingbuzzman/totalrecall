@@ -9,8 +9,8 @@ on:
 permissions:
   contents: read
 
-# A newer push cancels a run still going on the same branch or pull request, except on master: release.yml releases
-# from every master run that passes.
+# A newer push cancels a run still going on the same branch or pull request, except on master: a master run that passes
+# may release.
 concurrency:
   group: integration-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
@@ -21,6 +21,8 @@ jobs:
     # The binaries need macOS 26 or later.
     runs-on: macos-26
     timeout-minutes: 10
+    outputs:
+      final: ${{ steps.version.outputs.final }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -29,15 +31,17 @@ jobs:
         with:
           persist-credentials: false
 
-      # Only a push to master whose VERSION has no release yet builds the final version, which release.yml then
+      # Only a push to master whose VERSION has no release yet builds the final version, which the release job then
       # publishes; every other build reports VERSION-dev<commit>.
       - name: Decide the version
+        id: version
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           if ! git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
             echo "Building the final $version for release."
             echo "FINAL=1" >> "$GITHUB_ENV"
+            echo "final=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Lint
@@ -62,8 +66,8 @@ jobs:
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
 
-      # Builds the release tarball too, so .github/workflows/release.yml can publish the binaries tested here, and the
-      # build instrumented for coverage.
+      # Builds the release tarball too, so the release job can publish the binaries tested here, and the build
+      # instrumented for coverage.
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
 
@@ -121,3 +125,11 @@ jobs:
           path: build/test-results
           if-no-files-found: ignore
           retention-days: 1
+
+  # Starts only once the tests above pass, and only for a final build.
+  release:
+    needs: integration
+    if: needs.integration.outputs.final == 'true'
+    permissions:
+      contents: write # to create the release and its tag
+    uses: $/.github/workflows/release.yml
