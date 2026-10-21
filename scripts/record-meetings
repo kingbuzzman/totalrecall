@@ -5,14 +5,24 @@ For each meeting it waits until the start, then runs
 
     totalrecall DIR/rec.mp3 --stream | transcribe - DIR/transcript.txt --live
 
-in DIR = ~/Meetings/{week}-{year}/{month}-{day}/{HHhMM}-{short-name}/, where the week is the ISO week and HHhMM is
-when the meeting was meant to start, 24-hour in the Mac's time zone. It stops at the scheduled end plus a grace period, or when the next meeting starts,
-whichever comes first. Focus time and prepare/prep blocks are skipped, as are all-day events.
+in DIR = ~/Meetings/{calendar}/{week}-{year}/{month}-{day}/{HHhMM}-{short-name}/, where the calendar is the one the
+meeting is on (for Google accounts, the address), the week is the ISO week and HHhMM is when the meeting was meant to
+start, 24-hour in the Mac's time zone. Focus time and prepare/prep blocks are skipped, as
+are all-day events.
 
-Ctrl-C ends the current recording early (transcribe still writes the last words) and waits for the next meeting. Ctrl-C
-while waiting quits.
+A recording never stops on its own: not at the scheduled end, and not when the next meeting starts. Only Ctrl-C ends
+it (transcribe still writes the last words); then it waits for the next meeting, or records right away the one already
+underway. Ctrl-C while waiting quits.
 
-Usage: scripts/record-meetings [--calendar NAME]... [--root DIR] [--grace MINUTES] [--dry-run]
+With -n REASON it records one unscheduled meeting instead: it adds REASON to the calendar starting now (the first
+--calendar, or the first writable one), records right away until Ctrl-C, and quits. The recording comes first: it
+starts before the calendar is asked, and goes on when the calendar can't take the meeting. Its folder is under the
+first --calendar, or other/ without one.
+
+--language LANG (es, es-MX, ...) is the language spoken, passed on to transcribe; it defaults to transcribe's, en-US.
+
+Usage: scripts/record-meetings [--calendar NAME]... [--root DIR] [-n REASON [--new-length MINUTES]] [--language LANG]
+                               [--dry-run]
 
 The calendars default to $RECORD_MEETINGS_CALENDAR (comma-separated), or every calendar when that's unset; names come
 from `icalbuddy calendars`.
@@ -22,12 +32,12 @@ import argparse
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -38,6 +48,24 @@ EVENT_LINE = re.compile(
 )
 # How often to look at the calendar again while waiting, so moved or added meetings are picked up.
 RECHECK_SECONDS = 60
+# Adds a meeting to Calendar.app; the arguments are the calendar name (empty for the first writable one), the title, the
+# start as seconds since midnight today, and the length in minutes.
+NEW_EVENT_SCRIPT = """
+on run {calendarName, title, startTime, lengthMinutes}
+    set startDate to current date
+    set time of startDate to startTime as integer
+    set endDate to startDate + (lengthMinutes as integer) * minutes
+    tell application "Calendar"
+        if calendarName is "" then
+            set destination to first calendar whose writable is true
+        else
+            set destination to first calendar whose name is calendarName
+        end if
+        set details to {summary:title, start date:startDate, end date:endDate}
+        make new event at end of events of destination with properties details
+    end tell
+end run
+"""
 
 
 @dataclass(frozen=True)
@@ -45,17 +73,31 @@ class Meeting:
     start: datetime
     end: datetime
     title: str
+    # Only where the recording goes; the same meeting on two calendars is still one meeting.
+    calendar: str = field(default="", compare=False)
 
 
 def main():
     args = parse_args()
     calendars = args.calendar or [name for name in os.environ.get("RECORD_MEETINGS_CALENDAR", "").split(",") if name]
+    if args.new:
+        start = datetime.now().replace(second=0, microsecond=0)
+        end = start + timedelta(minutes=args.new_length)
+        meeting = Meeting(start, end, args.new, calendars[0] if calendars else "")
+        if args.dry_run:
+            print(f"{meeting.start:%H:%M}-{meeting.end:%H:%M}  {meeting_dir(args.root, meeting)}")
+            return
+        totalrecall, transcribe = find_tool("totalrecall"), transcribe_command(args.language)
+        print(f"Recording {meeting.title} until Ctrl-C")
+        threading.Thread(target=add_to_calendar, args=(meeting, calendars), daemon=True).start()
+        record(totalrecall, transcribe, meeting_dir(args.root, meeting), lambda: None)
+        return
     if args.dry_run:
         for meeting in todays_meetings(calendars):
             print(f"{meeting.start:%H:%M}-{meeting.end:%H:%M}  {meeting_dir(args.root, meeting)}")
         return
 
-    totalrecall, transcribe = find_tool("totalrecall"), find_tool("transcribe")
+    totalrecall, transcribe = find_tool("totalrecall"), transcribe_command(args.language)
     warnings = Warnings(args.warn)
     done, announced = set(), None
     while True:
@@ -77,12 +119,8 @@ def main():
                 return
             continue
 
-        stop_at = meeting.end + timedelta(minutes=args.grace)
-        later = [m.start for m in meetings[1:] if m.start > meeting.start]
-        if later:
-            stop_at = min(stop_at, later[0])
-        print(f"Recording {meeting.title} until {stop_at:%H:%M}")
-        quit_after = record(totalrecall, transcribe, meeting_dir(args.root, meeting), stop_at, warnings.check)
+        print(f"Recording {meeting.title} until Ctrl-C")
+        quit_after = record(totalrecall, transcribe, meeting_dir(args.root, meeting), warnings.check)
         done.add(meeting)
         if quit_after:
             return
@@ -92,8 +130,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Record and transcribe today's meetings from the calendar.")
     parser.add_argument("--calendar", action="append", help="only meetings from this calendar (repeatable)")
     parser.add_argument("--root", type=Path, default=Path.home() / "Meetings", help="where to save (default ~/Meetings)")
-    parser.add_argument("--grace", type=float, default=5, help="minutes to keep recording past the end (default 5)")
     parser.add_argument("--warn", type=float, default=5, help="minutes before each meeting to say so (default 5, 0 off)")
+    parser.add_argument("-n", "--new", metavar="REASON", help="record one meeting for REASON starting now, then quit")
+    parser.add_argument("--new-length", type=int, default=30, help="calendar length of the -n meeting (default 30)")
+    parser.add_argument("--language", metavar="LANG", help="language spoken, such as es or es-MX (default en-US)")
     parser.add_argument("--dry-run", action="store_true", help="list today's meetings and folders without recording")
     return parser.parse_args()
 
@@ -129,7 +169,8 @@ class Warnings:
 
 
 def todays_meetings(calendars):
-    command = ["icalbuddy", "-nc", "-nrd", "-ea", "-b", "@@", "-ps", "| ~~ |", "-iep", "datetime,title"]
+    # Without -nc, icalbuddy puts the calendar after the title: "Title (javier@multimediallc.com)".
+    command = ["icalbuddy", "-nrd", "-ea", "-b", "@@", "-ps", "| ~~ |", "-iep", "datetime,title"]
     command += ["-po", "datetime,title", "-df", "%Y-%m-%d", "-tf", "%H:%M"]
     if calendars:
         command += ["-ic", ",".join(calendars)]
@@ -142,19 +183,41 @@ def todays_meetings(calendars):
         match = EVENT_LINE.match(line)
         if not match:
             continue
-        start_date, start_time, end_date, end_time, title = match.groups()
+        start_date, start_time, end_date, end_time, title_and_calendar = match.groups()
+        title, _, calendar = title_and_calendar.rstrip(")").rpartition(" (")
         if end_time is None or SKIPPED_TITLES.search(title):
             continue
         start = datetime.strptime(f"{start_date} {start_time}", "%Y-%m-%d %H:%M")
         end = datetime.strptime(f"{end_date or start_date} {end_time}", "%Y-%m-%d %H:%M")
         if end > start:
-            meetings.add(Meeting(start, end, title.strip()))
+            meetings.add(Meeting(start, end, title.strip(), calendar))
     return sorted(meetings, key=lambda m: (m.start, m.end, m.title))
+
+
+def add_to_calendar(meeting, calendars):
+    since_midnight = meeting.start.hour * 3600 + meeting.start.minute * 60
+    length = round((meeting.end - meeting.start).total_seconds() / 60)
+    command = ["osascript", "-e", NEW_EVENT_SCRIPT, calendars[0] if calendars else "", meeting.title]
+    command += [str(since_midnight), str(length)]
+    # The recording matters more than the calendar entry, so a failing or hung Calendar (an error dialog blocks it)
+    # only gets a warning.
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        print("Couldn't add it to the calendar: Calendar didn't answer in 30 seconds")
+        return
+    except OSError as error:
+        print(f"Couldn't add it to the calendar: {error}")
+        return
+    if result.returncode != 0:
+        print(f"Couldn't add it to the calendar: {result.stderr.strip()}")
 
 
 def meeting_dir(root, meeting):
     year, week, _ = meeting.start.isocalendar()
-    return root / f"{week:02d}-{year}" / f"{meeting.start:%m-%d}" / f"{meeting.start:%Hh%M}-{short_name(meeting.title)}"
+    calendar = meeting.calendar.replace("/", "-").strip(". ") or "other"
+    day = root / calendar / f"{week:02d}-{year}" / f"{meeting.start:%m-%d}"
+    return day / f"{meeting.start:%Hh%M}-{short_name(meeting.title)}"
 
 
 def short_name(title, max_length=40):
@@ -170,22 +233,19 @@ def short_name(title, max_length=40):
     return name or "meeting"
 
 
-def record(totalrecall, transcribe, directory, stop_at, tick):
-    """Records into `directory` until `stop_at` or Ctrl-C, calling `tick` every second meanwhile. Returns True when a
-    second Ctrl-C asks to quit."""
+def record(totalrecall, transcribe, directory, tick):
+    """Records into `directory` until Ctrl-C, calling `tick` every second meanwhile. Never stops the recording itself.
+    Returns True when a second Ctrl-C asks to quit."""
     directory.mkdir(parents=True, exist_ok=True)
     audio, text = free_paths(directory)
     print(f"  {audio}\n  {text}")
     recorder = subprocess.Popen([totalrecall, str(audio), "--stream"], stdout=subprocess.PIPE)
-    transcriber = subprocess.Popen([transcribe, "-", str(text), "--live"], stdin=recorder.stdout)
+    transcriber = subprocess.Popen([*transcribe, "-", str(text), "--live"], stdin=recorder.stdout)
     recorder.stdout.close()
     try:
-        while recorder.poll() is None and datetime.now() < stop_at:
+        while recorder.poll() is None:
             tick()
             time.sleep(1)
-        # Ending the recording ends the stream, and transcribe finishes the transcript from it.
-        if recorder.poll() is None:
-            recorder.send_signal(signal.SIGINT)
     except KeyboardInterrupt:
         pass  # Ctrl-C reached both tools too, and they stop the same way.
     try:
@@ -213,6 +273,21 @@ def sleep_until(seconds):
     deadline = datetime.now() + timedelta(seconds=seconds)
     while datetime.now() < deadline:
         time.sleep(min(5, max(0, (deadline - datetime.now()).total_seconds())))
+
+
+def transcribe_command(language):
+    """transcribe, with --language when given and there's a model for it. transcribe quits at once on a language it
+    has no model for, so an unknown one falls back to transcribe's default rather than risk the recording."""
+    command = [find_tool("transcribe")]
+    if not language:
+        return command
+    listing = subprocess.run([*command, "--list-languages"], capture_output=True, text=True).stdout
+    codes = [line[1:].split()[0].lower() for line in listing.splitlines() if line[1:].strip()]
+    wanted = language.lower().replace("_", "-")
+    if not any(code == wanted or code.startswith(f"{wanted}-") for code in codes):
+        print(f"warning: transcribe has no {language} model (see transcribe --list-languages); transcribing in en-US")
+        return command
+    return [*command, "--language", language]
 
 
 def find_tool(name):

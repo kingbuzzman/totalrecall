@@ -8,3 +8,5 @@
 *.caf
 *.flac
 /build/
+__pycache__/
+*.pyc
