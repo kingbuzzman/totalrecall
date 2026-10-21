@@ -2,6 +2,11 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## 0.3.1
+
+- `make install` copies the tools into `~/.local/bin` instead of symlinking them to `build/bin`, so they keep working
+  after `make clean` and don't change under you with each rebuild. Run it again to replace the old symlinks.
+
 ## 0.3.0
 
 Changes how `transcribe` prints, and what both tools accept; see the commands to use now below.

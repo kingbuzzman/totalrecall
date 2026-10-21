@@ -121,10 +121,11 @@ lint:
 	swift format lint --recursive --strict Package.swift Sources Tests
 	$(ZIZMOR) .github/workflows
 
+# Copies, not symlinks, so the installed tools outlive make clean and a rebuild. install replaces the file, or a symlink
+# left by an older make install, instead of writing through it.
 install: $(TOOLS)
 	mkdir -p $(PREFIX)/bin
-	ln -sf $(CURDIR)/$(BIN)/totalrecall $(PREFIX)/bin/totalrecall
-	ln -sf $(CURDIR)/$(BIN)/transcribe $(PREFIX)/bin/transcribe
+	install -m 755 $(TOOLS) $(PREFIX)/bin/
 
 clean:
 	rm -rf $(BUILD)

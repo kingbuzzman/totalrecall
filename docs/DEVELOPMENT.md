@@ -6,7 +6,7 @@ Needs macOS 26 or later and the Xcode Command Line Tools (`xcode-select --instal
 
 ```sh
 make            # builds build/bin/totalrecall and build/bin/transcribe
-make install    # symlinks both into ~/.local/bin (override with PREFIX=/some/dir)
+make install    # copies both into ~/.local/bin (override with PREFIX=/some/dir)
 ```
 
 The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
