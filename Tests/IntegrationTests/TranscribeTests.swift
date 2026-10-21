@@ -1,10 +1,12 @@
+import AVFoundation
 import AudioLab
 import Foundation
 import Shared
 import Speech
 import Testing
+import os
 
-/// transcribe on speech from `say`, with Apple's on-device recognizer (downloaded on first use).
+/// transcribe on speech from the system voice, with Apple's on-device recognizer (downloaded on first use).
 @Suite(.retriedOnCI)
 struct TranscribeTests {
     private static let you = "Good morning everyone, thanks for joining the call."
@@ -269,16 +271,55 @@ final class LiveTranscribe {
 }
 
 enum Speech {
+    /// `text` in the system voice, as mono samples at 48 kHz.
     static func samples(saying text: String) async throws -> [Float] {
-        let url = TestEnvironment.result("say-\(UUID().uuidString).caf")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let say = try await ProcessResult.run(
-            URL(fileURLWithPath: "/usr/bin/say"),
-            ["-o", url.path, "--data-format=LEF32@48000", text],
-            timeout: .seconds(30)
-        )
-        guard say.status == 0 else { throw SpeechError(description: "say failed: \(say.standardError)") }
-        return try Recording(contentsOf: url).left
+        let voice = try await synthesize(text)
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let ratio = format.sampleRate / voice.format.sampleRate
+        let output = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(Double(voice.frameLength) * ratio) + 1
+        )!
+        nonisolated(unsafe) var fed = false  // only touched by the converter, which calls this block in turn
+        var error: NSError?
+        AVAudioConverter(from: voice.format, to: format)!.convert(to: output, error: &error) { _, status in
+            status.pointee = fed ? .endOfStream : .haveData
+            defer { fed = true }
+            return fed ? nil : voice
+        }
+        if let error { throw error }
+        return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
+    }
+
+    /// The speech in the voice's own format, made in-process by AVSpeechSynthesizer. Speech still unfinished after 30 s
+    /// is hung: the test fails, rather than the whole run stalling until CI gives up.
+    private static func synthesize(_ text: String) async throws -> AVAudioPCMBuffer {
+        let synthesizer = AVSpeechSynthesizer()
+        defer { synthesizer.stopSpeaking(at: .immediate) }
+        let pending = OSAllocatedUnfairLock<CheckedContinuation<AVAudioPCMBuffer, any Error>?>(initialState: nil)
+        nonisolated(unsafe) var samples: [Float] = []  // only touched by the synthesizer's callback
+        return try await withCheckedThrowingContinuation { continuation in
+            pending.withLock { $0 = continuation }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+                pending.withLock { $0.take() }?.resume(throwing: SpeechError(description: "speech synthesis hung"))
+            }
+            synthesizer.write(AVSpeechUtterance(string: text)) { buffer in
+                guard let buffer = buffer as? AVAudioPCMBuffer, let channel = buffer.floatChannelData?[0] else {
+                    return
+                }
+                // Copied as they come, as the synthesizer may reuse its buffers; an empty one ends the speech.
+                guard buffer.frameLength == 0 else {
+                    return samples += UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength))
+                }
+                let speech = AVAudioPCMBuffer(
+                    pcmFormat: buffer.format,
+                    frameCapacity: AVAudioFrameCount(samples.count)
+                )!
+                speech.frameLength = speech.frameCapacity
+                speech.floatChannelData![0].update(from: samples, count: samples.count)
+                pending.withLock { $0.take() }?.resume(returning: speech)
+            }
+        }
     }
 
     static func file(saying text: String, name: String) async throws -> URL {
