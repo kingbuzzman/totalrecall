@@ -273,7 +273,8 @@ final class LiveTranscribe {
 enum Speech {
     /// `text` in the system voice, as mono samples at 48 kHz.
     static func samples(saying text: String) async throws -> [Float] {
-        let voice = try await synthesize(text)
+        // Read only by the converter below, which the macOS 26 SDK marks @Sendable; the macOS 27 SDK does not.
+        nonisolated(unsafe) let voice = try await synthesize(text)
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
         let ratio = format.sampleRate / voice.format.sampleRate
         let output = AVAudioPCMBuffer(
