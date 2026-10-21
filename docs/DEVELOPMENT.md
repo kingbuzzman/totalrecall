@@ -16,6 +16,12 @@ local time of the build; a CI build reports `<VERSION>-dev<commit>`, and only a 
 `VERSION` as is. Make sure `~/.local/bin` is on your `PATH`. Everything a build makes goes in `build/`, which `make
 clean` deletes.
 
+`make` signs both tools with the code-signing certificate `TotalRecall Local` from your keychain, so macOS keeps their
+microphone and speech permissions across rebuilds. Create it once in Keychain Access: Certificate Assistant → Create a
+Certificate, named `TotalRecall Local`, Identity Type Self-Signed Root, Certificate Type Code Signing. Use another
+certificate with `CODESIGN_IDENTITY="Apple Development: …"`, or none with `CODESIGN_IDENTITY=`; CI builds are not
+signed.
+
 ## How it works
 
 `totalrecall` uses Core Audio process taps to capture system audio directly, so there is no driver, no audio

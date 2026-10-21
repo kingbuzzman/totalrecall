@@ -33,6 +33,15 @@ SPEEXDSP_CFLAGS := -O2 -mmacosx-version-min=$(MACOS_MIN)
 # Where Package.swift's CSpeexDSP finds it.
 export PKG_CONFIG_PATH := $(SPEEXDSP)/lib/pkgconfig
 SOURCES := Package.swift $(shell find Sources -type f)
+# Each tool is signed with this certificate from the keychain, so macOS sees the same app across rebuilds and keeps its
+# permissions. CI builds, or any with CODESIGN_IDENTITY= (empty), keep the linker's ad-hoc signature. The identifier is
+# the tool's CFBundleIdentifier.
+ifeq ($(CI),true)
+CODESIGN_IDENTITY ?=
+else
+CODESIGN_IDENTITY ?= TotalRecall Local
+endif
+SIGN =$(if $(CODESIGN_IDENTITY),codesign --force --sign "$(CODESIGN_IDENTITY)" --identifier local.$(notdir $@) $@)
 INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(CURDIR)/$(BUILD)/$(1)/Info.plist
 # One build of the tools and the tests, instrumented for coverage. A debug build, the only kind in which SwiftPM gives the
 # tests' @testable imports of the tools their own entry point (in a release build with -enable-testing, Xcode 26's test
@@ -61,6 +70,7 @@ $(BIN)/totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/l
 	$(STRICT) swift build $(SWIFTPM) -c release --product totalrecall $(call INFO_PLIST,TotalRecall)
 	mkdir -p $(BIN)
 	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/totalrecall" $@
+	$(SIGN)
 
 # transcribe does not use speexdsp, but SwiftPM looks for its pkg-config file while loading the package, and warns when
 # it is missing; under make -j, that would race speexdsp's build.
@@ -68,6 +78,7 @@ $(BIN)/transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/lib
 	$(STRICT) swift build $(SWIFTPM) -c release --product transcribe $(call INFO_PLIST,Transcribe)
 	mkdir -p $(BIN)
 	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/transcribe" $@
+	$(SIGN)
 
 # Only the library, its headers and its pkg-config file, with warnings as errors: speexdsp's own test programs have
 # warnings of their own. lt_cv_apple_cc_single_mod=no skips libtool's check of -single_module, which ld warns is obsolete.
