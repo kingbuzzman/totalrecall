@@ -29,6 +29,49 @@ case .listLanguages:
         print("\(mark) \(locale.padding(toLength: 8, withPad: " ", startingAt: 0)) \(name)")
     }
     exit(0)
+case .speakersList:
+    do {
+        let db = try SpeakerDatabase()
+        let speakers = try db.allSpeakers()
+        if speakers.isEmpty {
+            print("No speakers in database.")
+        } else {
+            for speaker in speakers {
+                let name = speaker.name ?? "(unnamed)"
+                print("\(speaker.id.uuidString)  \(name)  created \(speaker.createdAt)")
+            }
+        }
+    } catch {
+        fail(error.localizedDescription)
+    }
+    exit(0)
+case .speakersLabel(let uuidString, let name):
+    do {
+        guard let uuid = UUID(uuidString: uuidString.uppercased()) else {
+            fail("invalid UUID: \(uuidString)")
+        }
+        let db = try SpeakerDatabase()
+        try db.labelSpeaker(uuid, name: name)
+        print("Labeled \(uuidString) as \"\(name)\"")
+    } catch {
+        fail(error.localizedDescription)
+    }
+    exit(0)
+case .speakersMerge(let sourceString, let targetString):
+    do {
+        guard let source = UUID(uuidString: sourceString.uppercased()) else {
+            fail("invalid source UUID: \(sourceString)")
+        }
+        guard let target = UUID(uuidString: targetString.uppercased()) else {
+            fail("invalid target UUID: \(targetString)")
+        }
+        let db = try SpeakerDatabase()
+        try db.mergeSpeakers(source: source, into: target)
+        print("Merged \(sourceString) into \(targetString)")
+    } catch {
+        fail(error.localizedDescription)
+    }
+    exit(0)
 case .help:
     print("transcribe \(version)\n\n\(usage)")
     exit(0)
@@ -98,6 +141,21 @@ do {
             try await SpeakerTranscriber(speaker: .them, locale: locale, sampleRate: source.sampleRate),
         ]
         : [try await SpeakerTranscriber(speaker: nil, locale: locale, sampleRate: source.sampleRate)]
+
+    // Set up speaker identification if enabled
+    let speakerIdentifier: SpeakerIdentifier?
+    if options.identifySpeakers {
+        let db = try SpeakerDatabase()
+        speakerIdentifier = SpeakerIdentifier(
+            database: db,
+            vad: PlaceholderVAD(),
+            embedder: PlaceholderEmbedder()
+        )
+    } else {
+        speakerIdentifier = nil
+    }
+    nonisolated(unsafe) var audioTimestamp: Double = 0
+
     // Created only now, once transcribing can start, so a failure before it leaves no empty file behind; from here on,
     // whatever has been transcribed is in it, even if transcribe is stopped part way.
     let textFile = try textURL.map(createTextFile)
@@ -114,10 +172,15 @@ do {
             group.addTask { try await transcriber.run(onUpdate: printer.update) }
         }
         let chunksReadAhead = pendingChunks
+        let sampleRate = source.sampleRate
         group.addTask {
-            for chunk in chunksReadAhead { feed(chunk, to: transcribers) }
-            let chunkFrames = Int(source.sampleRate * chunkSeconds)
-            while let chunk = try source.read(maxFrames: chunkFrames) { feed(chunk, to: transcribers) }
+            for chunk in chunksReadAhead {
+                feedWithIdentification(chunk, to: transcribers, identifier: speakerIdentifier, sampleRate: sampleRate, timestamp: &audioTimestamp)
+            }
+            let chunkFrames = Int(sampleRate * chunkSeconds)
+            while let chunk = try source.read(maxFrames: chunkFrames) {
+                feedWithIdentification(chunk, to: transcribers, identifier: speakerIdentifier, sampleRate: sampleRate, timestamp: &audioTimestamp)
+            }
             for transcriber in transcribers { try await transcriber.finish() }
         }
         try await group.waitForAll()

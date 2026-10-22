@@ -13,6 +13,8 @@ enum Speaker: String {
 /// A piece of transcript: volatile while the recognizer may still revise it, final once it no longer will.
 struct TranscriptUpdate {
     let speaker: Speaker?
+    /// Dynamic speaker name from voice identification, overrides `speaker.rawValue` when set.
+    let speakerName: String?
     let start: Double
     let text: String
     let isFinal: Bool
@@ -23,6 +25,8 @@ struct TranscriptUpdate {
 /// results are read on another.
 final class SpeakerTranscriber: @unchecked Sendable {
     let speaker: Speaker?
+    /// Dynamic speaker name from voice identification. When set, overrides `speaker.rawValue` in output.
+    var dynamicSpeakerName: String?
     let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let sourceFormat: AVAudioFormat
@@ -68,6 +72,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
             onUpdate(
                 TranscriptUpdate(
                     speaker: speaker,
+                    speakerName: dynamicSpeakerName,
                     start: result.range.start.seconds,
                     text: text,
                     isFinal: result.isFinal
@@ -109,6 +114,36 @@ func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
         return
     }
     transcribers[0].append(mixDown(chunk))
+}
+
+/// Feeds audio to transcribers and identifies speakers if an identifier is provided.
+func feedWithIdentification(
+    _ chunk: [[Float]],
+    to transcribers: [SpeakerTranscriber],
+    identifier: SpeakerIdentifier?,
+    sampleRate: Double,
+    timestamp: inout Double
+) {
+    let chunkDuration = Double(chunk.first?.count ?? 0) / sampleRate
+
+    // Identify speakers if enabled
+    if let identifier {
+        for (index, transcriber) in transcribers.enumerated() {
+            let channel = index < chunk.count ? chunk[index] : mixDown(chunk)
+            if let result = try? identifier.identify(
+                audio: channel,
+                sampleRate: sampleRate,
+                channel: index,
+                timestamp: timestamp
+            ) {
+                transcriber.dynamicSpeakerName = result.displayName
+            }
+        }
+    }
+
+    // Feed audio to transcribers
+    feed(chunk, to: transcribers)
+    timestamp += chunkDuration
 }
 
 /// The average of the channels.

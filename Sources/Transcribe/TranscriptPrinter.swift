@@ -36,7 +36,7 @@ final class TranscriptPrinter: @unchecked Sendable {
         // The recognizer sometimes reports bare punctuation, such as "." for silence.
         let hasWords = update.text.contains { $0.isLetter || $0.isNumber }
         lock.withLock {
-            let key = update.speaker?.rawValue ?? ""
+            let key = update.speakerName ?? update.speaker?.rawValue ?? ""
             if update.isFinal {
                 volatileText[key] = nil
                 if hasWords {
@@ -61,7 +61,8 @@ final class TranscriptPrinter: @unchecked Sendable {
     private static func line(_ update: TranscriptUpdate) -> String {
         let seconds = Int(update.start.isFinite ? update.start : 0)
         let time = String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-        return "[\(time)] " + (update.speaker.map { "\($0.rawValue): " } ?? "") + update.text
+        let speakerLabel = update.speakerName ?? update.speaker?.rawValue
+        return "[\(time)] " + (speakerLabel.map { "\($0): " } ?? "") + update.text
     }
 
     private func clearLiveLine() {
