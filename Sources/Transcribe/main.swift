@@ -1,3 +1,5 @@
+import AVFoundation
+import CoreML
 import Foundation
 import Shared
 import Speech
@@ -29,47 +31,63 @@ case .listLanguages:
         print("\(mark) \(locale.padding(toLength: 8, withPad: " ", startingAt: 0)) \(name)")
     }
     exit(0)
-case .speakersList:
-    do {
-        let db = try SpeakerDatabase()
-        let speakers = try db.allSpeakers()
-        if speakers.isEmpty {
-            print("No speakers in database.")
-        } else {
-            for speaker in speakers {
-                let name = speaker.name ?? "(unnamed)"
-                print("\(speaker.id.uuidString)  \(name)  created \(speaker.createdAt)")
-            }
-        }
-    } catch {
-        fail(error.localizedDescription)
+case .listSpeakers:
+    let (speakers, samples) = changingSpeakers { (try $0.speakers(), try $0.sampleCounts()) }
+    if speakers.isEmpty { print("nobody yet: transcribe --identify-speakers remembers the people it hears") }
+    for speaker in speakers {
+        let seconds = Double(speaker.prints) * SpeakerIdentifier.hopSeconds
+        let heard = seconds < 60 ? "\(Int(seconds)) s" : "\(Int((seconds / 60).rounded())) min"
+        let since = speaker.createdAt.formatted(date: .abbreviated, time: .omitted)
+        let number = String(speaker.id).padding(toLength: 4, withPad: " ", startingAt: 0)
+        let name = (speaker.name ?? (speaker.isYou ? Speaker.you.rawValue : "-")) + (speaker.isYou ? " (you)" : "")
+        let count = samples[speaker.id, default: 0]
+        let sampleCount = count == 0 ? "" : count == 1 ? ", 1 sample" : ", \(count) samples"
+        print("\(number) \(name)  (\(heard)\(sampleCount) since \(since))")
     }
     exit(0)
-case .speakersLabel(let uuidString, let name):
-    do {
-        guard let uuid = UUID(uuidString: uuidString.uppercased()) else {
-            fail("invalid UUID: \(uuidString)")
-        }
-        let db = try SpeakerDatabase()
-        try db.labelSpeaker(uuid, name: name)
-        print("Labeled \(uuidString) as \"\(name)\"")
-    } catch {
-        fail(error.localizedDescription)
+case .nameSpeaker(let speaker, let name):
+    guard changingSpeakers({ try $0.rename(speaker, to: name) }) else {
+        fail("no speaker \(speaker); see transcribe speakers")
     }
     exit(0)
-case .speakersMerge(let sourceString, let targetString):
-    do {
-        guard let source = UUID(uuidString: sourceString.uppercased()) else {
-            fail("invalid source UUID: \(sourceString)")
+case .mergeSpeaker(let speaker, let target):
+    guard changingSpeakers({ try $0.merge(speaker, into: target) }) else {
+        fail(
+            speaker == target
+                ? "a speaker is already part of themselves"
+                : "no speaker \(speaker) or \(target); see transcribe speakers"
+        )
+    }
+    exit(0)
+case .forgetSpeaker(let speaker):
+    guard changingSpeakers({ try $0.forget(speaker) }) else { fail("no speaker \(speaker); see transcribe speakers") }
+    exit(0)
+case .playSpeaker(let speaker):
+    let samples = speakerSamples(speaker)
+    for (index, sample) in samples.enumerated() {
+        print("speaker \(speaker), sample \(index + 1) of \(samples.count) (\(Int(sample.seconds.rounded())) s)")
+        // Played here rather than by another program, so it stops when transcribe does.
+        let player: AVAudioPlayer
+        do {
+            player = try AVAudioPlayer(data: sample.audio, fileTypeHint: AVFileType.m4a.rawValue)
+        } catch {
+            fail("cannot play the sample: \(error.localizedDescription)")
         }
-        guard let target = UUID(uuidString: targetString.uppercased()) else {
-            fail("invalid target UUID: \(targetString)")
+        guard player.play() else { fail("cannot play the sample") }
+        while player.isPlaying { usleep(50_000) }
+    }
+    exit(0)
+case .saveSpeakerSamples(let speaker, let directory):
+    let samples = speakerSamples(speaker)
+    let folder = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+    for (index, sample) in samples.enumerated() {
+        let url = folder.appending(path: "speaker-\(speaker)-\(index + 1).m4a")
+        do {
+            try sample.audio.write(to: url, options: .withoutOverwriting)
+        } catch {
+            fail("cannot save \(url.path): \(error.localizedDescription)")
         }
-        let db = try SpeakerDatabase()
-        try db.mergeSpeakers(source: source, into: target)
-        print("Merged \(sourceString) into \(targetString)")
-    } catch {
-        fail(error.localizedDescription)
+        print(url.path)
     }
     exit(0)
 case .help:
@@ -134,28 +152,65 @@ do {
         (separatesSpeakers, pendingChunks) = try hasSeparateSpeakers(source)
     }
 
+    // With --identify-speakers, people are told apart by voice: on the right channel, or the one mixed channel, and on
+    // your microphone, where everyone is you. It is an extra: whatever goes wrong with it is reported, and the
+    // transcript goes on without it.
+    var speakerModel: MLModel?
+    var database: SpeakerDatabase?
+    if options.identifiesSpeakers {
+        do {
+            speakerModel = try SpeakerModel.builtIn()
+        } catch {
+            warnAboutVoices("cannot tell voices apart: \(error.localizedDescription)")
+        }
+    }
+    if speakerModel != nil {
+        do {
+            database = try SpeakerDatabase()
+        } catch {
+            warnAboutVoices("speakers are not being remembered: \(error.localizedDescription)")
+        }
+    }
+    let identifier = { [speakerModel, database] (name: String, isYours: Bool) -> SpeakerIdentifier? in
+        guard let speakerModel else { return nil }
+        do {
+            return try SpeakerIdentifier(
+                name: name,
+                isYours: isYours,
+                sampleRate: source.sampleRate,
+                printer: try VoicePrinter(model: speakerModel),
+                database: database,
+                warn: warnAboutVoices
+            )
+        } catch {
+            warnAboutVoices(error.localizedDescription)
+            return nil
+        }
+    }
     let transcribers =
         separatesSpeakers
         ? [
-            try await SpeakerTranscriber(speaker: .you, locale: locale, sampleRate: source.sampleRate),
-            try await SpeakerTranscriber(speaker: .them, locale: locale, sampleRate: source.sampleRate),
+            try await SpeakerTranscriber(
+                speaker: .you,
+                locale: locale,
+                sampleRate: source.sampleRate,
+                identifier: identifier("Them", true)
+            ),
+            try await SpeakerTranscriber(
+                speaker: .them,
+                locale: locale,
+                sampleRate: source.sampleRate,
+                identifier: identifier("Them", false)
+            ),
         ]
-        : [try await SpeakerTranscriber(speaker: nil, locale: locale, sampleRate: source.sampleRate)]
-
-    // Set up speaker identification if enabled
-    let speakerIdentifier: SpeakerIdentifier?
-    if options.identifySpeakers {
-        let db = try SpeakerDatabase()
-        speakerIdentifier = SpeakerIdentifier(
-            database: db,
-            vad: PlaceholderVAD(),
-            embedder: PlaceholderEmbedder()
-        )
-    } else {
-        speakerIdentifier = nil
-    }
-    nonisolated(unsafe) var audioTimestamp: Double = 0
-
+        : [
+            try await SpeakerTranscriber(
+                speaker: nil,
+                locale: locale,
+                sampleRate: source.sampleRate,
+                identifier: identifier("Speaker", false)
+            )
+        ]
     // Created only now, once transcribing can start, so a failure before it leaves no empty file behind; from here on,
     // whatever has been transcribed is in it, even if transcribe is stopped part way.
     let textFile = try textURL.map(createTextFile)
@@ -172,15 +227,10 @@ do {
             group.addTask { try await transcriber.run(onUpdate: printer.update) }
         }
         let chunksReadAhead = pendingChunks
-        let sampleRate = source.sampleRate
         group.addTask {
-            for chunk in chunksReadAhead {
-                feedWithIdentification(chunk, to: transcribers, identifier: speakerIdentifier, sampleRate: sampleRate, timestamp: &audioTimestamp)
-            }
-            let chunkFrames = Int(sampleRate * chunkSeconds)
-            while let chunk = try source.read(maxFrames: chunkFrames) {
-                feedWithIdentification(chunk, to: transcribers, identifier: speakerIdentifier, sampleRate: sampleRate, timestamp: &audioTimestamp)
-            }
+            for chunk in chunksReadAhead { feed(chunk, to: transcribers) }
+            let chunkFrames = Int(source.sampleRate * chunkSeconds)
+            while let chunk = try source.read(maxFrames: chunkFrames) { feed(chunk, to: transcribers) }
             for transcriber in transcribers { try await transcriber.finish() }
         }
         try await group.waitForAll()
@@ -189,6 +239,32 @@ do {
     try textFile?.close()
 } catch {
     fail(error.localizedDescription)
+}
+
+/// Reports a problem with `--identify-speakers`, which the transcript goes on without.
+func warnAboutVoices(_ message: String) {
+    fputs("transcribe: --identify-speakers: \(message)\n", stderr)
+}
+
+/// A speaker's samples, longest first, failing if there are none.
+func speakerSamples(_ speaker: Int) -> [SpeakerDatabase.Sample] {
+    let (exists, samples) = changingSpeakers { (try $0.speaker(speaker) != nil, try $0.samples(of: speaker)) }
+    guard exists else { fail("no speaker \(speaker); see transcribe speakers") }
+    guard !samples.isEmpty else {
+        fail(
+            "no samples of speaker \(speaker): they are kept from stretches of \(Int(SpeakerIdentifier.shortestSample)) s or more, until they have a name"
+        )
+    }
+    return samples
+}
+
+/// Opens the speaker database for `transcribe speakers`, failing if it cannot be read or changed.
+func changingSpeakers<Result>(_ change: (SpeakerDatabase) throws -> Result) -> Result {
+    do {
+        return try change(try SpeakerDatabase())
+    } catch {
+        fail(error.localizedDescription)
+    }
 }
 
 /// Creates the text file, emptying it if it exists (`--force`).

@@ -13,11 +13,13 @@ enum Speaker: String {
 /// A piece of transcript: volatile while the recognizer may still revise it, final once it no longer will.
 struct TranscriptUpdate {
     let speaker: Speaker?
-    /// Dynamic speaker name from voice identification, overrides `speaker.rawValue` when set.
-    let speakerName: String?
     let start: Double
     let text: String
     let isFinal: Bool
+    /// Which of the people on the speaker's channel it is, such as "Them 2", with `--identify-speakers`.
+    var voice: String? = nil
+    /// Where a final line ends, when it is known.
+    var end: Double? = nil
 }
 
 /// Transcribes one speaker's audio with Apple's on-device speech recognizer, reporting in-progress text as it is
@@ -25,8 +27,8 @@ struct TranscriptUpdate {
 /// results are read on another.
 final class SpeakerTranscriber: @unchecked Sendable {
     let speaker: Speaker?
-    /// Dynamic speaker name from voice identification. When set, overrides `speaker.rawValue` in output.
-    var dynamicSpeakerName: String?
+    /// Tells apart the people on this channel, with `--identify-speakers`.
+    let identifier: SpeakerIdentifier?
     let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let sourceFormat: AVAudioFormat
@@ -39,8 +41,9 @@ final class SpeakerTranscriber: @unchecked Sendable {
     private let inputStream: AsyncStream<AnalyzerInput>
     private let input: AsyncStream<AnalyzerInput>.Continuation
 
-    init(speaker: Speaker?, locale: Locale, sampleRate: Double) async throws {
+    init(speaker: Speaker?, locale: Locale, sampleRate: Double, identifier: SpeakerIdentifier? = nil) async throws {
         self.speaker = speaker
+        self.identifier = identifier
         transcriber = Self.makeModule(locale: locale)
         analyzer = SpeechAnalyzer(modules: [transcriber])
         sourceFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
@@ -64,30 +67,55 @@ final class SpeakerTranscriber: @unchecked Sendable {
         )
     }
 
-    /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in.
-    func run(onUpdate: (TranscriptUpdate) -> Void) async throws {
+    /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in. With an
+    /// identifier, only a final line says who spoke it, once who did is settled (`SpeakerIdentifier.settle`), so it
+    /// comes a few seconds later than it would, while the words still being recognized go on showing under the
+    /// channel's name.
+    func run(onUpdate: @escaping @Sendable (TranscriptUpdate) -> Void) async throws {
         try await analyzer.start(inputSequence: inputStream)
+        let (lines, line) = AsyncStream.makeStream(of: TranscriptUpdate.self)
+        async let labeled: Void = label(lines, onUpdate: onUpdate)
         for try await result in transcriber.results {
             let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            onUpdate(
-                TranscriptUpdate(
-                    speaker: speaker,
-                    speakerName: dynamicSpeakerName,
-                    start: result.range.start.seconds,
-                    text: text,
-                    isFinal: result.isFinal
-                )
+            var update = TranscriptUpdate(
+                speaker: speaker,
+                start: result.range.start.seconds,
+                text: text,
+                isFinal: result.isFinal
             )
+            if result.isFinal, identifier != nil {
+                update.end = result.range.end.seconds
+                line.yield(update)
+            } else {
+                onUpdate(update)
+            }
+        }
+        line.finish()
+        await labeled
+    }
+
+    /// Says who spoke each line, in order, once it is settled.
+    private func label(_ lines: AsyncStream<TranscriptUpdate>, onUpdate: (TranscriptUpdate) -> Void) async {
+        guard let identifier else { return }
+        for await var update in lines {
+            let end = update.end ?? update.start
+            await identifier.settle(through: end)
+            update.voice = identifier.speaker(from: update.start, to: end)
+            onUpdate(update)
         }
     }
 
     func append(_ samples: [Float]) {
-        guard !samples.isEmpty, let buffer = convert(samples) else { return }
+        guard !samples.isEmpty else { return }
+        // Before the recognizer hears it, so who is speaking is known by the time it settles on what they said.
+        identifier?.append(samples)
+        guard let buffer = convert(samples) else { return }
         input.yield(AnalyzerInput(buffer: buffer))
     }
 
     /// Ends the audio; `run` returns once the recognizer has finalized the rest.
     func finish() async throws {
+        identifier?.finish()
         input.finish()
         try await analyzer.finalizeAndFinishThroughEndOfInput()
     }
@@ -114,36 +142,6 @@ func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
         return
     }
     transcribers[0].append(mixDown(chunk))
-}
-
-/// Feeds audio to transcribers and identifies speakers if an identifier is provided.
-func feedWithIdentification(
-    _ chunk: [[Float]],
-    to transcribers: [SpeakerTranscriber],
-    identifier: SpeakerIdentifier?,
-    sampleRate: Double,
-    timestamp: inout Double
-) {
-    let chunkDuration = Double(chunk.first?.count ?? 0) / sampleRate
-
-    // Identify speakers if enabled
-    if let identifier {
-        for (index, transcriber) in transcribers.enumerated() {
-            let channel = index < chunk.count ? chunk[index] : mixDown(chunk)
-            if let result = try? identifier.identify(
-                audio: channel,
-                sampleRate: sampleRate,
-                channel: index,
-                timestamp: timestamp
-            ) {
-                transcriber.dynamicSpeakerName = result.displayName
-            }
-        }
-    }
-
-    // Feed audio to transcribers
-    feed(chunk, to: transcribers)
-    timestamp += chunkDuration
 }
 
 /// The average of the channels.

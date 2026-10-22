@@ -1,330 +1,338 @@
 import Foundation
 import SQLite3
 
-/// Manages the speaker identification database at ~/.transcribe/speakers.db
+/// The people `--identify-speakers` has heard, so each keeps their number, or the name given with
+/// `transcribe speakers name`, from one call to the next: a SQLite database at ~/.transcribe/speakers.db, or wherever
+/// `TRANSCRIBE_SPEAKERS` in the environment says. Every change goes in as it happens, so the speakers of a call still
+/// going are already there. With each speaker go a few samples of their speech, to tell who they are by
+/// (`transcribe speakers play`), as AAC audio in an MPEG-4 file, the bytes of a .m4a. Each channel's identifier uses it
+/// from its own task, so every call is guarded by a lock.
 final class SpeakerDatabase: @unchecked Sendable {
-    private let db: OpaquePointer
+    struct Speaker: Equatable {
+        let id: Int
+        var name: String?
+        /// The average of their voice prints, and how many prints, `SpeakerIdentifier.hopSeconds` of speech each.
+        var voice: [Float]
+        var prints: Int
+        /// When they were first heard.
+        var createdAt: Date
+        /// Heard on your microphone: you.
+        var isYou: Bool
+    }
 
-    /// Opens or creates the database, initializing tables if needed.
-    init() throws {
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".transcribe", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let path = directory.appendingPathComponent("speakers.db").path
+    struct Sample: Equatable {
+        let id: Int
+        /// A .m4a file's bytes.
+        let audio: Data
+        let seconds: Double
+    }
 
-        var handle: OpaquePointer?
-        guard sqlite3_open(path, &handle) == SQLITE_OK, let db = handle else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
-            sqlite3_close(handle)
-            throw DatabaseError("cannot open database: \(message)")
+    /// Each speaker keeps their longest samples, this many.
+    static let samplesPerSpeaker = 4
+
+    static var defaultURL: URL {
+        if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] {
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         }
-        self.db = db
-        try createTables()
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".transcribe/speakers.db")
+    }
+
+    private let database: OpaquePointer
+    /// Recursive, as `merge` reads the speakers on the way.
+    private let lock = NSRecursiveLock()
+
+    init(url: URL = defaultURL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var handle: OpaquePointer?
+        guard sqlite3_open(url.path, &handle) == SQLITE_OK, let handle else {
+            let reason = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "out of memory"
+            sqlite3_close(handle)
+            throw TranscribeError("cannot open \(url.path): \(reason)")
+        }
+        database = handle
+        // Another transcribe may be writing too; it never takes long.
+        sqlite3_busy_timeout(database, 2_000)
+        do {
+            try execute("PRAGMA journal_mode = WAL")
+            // So a speaker's samples go with them.
+            try execute("PRAGMA foreign_keys = ON")
+            try execute(
+                """
+                CREATE TABLE IF NOT EXISTS speakers (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT,
+                    voice BLOB NOT NULL,
+                    prints INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    is_you INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            try execute(
+                """
+                CREATE TABLE IF NOT EXISTS samples (
+                    id INTEGER PRIMARY KEY,
+                    speaker_id INTEGER NOT NULL REFERENCES speakers (id) ON DELETE CASCADE,
+                    audio BLOB NOT NULL,
+                    seconds REAL NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
+            try execute("CREATE INDEX IF NOT EXISTS samples_speaker_id ON samples (speaker_id)")
+            try dropSamplesOfThoseWithNames()
+        } catch {
+            sqlite3_close(database)
+            throw error
+        }
     }
 
     deinit {
-        sqlite3_close(db)
+        sqlite3_close(database)
     }
 
-    // MARK: - Schema
+    /// Everyone, in the order they were first heard.
+    func speakers() throws -> [Speaker] {
+        try speakers(where: "1")
+    }
 
-    private func createTables() throws {
-        let sql = """
-            CREATE TABLE IF NOT EXISTS speakers (
-                id          BLOB PRIMARY KEY,
-                name        TEXT,
-                created_at  TEXT NOT NULL
-            );
+    func speaker(_ id: Int) throws -> Speaker? {
+        try speakers(where: "id = ?", [.integer(id)]).first
+    }
 
-            CREATE TABLE IF NOT EXISTS voice_samples (
-                id          BLOB PRIMARY KEY,
-                speaker_id  BLOB REFERENCES speakers(id),
-                embedding   BLOB NOT NULL,
-                channel     INTEGER,
-                confidence  REAL,
-                created_at  TEXT NOT NULL
-            );
+    private func speakers(where condition: String, _ values: [Value] = []) throws -> [Speaker] {
+        let sql = "SELECT id, name, voice, prints, created_at, is_you FROM speakers WHERE \(condition) ORDER BY id"
+        return try query(sql, values) { row in
+            Speaker(
+                id: row.integer(0),
+                name: row.text(1),
+                voice: row.voice(2),
+                prints: row.integer(3),
+                createdAt: Date(timeIntervalSince1970: row.real(4)),
+                isYou: row.integer(5) != 0
+            )
+        }
+    }
 
-            CREATE INDEX IF NOT EXISTS idx_samples_speaker ON voice_samples(speaker_id);
+    /// Adds someone heard for the first time, returning their number.
+    func add(voice: [Float], prints: Int) throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute(
+            "INSERT INTO speakers (voice, prints, created_at) VALUES (?, ?, ?)",
+            [.voice(voice), .integer(prints), .real(Date().timeIntervalSince1970)]
+        )
+        return Int(sqlite3_last_insert_rowid(database))
+    }
+
+    /// Saves what someone's voice has come to sound like, as they are heard. False if there is no such speaker.
+    @discardableResult
+    func update(_ id: Int, voice: [Float], prints: Int) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute(
+            "UPDATE speakers SET voice = ?, prints = ? WHERE id = ?",
+            [.voice(voice), .integer(prints), .integer(id)]
+        )
+        return sqlite3_changes(database) > 0
+    }
+
+    /// Marks someone as you, heard on your microphone. False if there is no such speaker.
+    @discardableResult
+    func markAsYou(_ id: Int) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute("UPDATE speakers SET is_you = 1 WHERE id = ?", [.integer(id)])
+        return sqlite3_changes(database) > 0
+    }
+
+    /// Names someone, or with nil takes their name away. Their samples go, as they were kept to tell who they are.
+    /// False if there is no such speaker.
+    func rename(_ id: Int, to name: String?) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute("UPDATE speakers SET name = ? WHERE id = ?", [name.map(Value.text) ?? .null, .integer(id)])
+        let renamed = sqlite3_changes(database) > 0
+        try dropSamplesOfThoseWithNames()
+        return renamed
+    }
+
+    /// Makes `id` part of `target`, for one person that was taken for two: their voices are averaged, `target` keeps
+    /// its name unless it has none, and they were first heard when the earlier of the two was. False if either is
+    /// missing.
+    func merge(_ id: Int, into target: Int) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let speakers = try speakers()
+        guard id != target, let merged = speakers.first(where: { $0.id == id }),
+            let kept = speakers.first(where: { $0.id == target })
+        else { return false }
+        let prints = merged.prints + kept.prints
+        let voice = zip(merged.voice, kept.voice).map {
+            ($0 * Float(merged.prints) + $1 * Float(kept.prints)) / Float(max(prints, 1))
+        }
+        try execute("BEGIN")
+        do {
+            try execute(
+                "UPDATE speakers SET voice = ?, prints = ?, name = ?, created_at = ?, is_you = ? WHERE id = ?",
+                [
+                    .voice(voice),
+                    .integer(prints),
+                    (kept.name ?? merged.name).map(Value.text) ?? .null,
+                    .real(min(merged.createdAt, kept.createdAt).timeIntervalSince1970),
+                    .integer(merged.isYou || kept.isYou ? 1 : 0),
+                    .integer(target),
+                ]
+            )
+            try execute("UPDATE samples SET speaker_id = ? WHERE speaker_id = ?", [.integer(target), .integer(id)])
+            try keepLongestSamples(of: target)
+            try execute("DELETE FROM speakers WHERE id = ?", [.integer(id)])
+            try dropSamplesOfThoseWithNames()
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+        return true
+    }
+
+    /// Keeps a sample of someone's speech, `seconds` long, unless they already have `samplesPerSpeaker` longer ones.
+    func addSample(_ audio: Data, seconds: Double, to speaker: Int) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute(
+            "INSERT INTO samples (speaker_id, audio, seconds, created_at) VALUES (?, ?, ?, ?)",
+            [.integer(speaker), .data(audio), .real(seconds), .real(Date().timeIntervalSince1970)]
+        )
+        try keepLongestSamples(of: speaker)
+    }
+
+    /// Someone's samples, the longest first.
+    func samples(of speaker: Int) throws -> [Sample] {
+        try query(
+            "SELECT id, audio, seconds FROM samples WHERE speaker_id = ? ORDER BY seconds DESC, id",
+            [.integer(speaker)]
+        ) { row in
+            Sample(id: row.integer(0), audio: row.data(1), seconds: row.real(2))
+        }
+    }
+
+    /// How many samples each speaker has, by number; those with none are left out.
+    func sampleCounts() throws -> [Int: Int] {
+        Dictionary(
+            uniqueKeysWithValues: try query("SELECT speaker_id, count(*) FROM samples GROUP BY speaker_id") {
+                ($0.integer(0), $0.integer(1))
+            }
+        )
+    }
+
+    /// Moves someone's samples to another speaker, keeping the longest, for one person first taken for someone new.
+    func moveSamples(of id: Int, to target: Int) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute("UPDATE samples SET speaker_id = ? WHERE speaker_id = ?", [.integer(target), .integer(id)])
+        try keepLongestSamples(of: target)
+    }
+
+    /// Samples are only for telling who someone is.
+    private func dropSamplesOfThoseWithNames() throws {
+        try execute("DELETE FROM samples WHERE speaker_id IN (SELECT id FROM speakers WHERE name IS NOT NULL)")
+    }
+
+    private func keepLongestSamples(of speaker: Int) throws {
+        try execute(
             """
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-            throw DatabaseError("cannot create tables: \(errorMessage)")
+            DELETE FROM samples WHERE speaker_id = ? AND id NOT IN
+                (SELECT id FROM samples WHERE speaker_id = ? ORDER BY seconds DESC, id LIMIT ?)
+            """,
+            [.integer(speaker), .integer(speaker), .integer(Self.samplesPerSpeaker)]
+        )
+    }
+
+    /// Takes them and their samples out. False if there is no such speaker.
+    func forget(_ id: Int) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try execute("DELETE FROM speakers WHERE id = ?", [.integer(id)])
+        return sqlite3_changes(database) > 0
+    }
+
+    // MARK: - SQLite
+
+    enum Value {
+        case integer(Int)
+        case real(Double)
+        case text(String)
+        case voice([Float])
+        case data(Data)
+        case null
+    }
+
+    /// A row of a query's result, read by column.
+    struct Row {
+        fileprivate let statement: OpaquePointer
+
+        func integer(_ column: Int32) -> Int { Int(sqlite3_column_int64(statement, column)) }
+        func real(_ column: Int32) -> Double { sqlite3_column_double(statement, column) }
+        func text(_ column: Int32) -> String? { sqlite3_column_text(statement, column).map { String(cString: $0) } }
+
+        func voice(_ column: Int32) -> [Float] {
+            let bytes = Int(sqlite3_column_bytes(statement, column))
+            var voice = [Float](repeating: 0, count: bytes / MemoryLayout<Float>.size)
+            guard let blob = sqlite3_column_blob(statement, column) else { return voice }
+            voice.withUnsafeMutableBytes { $0.copyMemory(from: UnsafeRawBufferPointer(start: blob, count: $0.count)) }
+            return voice
+        }
+
+        func data(_ column: Int32) -> Data {
+            guard let blob = sqlite3_column_blob(statement, column) else { return Data() }
+            return Data(bytes: blob, count: Int(sqlite3_column_bytes(statement, column)))
         }
     }
 
-    // MARK: - Speaker Operations
+    /// Tells SQLite to copy what is bound, as the Swift value it comes from does not outlive the call.
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    /// Creates a new speaker and returns its UUID.
-    func createSpeaker() throws -> UUID {
-        let id = UUID()
-        let sql = "INSERT INTO speakers (id, name, created_at) VALUES (?, NULL, ?)"
-        let statement = try prepare(sql)
+    private func execute(_ sql: String, _ values: [Value] = []) throws {
+        _ = try query(sql, values) { _ in () }
+    }
+
+    private func query<Result>(_ sql: String, _ values: [Value] = [], row read: (Row) -> Result) throws -> [Result] {
+        lock.lock()
+        defer { lock.unlock() }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw failure()
+        }
         defer { sqlite3_finalize(statement) }
-
-        bindUUID(id, to: statement, at: 1)
-        bindText(ISO8601DateFormatter().string(from: Date()), to: statement, at: 2)
-
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError("cannot create speaker: \(errorMessage)")
-        }
-        return id
-    }
-
-    /// Returns all speakers.
-    func allSpeakers() throws -> [IdentifiedSpeaker] {
-        let sql = "SELECT id, name, created_at FROM speakers ORDER BY created_at"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        var speakers: [IdentifiedSpeaker] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            speakers.append(IdentifiedSpeaker(
-                id: readUUID(from: statement, at: 0),
-                name: readText(from: statement, at: 1),
-                createdAt: readText(from: statement, at: 2) ?? ""
-            ))
-        }
-        return speakers
-    }
-
-    /// Sets a speaker's display name.
-    func labelSpeaker(_ id: UUID, name: String?) throws {
-        let sql = "UPDATE speakers SET name = ? WHERE id = ?"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        if let name {
-            bindText(name, to: statement, at: 1)
-        } else {
-            sqlite3_bind_null(statement, 1)
-        }
-        bindUUID(id, to: statement, at: 2)
-
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError("cannot label speaker: \(errorMessage)")
-        }
-    }
-
-    /// Merges two speakers: all samples from `source` are moved to `target`, then `source` is deleted.
-    func mergeSpeakers(source: UUID, into target: UUID) throws {
-        let updateSQL = "UPDATE voice_samples SET speaker_id = ? WHERE speaker_id = ?"
-        let updateStatement = try prepare(updateSQL)
-        defer { sqlite3_finalize(updateStatement) }
-
-        bindUUID(target, to: updateStatement, at: 1)
-        bindUUID(source, to: updateStatement, at: 2)
-
-        guard sqlite3_step(updateStatement) == SQLITE_DONE else {
-            throw DatabaseError("cannot move samples: \(errorMessage)")
-        }
-
-        let deleteSQL = "DELETE FROM speakers WHERE id = ?"
-        let deleteStatement = try prepare(deleteSQL)
-        defer { sqlite3_finalize(deleteStatement) }
-
-        bindUUID(source, to: deleteStatement, at: 1)
-
-        guard sqlite3_step(deleteStatement) == SQLITE_DONE else {
-            throw DatabaseError("cannot delete speaker: \(errorMessage)")
-        }
-    }
-
-    // MARK: - Voice Sample Operations
-
-    /// Adds a voice sample, optionally linked to a speaker.
-    func addSample(embedding: [Float], channel: Int, speakerID: UUID?, confidence: Double?) throws -> UUID {
-        let id = UUID()
-        let sql = """
-            INSERT INTO voice_samples (id, speaker_id, embedding, channel, confidence, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        bindUUID(id, to: statement, at: 1)
-        if let speakerID {
-            bindUUID(speakerID, to: statement, at: 2)
-        } else {
-            sqlite3_bind_null(statement, 2)
-        }
-        bindEmbedding(embedding, to: statement, at: 3)
-        sqlite3_bind_int(statement, 4, Int32(channel))
-        if let confidence {
-            sqlite3_bind_double(statement, 5, confidence)
-        } else {
-            sqlite3_bind_null(statement, 5)
-        }
-        bindText(ISO8601DateFormatter().string(from: Date()), to: statement, at: 6)
-
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError("cannot add sample: \(errorMessage)")
-        }
-        return id
-    }
-
-    /// Links an orphan sample to a speaker.
-    func linkSample(_ sampleID: UUID, to speakerID: UUID, confidence: Double) throws {
-        let sql = "UPDATE voice_samples SET speaker_id = ?, confidence = ? WHERE id = ?"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        bindUUID(speakerID, to: statement, at: 1)
-        sqlite3_bind_double(statement, 2, confidence)
-        bindUUID(sampleID, to: statement, at: 3)
-
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError("cannot link sample: \(errorMessage)")
-        }
-    }
-
-    /// Returns all samples with their embeddings for matching.
-    func allSamplesWithEmbeddings() throws -> [(sampleID: UUID, speakerID: UUID?, embedding: [Float])] {
-        let sql = "SELECT id, speaker_id, embedding FROM voice_samples"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        var samples: [(UUID, UUID?, [Float])] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let sampleID = readUUID(from: statement, at: 0)
-            let speakerID = readOptionalUUID(from: statement, at: 1)
-            let embedding = readEmbedding(from: statement, at: 2)
-            samples.append((sampleID, speakerID, embedding))
-        }
-        return samples
-    }
-
-    /// Returns the speaker name if set, or nil.
-    func speakerName(for id: UUID) throws -> String? {
-        let sql = "SELECT name FROM speakers WHERE id = ?"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
-
-        bindUUID(id, to: statement, at: 1)
-
-        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-        return readText(from: statement, at: 0)
-    }
-
-    // MARK: - Matching
-
-    /// Finds the best matching speaker for an embedding using cosine similarity.
-    /// Returns the speaker ID and similarity score, or nil if no match exceeds the threshold.
-    func findMatch(for embedding: [Float], threshold: Double = 0.75) throws -> (speakerID: UUID, similarity: Double)? {
-        let samples = try allSamplesWithEmbeddings()
-        var bestMatch: (speakerID: UUID, similarity: Double)?
-
-        for (_, speakerID, sampleEmbedding) in samples {
-            guard let speakerID else { continue }  // skip orphans
-            let similarity = cosineSimilarity(embedding, sampleEmbedding)
-            if similarity > threshold && (bestMatch == nil || similarity > bestMatch!.similarity) {
-                bestMatch = (speakerID, similarity)
+        for (index, value) in values.enumerated() {
+            let position = Int32(index + 1)
+            switch value {
+            case .integer(let integer): sqlite3_bind_int64(statement, position, Int64(integer))
+            case .real(let real): sqlite3_bind_double(statement, position, real)
+            case .text(let text): sqlite3_bind_text(statement, position, text, -1, Self.transient)
+            case .voice(let voice):
+                voice.withUnsafeBytes {
+                    _ = sqlite3_bind_blob(statement, position, $0.baseAddress, Int32($0.count), Self.transient)
+                }
+            case .data(let data):
+                data.withUnsafeBytes {
+                    _ = sqlite3_bind_blob(statement, position, $0.baseAddress, Int32($0.count), Self.transient)
+                }
+            case .null: sqlite3_bind_null(statement, position)
             }
         }
-        return bestMatch
-    }
-
-    // MARK: - Helpers
-
-    private var errorMessage: String {
-        String(cString: sqlite3_errmsg(db))
-    }
-
-    private func prepare(_ sql: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw DatabaseError("cannot prepare statement: \(errorMessage)")
-        }
-        return statement
-    }
-
-    private func bindUUID(_ uuid: UUID, to statement: OpaquePointer, at index: Int32) {
-        _ = withUnsafeBytes(of: uuid.uuid) { bytes in
-            sqlite3_bind_blob(statement, index, bytes.baseAddress, 16, SQLITE_TRANSIENT)
+        var rows: [Result] = []
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW: rows.append(read(Row(statement: statement)))
+            case SQLITE_DONE: return rows
+            default: throw failure()
+            }
         }
     }
 
-    private func bindText(_ text: String, to statement: OpaquePointer, at index: Int32) {
-        sqlite3_bind_text(statement, index, text, -1, SQLITE_TRANSIENT)
-    }
-
-    private func bindEmbedding(_ embedding: [Float], to statement: OpaquePointer, at index: Int32) {
-        _ = embedding.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), SQLITE_TRANSIENT)
-        }
-    }
-
-    private func readUUID(from statement: OpaquePointer, at index: Int32) -> UUID {
-        let blob = sqlite3_column_blob(statement, index)!
-        let bytes = blob.assumingMemoryBound(to: UInt8.self)
-        return UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
-    }
-
-    private func readOptionalUUID(from statement: OpaquePointer, at index: Int32) -> UUID? {
-        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
-        return readUUID(from: statement, at: index)
-    }
-
-    private func readText(from statement: OpaquePointer, at index: Int32) -> String? {
-        guard let text = sqlite3_column_text(statement, index) else { return nil }
-        return String(cString: text)
-    }
-
-    private func readEmbedding(from statement: OpaquePointer, at index: Int32) -> [Float] {
-        let blob = sqlite3_column_blob(statement, index)!
-        let count = Int(sqlite3_column_bytes(statement, index)) / MemoryLayout<Float>.size
-        let pointer = blob.assumingMemoryBound(to: Float.self)
-        return Array(UnsafeBufferPointer(start: pointer, count: count))
-    }
-
-    struct DatabaseError: LocalizedError {
-        let errorDescription: String?
-
-        init(_ description: String) {
-            errorDescription = description
-        }
+    private func failure() -> TranscribeError {
+        TranscribeError("speaker database: \(String(cString: sqlite3_errmsg(database)))")
     }
 }
-
-// MARK: - Identified Speaker Model
-
-struct IdentifiedSpeaker: Sendable {
-    let id: UUID
-    let name: String?
-    let createdAt: String
-
-    /// Display name: the speaker's name if set, otherwise a truncated UUID.
-    var displayName: String {
-        name ?? String(id.uuidString.prefix(8).lowercased())
-    }
-}
-
-// MARK: - Cosine Similarity
-
-/// Computes cosine similarity between two vectors. Returns -1 to 1, higher is more similar.
-private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Double {
-    guard a.count == b.count, !a.isEmpty else { return 0 }
-
-    var dotProduct: Float = 0
-    var normA: Float = 0
-    var normB: Float = 0
-
-    for i in 0..<a.count {
-        dotProduct += a[i] * b[i]
-        normA += a[i] * a[i]
-        normB += b[i] * b[i]
-    }
-
-    let denominator = sqrt(normA) * sqrt(normB)
-    guard denominator > 0 else { return 0 }
-
-    return Double(dotProduct / denominator)
-}
-
-// MARK: - SQLite Transient
-
-private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

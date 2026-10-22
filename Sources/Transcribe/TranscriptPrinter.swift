@@ -11,7 +11,8 @@ final class TranscriptPrinter: @unchecked Sendable {
     private let save: ((String) -> Void)?
     private let terminalWidth: () -> Int
     private let lock = NSLock()
-    private var volatileText: [String: String] = [:]
+    /// Each speaker's words still being recognized, and when they start.
+    private var volatileText: [String: (start: Double, text: String)] = [:]
 
     /// `printsLines` prints each line to stdout, and `isLive` also shows the text still being recognized there, drawn
     /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file.
@@ -36,9 +37,11 @@ final class TranscriptPrinter: @unchecked Sendable {
         // The recognizer sometimes reports bare punctuation, such as "." for silence.
         let hasWords = update.text.contains { $0.isLetter || $0.isNumber }
         lock.withLock {
-            let key = update.speakerName ?? update.speaker?.rawValue ?? ""
+            let key = update.speaker?.rawValue ?? ""
             if update.isFinal {
-                volatileText[key] = nil
+                // A line held back to say who spoke it comes while the words after it are being recognized.
+                let followsIt = update.end.flatMap { end in volatileText[key].map { $0.start >= end } } ?? false
+                if !followsIt { volatileText[key] = nil }
                 if hasWords {
                     let line = Self.line(update) + "\n"
                     save?(line)
@@ -48,7 +51,7 @@ final class TranscriptPrinter: @unchecked Sendable {
                     }
                 }
             } else {
-                volatileText[key] = hasWords ? update.text : nil
+                volatileText[key] = hasWords ? (update.start, update.text) : nil
             }
             drawLiveLine()
         }
@@ -61,8 +64,8 @@ final class TranscriptPrinter: @unchecked Sendable {
     private static func line(_ update: TranscriptUpdate) -> String {
         let seconds = Int(update.start.isFinite ? update.start : 0)
         let time = String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-        let speakerLabel = update.speakerName ?? update.speaker?.rawValue
-        return "[\(time)] " + (speakerLabel.map { "\($0): " } ?? "") + update.text
+        let label = update.voice ?? update.speaker?.rawValue
+        return "[\(time)] " + (label.map { "\($0): " } ?? "") + update.text
     }
 
     private func clearLiveLine() {
@@ -71,8 +74,8 @@ final class TranscriptPrinter: @unchecked Sendable {
 
     private func drawLiveLine() {
         guard isLive else { return }
-        let parts = volatileText.sorted { $0.key > $1.key }.filter { !$0.value.isEmpty }
-            .map { $0.key.isEmpty ? $0.value : "\($0.key): \($0.value)" }
+        let parts = volatileText.sorted { $0.key > $1.key }.filter { !$0.value.text.isEmpty }
+            .map { $0.key.isEmpty ? $0.value.text : "\($0.key): \($0.value.text)" }
         clearLiveLine()
         guard !parts.isEmpty else { return }
         // Keep it to one line, showing the most recent words.
