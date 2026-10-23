@@ -63,6 +63,10 @@ final class SpeakerIdentifier: @unchecked Sendable {
     /// The time each of `voices.labels` covers, in seconds from the start of the audio.
     private var spans: [(start: Double, end: Double)] = []
     private let database: SpeakerDatabase?
+    /// When this channel had speech, and when the other one did: on your microphone, what it heard while the system
+    /// audio had speech is left out, as it may be the speakers playing it.
+    private let speechTimes: SpeechTimes?
+    private let otherSpeechTimes: SpeechTimes?
     private let warn: (String) -> Void
     private var hasWarned = false
     private var hasWarnedAboutPrints = false
@@ -88,15 +92,18 @@ final class SpeakerIdentifier: @unchecked Sendable {
     }
 
     /// `name` is what the speakers are called, before their number; `isYours` is for your microphone; `printer` makes
-    /// the voice prints, at `VoicePrinter.sampleRate`. `warn` is told, once each, if the database cannot be read or written, and if
-    /// voices cannot be printed: people are then not remembered, or not told apart. Throws for audio it cannot tell
-    /// voices apart in.
+    /// the voice prints, at `VoicePrinter.sampleRate`. `speechTimes` is told when there was speech; the audio from when
+    /// `otherSpeechTimes` had some is left out, so it has to have heard it first. `warn` is told, once each, if the
+    /// database cannot be read or written, and if voices cannot be printed: people are then not remembered, or not
+    /// told apart. Throws for audio it cannot tell voices apart in.
     init(
         name: String,
         isYours: Bool = false,
         sampleRate: Double,
         printer: any VoicePrinting,
         database: SpeakerDatabase? = nil,
+        speechTimes: SpeechTimes? = nil,
+        otherSpeechTimes: SpeechTimes? = nil,
         warn: @escaping (String) -> Void = { _ in }
     ) throws {
         resampler = try VoiceResampler(sampleRate: sampleRate)
@@ -105,6 +112,8 @@ final class SpeakerIdentifier: @unchecked Sendable {
         self.isYours = isYours
         voices = VoiceClusters()
         self.database = database
+        self.speechTimes = speechTimes
+        self.otherSpeechTimes = otherSpeechTimes
         self.warn = warn
         remember { heardBefore = try database?.speakers() ?? [] }
     }
@@ -150,6 +159,9 @@ final class SpeakerIdentifier: @unchecked Sendable {
     }
 
     private func identify(_ window: ArraySlice<Float>) {
+        let rate = VoicePrinter.sampleRate
+        let span = (start: Double(pendingStart) / rate, end: Double(pendingStart + window.count) / rate)
+        if otherSpeechTimes?.hadSpeech(from: span.start, to: span.end) ?? false { return }
         let minimumSpeech = lock.withLock { voices.speakers.isEmpty } ? Self.firstSpeech : VoicePrinter.minimumSpeech
         let print: [Float]?
         do {
@@ -162,12 +174,11 @@ final class SpeakerIdentifier: @unchecked Sendable {
             return
         }
         guard let print else { return }
-        let rate = VoicePrinter.sampleRate
-        let span = (Double(pendingStart) / rate, Double(pendingStart + window.count) / rate)
+        speechTimes?.add(from: span.start, to: span.end)
         hasHeardAnyone = true
         lock.withLock {
             voices.add(print)
-            spans.append(span)
+            spans.append((span.start, span.end))
             save()
         }
         takeSamples(atTheEnd: false)
@@ -324,6 +335,28 @@ final class SpeakerIdentifier: @unchecked Sendable {
             guard !hasWarned else { return }
             hasWarned = true
             warn("speakers are not being remembered: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// When a channel had speech, as its identifier heard it, for the one on another channel to leave that time out.
+final class SpeechTimes: @unchecked Sendable {
+    /// How long it is remembered.
+    private static let memorySeconds = 60.0
+    private let lock = NSLock()
+    private var spans: [(start: Double, end: Double)] = []
+
+    func add(from start: Double, to end: Double) {
+        lock.withLock {
+            spans.append((start, end))
+            spans.removeAll { $0.end < end - Self.memorySeconds }
+        }
+    }
+
+    /// Whether there was speech for at least half of this time.
+    func hadSpeech(from start: Double, to end: Double) -> Bool {
+        lock.withLock {
+            spans.contains { min($0.end, end) - max($0.start, start) >= (end - start) / 2 }
         }
     }
 }

@@ -137,6 +137,24 @@ struct SpeakerIdentifierTests {
         #expect(identifier.speaker(from: 43, to: 50) == "You")
     }
 
+    @Test func takesNothingYourMicrophoneHearsWhileTheSystemAudioHasSpeechForAVoice() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let systemSpeech = SpeechTimes()
+        let theirs = try makeIdentifier(database: database, speechTimes: systemSpeech)
+        let yours = try makeIdentifier(isYours: true, database: database, otherSpeechTimes: systemSpeech)
+        let theirAudio = voice(2, seconds: 20) + voice(0, seconds: 20)
+        let yourAudio = voice(3, seconds: 20) + voice(1, seconds: 20)
+
+        let chunk = Int(Self.rate * chunkSeconds)
+        for start in stride(from: 0, to: theirAudio.count, by: chunk) {
+            theirs.append(Array(theirAudio[start..<min(start + chunk, theirAudio.count)]))
+            yours.append(Array(yourAudio[start..<min(start + chunk, yourAudio.count)]))
+        }
+
+        #expect(yours.speaker(from: 25, to: 35) == "You")
+        #expect(try database.speakers().count == 2)
+    }
+
     @Test func knowsYourVoiceWhereverElseItIsHeard() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         feed(voice(1, seconds: 40), to: try makeIdentifier(isYours: true, database: database))
@@ -241,14 +259,18 @@ struct SpeakerIdentifierTests {
         name: String = "Them",
         isYours: Bool = false,
         sampleRate: Double = rate,
-        database: SpeakerDatabase? = nil
+        database: SpeakerDatabase? = nil,
+        speechTimes: SpeechTimes? = nil,
+        otherSpeechTimes: SpeechTimes? = nil
     ) throws -> SpeakerIdentifier {
         try SpeakerIdentifier(
             name: name,
             isYours: isYours,
             sampleRate: sampleRate,
             printer: StandInPrinter(),
-            database: database
+            database: database,
+            speechTimes: speechTimes,
+            otherSpeechTimes: otherSpeechTimes
         )
     }
 

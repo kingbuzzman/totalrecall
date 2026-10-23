@@ -65,6 +65,27 @@ struct VoicePrinterTests {
         #expect(try printer.voicePrint(of: pings[...]) == nil)
     }
 
+    @Test func printsNothingOfAHum() throws {
+        let printer = try VoicePrinter(model: Self.model)
+        let hum = (0..<48_000).map { index in
+            let time = Double(index) / 16_000
+            return Float((sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.01)
+        }
+
+        #expect(try printer.voicePrint(of: hum[...]) == nil)
+    }
+
+    @Test func printsAQuietVoiceOverAHum() throws {
+        let printer = try VoicePrinter(model: Self.model)
+        let voice = Self.madeUpVoice().enumerated().map { index, sample in
+            let time = Double(index) / 16_000
+            let hum = (sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.0003
+            return sample * 0.03 + Float(hum)
+        }
+
+        #expect(try printer.voicePrint(of: voice[...]) != nil)
+    }
+
     @Test func measuresHowFarApartTwoPrintsPoint() {
         var (first, second) = ([Float](repeating: 0, count: 256), [Float](repeating: 0, count: 256))
         first[0] = 1

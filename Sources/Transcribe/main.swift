@@ -171,6 +171,8 @@ do {
             warnAboutVoices("speakers are not being remembered: \(error.localizedDescription)")
         }
     }
+    // What your microphone picks up from the speakers while the system audio has speech is not taken for anyone's voice.
+    let systemSpeech = SpeechTimes()
     let identifier = { [speakerModel, database] (name: String, isYours: Bool) -> SpeakerIdentifier? in
         guard let speakerModel else { return nil }
         do {
@@ -180,6 +182,8 @@ do {
                 sampleRate: source.sampleRate,
                 printer: try VoicePrinter(model: speakerModel),
                 database: database,
+                speechTimes: separatesSpeakers && !isYours ? systemSpeech : nil,
+                otherSpeechTimes: separatesSpeakers && isYours ? systemSpeech : nil,
                 warn: warnAboutVoices
             )
         } catch {
@@ -222,9 +226,21 @@ do {
         save: textFile.map(saveLine)
     )
 
+    // Nor are what it picks up of what they say lines of yours.
+    let echoes = separatesSpeakers ? EchoFilter(pass: printer.update) : nil
+
     try await withThrowingTaskGroup(of: Void.self) { group in
         for transcriber in transcribers {
-            group.addTask { try await transcriber.run(onUpdate: printer.update) }
+            group.addTask {
+                guard let echoes else { return try await transcriber.run(onUpdate: printer.update) }
+                guard transcriber.speaker == .them else { return try await transcriber.run(onUpdate: echoes.update) }
+                try await transcriber.run(
+                    onUpdate: echoes.update,
+                    onRecognized: echoes.theirs,
+                    onHeard: echoes.theyHaveBeenHeard
+                )
+                echoes.theyHaveFinished()
+            }
         }
         let chunksReadAhead = pendingChunks
         group.addTask {

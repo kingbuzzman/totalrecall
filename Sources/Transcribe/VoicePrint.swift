@@ -11,7 +11,7 @@ import Shared
 /// ResNet34-LM; see `SpeakerModel`). The network hears 80-band log-mel filterbank frames of 16 kHz audio, computed here
 /// as Kaldi computes them, as it was trained on; only the frames with speech go in: near a voiced one, with a pitch,
 /// which noise has not, however quiet, as someone across the room is on a headset's microphone, and with most of its
-/// sound low, as a voice's is and a notification's ping not. A print is 256 numbers, of length 1, so `voiceDistance` is
+/// sound low, as a voice's is and a notification's ping not, but not all of it, as a hum's is. A print is 256 numbers, of length 1, so `voiceDistance` is
 /// how far apart their directions are.
 final class VoicePrinter: VoicePrinting {
     static let sampleRate = 16_000.0
@@ -34,6 +34,10 @@ final class VoicePrinter: VoicePrinting {
     /// frame is voiced only with at least `lowSoundShare` of its sound that low.
     private static let lowSound = 1_000.0
     private static let lowSoundShare: Float = 0.25
+    /// Nor is a voice all below `formants`, where what it says is: in voiced frames, mostly over 0.3 of its sound is
+    /// in them, and hardly ever under 0.02; a hum, as of a fan or the mains, as steady as a voice, is all below them.
+    private static let formants = 300.0...3_400.0
+    private static let formantShare: Float = 0.02
     // Kaldi's filterbank, as WeSpeaker computes it: 25 ms frames every 10 ms, the DC offset removed, pre-emphasized,
     // Hamming-windowed, the power spectrum through 80 triangular mel bands from 20 Hz to 8 kHz, of samples at the scale
     // of 16-bit audio.
@@ -50,9 +54,10 @@ final class VoicePrinter: VoicePrinting {
     /// One triangular filter per mel band, over the FFT bins below the Nyquist frequency.
     private let filters: [[Float]]
     /// How much of each FFT bin's power is sound: none below the lowest pitch, and, above, what the pre-emphasis did
-    /// not add; and the bins below `lowSound`.
+    /// not add; and the bins below `lowSound`, and in `formants`.
     private let sound: [Float]
     private let lowBins: Int
+    private let formantBins: Range<Int>
 
     init(model: MLModel) throws {
         guard let fft = vDSP.FFT(log2n: 9, radix: .radix2, ofType: DSPSplitComplex.self) else {
@@ -82,7 +87,9 @@ final class VoicePrinter: VoicePrinting {
             let preemphasis = Double(Self.preemphasis)
             return Float(1 / (1 - 2 * preemphasis * cos(phase) + preemphasis * preemphasis))
         }
-        lowBins = Int((Self.lowSound / binWidth).rounded(.up))
+        func bin(_ frequency: Double) -> Int { Int((frequency / binWidth).rounded(.up)) }
+        lowBins = bin(Self.lowSound)
+        formantBins = bin(Self.formants.lowerBound)..<bin(Self.formants.upperBound)
     }
 
     /// The print of this audio, at `sampleRate`, or nil if less than `minimumSpeech` of it is speech.
@@ -92,7 +99,7 @@ final class VoicePrinter: VoicePrinting {
     ) throws
         -> [Float]?
     {
-        var frames: [(loudness: Float, lowShare: Float, bands: [Float])] = []
+        var frames: [(loudness: Float, lowShare: Float, formantShare: Float, bands: [Float])] = []
         var start = samples.startIndex
         while start + Self.frameLength <= samples.endIndex {
             frames.append(analyze(samples[start..<start + Self.frameLength]))
@@ -101,7 +108,7 @@ final class VoicePrinter: VoicePrinting {
         guard let loudest = frames.map(\.loudness).max() else { return nil }
         let isLoud = frames.map { $0.loudness > max(loudest - Self.speechRange, Self.silence) }
         let isVoiced = isLoud.indices.map {
-            isLoud[$0] && frames[$0].lowShare >= Self.lowSoundShare
+            isLoud[$0] && frames[$0].lowShare >= Self.lowSoundShare && frames[$0].formantShare >= Self.formantShare
                 && isPeriodic(samples, at: samples.startIndex + $0 * Self.hopLength)
         }
         var nearVoiced = [Bool](repeating: false, count: frames.count)
@@ -158,8 +165,9 @@ final class VoicePrinter: VoicePrinting {
         return vDSP.divide(print, length)
     }
 
-    /// A frame's loudness, in dB below full scale, the share of its sound below `lowSound`, and its log mel filterbank.
-    private func analyze(_ frame: ArraySlice<Float>) -> (Float, Float, [Float]) {
+    /// A frame's loudness, in dB below full scale, the shares of its sound below `lowSound` and in `formants`, and its
+    /// log mel filterbank.
+    private func analyze(_ frame: ArraySlice<Float>) -> (Float, Float, Float, [Float]) {
         let loudness = 10 * log10(vDSP.sumOfSquares(frame) / Float(frame.count) + 1e-12)
         var samples = vDSP.multiply(Self.sampleScale, frame)
         samples = vDSP.add(-vDSP.mean(samples), samples)
@@ -190,8 +198,8 @@ final class VoicePrinter: VoicePrinting {
         let bands = filters.map { log(max(vDSP.dot($0, power), Float.ulpOfOne)) }
         let sound = vDSP.multiply(power, self.sound)
         let total = vDSP.sum(sound)
-        let lowShare = total > 0 ? vDSP.sum(sound[..<lowBins]) / total : 0
-        return (loudness, lowShare, bands)
+        guard total > 0 else { return (loudness, 0, 0, bands) }
+        return (loudness, vDSP.sum(sound[..<lowBins]) / total, vDSP.sum(sound[formantBins]) / total, bands)
     }
 }
 

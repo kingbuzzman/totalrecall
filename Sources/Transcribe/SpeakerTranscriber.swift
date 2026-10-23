@@ -20,6 +20,9 @@ struct TranscriptUpdate {
     var voice: String? = nil
     /// Where a final line ends, when it is known.
     var end: Double? = nil
+    /// A final line held back a while, to say who spoke it or whether it is an echo, sent ahead so its words can go on
+    /// showing until it comes. A final line without words then says it never will.
+    var isHeld = false
 }
 
 /// Transcribes one speaker's audio with Apple's on-device speech recognizer, reporting in-progress text as it is
@@ -70,8 +73,16 @@ final class SpeakerTranscriber: @unchecked Sendable {
     /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in. With an
     /// identifier, only a final line says who spoke it, once who did is settled (`SpeakerIdentifier.settle`), so it
     /// comes a few seconds later than it would, while the words still being recognized go on showing under the
-    /// channel's name.
-    func run(onUpdate: @escaping @Sendable (TranscriptUpdate) -> Void) async throws {
+    /// channel's name. `onRecognized` gets every update the moment the recognizer makes it, and `onHeard` how far into
+    /// the audio it has listened, as it goes on, speech or not.
+    func run(
+        onUpdate: @escaping @Sendable (TranscriptUpdate) -> Void,
+        onRecognized: (@Sendable (TranscriptUpdate) -> Void)? = nil,
+        onHeard: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        if let onHeard {
+            await analyzer.setVolatileRangeChangedHandler { range, _, _ in onHeard(range.end.seconds) }
+        }
         try await analyzer.start(inputSequence: inputStream)
         let (lines, line) = AsyncStream.makeStream(of: TranscriptUpdate.self)
         async let labeled: Void = label(lines, onUpdate: onUpdate)
@@ -83,8 +94,12 @@ final class SpeakerTranscriber: @unchecked Sendable {
                 text: text,
                 isFinal: result.isFinal
             )
+            if result.isFinal { update.end = result.range.end.seconds }
+            onRecognized?(update)
             if result.isFinal, identifier != nil {
-                update.end = result.range.end.seconds
+                var held = update
+                held.isHeld = true
+                onUpdate(held)
                 line.yield(update)
             } else {
                 onUpdate(update)
@@ -138,7 +153,8 @@ final class SpeakerTranscriber: @unchecked Sendable {
 /// Hands a chunk of audio to the transcribers: one channel each, or, for a single transcriber, all channels mixed.
 func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
     guard transcribers.count == 1 else {
-        for (transcriber, channel) in zip(transcribers, chunk) { transcriber.append(channel) }
+        // The system audio first, so your microphone's identifier knows when it had speech.
+        for (transcriber, channel) in zip(transcribers, chunk).reversed() { transcriber.append(channel) }
         return
     }
     transcribers[0].append(mixDown(chunk))
