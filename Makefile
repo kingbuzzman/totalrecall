@@ -44,13 +44,12 @@ endif
 SIGN =$(if $(CODESIGN_IDENTITY),codesign --force --sign "$(CODESIGN_IDENTITY)" --identifier local.$(notdir $@) $@)
 INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(CURDIR)/$(BUILD)/$(1)/Info.plist
 # The speaker model transcribe --identify-speakers tells voices apart with, made by scripts/convert-speaker-model.py, is
-# built into transcribe: each file of the Core ML package goes into a section of its own, as SpeakerModel reads them.
+# built into transcribe: the Core ML package's model and its weights go into a section each, as SpeakerModel reads them.
 SPEAKER_MODEL := Models/SpeakerEmbedding.mlpackage
-SPEAKER_MODEL_FILES := $(SPEAKER_MODEL)/Manifest.json $(SPEAKER_MODEL)/Data/com.apple.CoreML/model.mlmodel \
+SPEAKER_MODEL_FILES := $(SPEAKER_MODEL)/Data/com.apple.CoreML/model.mlmodel \
 	$(SPEAKER_MODEL)/Data/com.apple.CoreML/weights/weight.bin
 SPEAKER_MODEL_SECTION = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker $(1) -Xlinker $(CURDIR)/$(SPEAKER_MODEL)/$(2)
-SPEAKER_MODEL_SECTIONS := $(call SPEAKER_MODEL_SECTION,__voice_manifest,Manifest.json) \
-	$(call SPEAKER_MODEL_SECTION,__voice_model,Data/com.apple.CoreML/model.mlmodel) \
+SPEAKER_MODEL_SECTIONS := $(call SPEAKER_MODEL_SECTION,__voice_model,Data/com.apple.CoreML/model.mlmodel) \
 	$(call SPEAKER_MODEL_SECTION,__voice_weights,Data/com.apple.CoreML/weights/weight.bin)
 # One build of the tools and the tests, instrumented for coverage. A debug build, the only kind in which SwiftPM gives the
 # tests' @testable imports of the tools their own entry point (in a release build with -enable-testing, Xcode 26's test
@@ -118,9 +117,11 @@ $(RELEASE): $(TOOLS) README.md
 
 # Unit and end-to-end tests, the latter against the release builds; run a subset with: make test TESTS=RecorderTests
 # Tests that need the BlackHole test devices are skipped without them, except on CI.
+# MallocScribble overwrites memory the moment it is freed, so whatever is still read after, such as weights Core ML
+# reads when it plans a model again, comes out wrong in the tests rather than now and then in a long recording.
 test: $(TOOLS) $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build $(SWIFTPM) --build-tests
-	$(UNBUFFERED) swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)') </dev/null
+	MallocScribble=1 $(UNBUFFERED) swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)') </dev/null
 
 # The tests again, on the build instrumented for coverage; fails below COVERAGE_MIN. Takes TESTS like make test.
 coverage: coverage-build

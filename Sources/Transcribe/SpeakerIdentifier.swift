@@ -41,8 +41,9 @@ final class SpeakerIdentifier: @unchecked Sendable {
     /// How much of the audio is kept, to take samples from.
     private static let historySeconds = 40.0
     /// How much further than a line the audio is heard before saying who spoke it: enough for someone new to be
-    /// recognized, from the windows that follow their first words.
-    static let settleSeconds = windowSeconds + hopSeconds
+    /// recognized, from the window whose middle has the line and the ones that follow it.
+    static let settleSeconds =
+        Double(VoiceClusters.newSpeakerPrints - 1) * hopSeconds + windowSeconds - (windowSeconds - hopSeconds) / 2
     /// Saved voices this alike may well be one person, heard as two: `transcribe speakers` says so.
     static let soundAlike: Float = 0.5
     /// Someone is saved once at least this share of their prints the transcript has caught up with have words: most
@@ -283,14 +284,21 @@ final class SpeakerIdentifier: @unchecked Sendable {
     /// someone has said words are they saved.
     func speaker(from start: Double, to end: Double) -> String? {
         lock.withLock {
+            // By the middle `hopSeconds` of each print's window, as the rest of it may be someone else's: one print's
+            // at each moment. A line in none of them, at the edge of speech, goes by the whole windows.
             var time: [Int: Double] = [:]
             var heard: [Int] = []
-            for index in spans.indices.reversed() {
-                if spans[index].end <= start { break }
-                let overlap = min(end, spans[index].end) - max(start, spans[index].start)
-                guard overlap > 0 else { continue }
-                time[voices.labels[index], default: 0] += overlap
-                heard.append(index)
+            for isMiddle in [true, false] where time.isEmpty {
+                heard = []
+                for index in spans.indices.reversed() {
+                    let span = spans[index]
+                    if span.end <= start { break }
+                    let trim = isMiddle ? max(span.end - span.start - Self.hopSeconds, 0) / 2 : 0
+                    let overlap = min(end, span.end - trim) - max(start, span.start + trim)
+                    guard overlap > 0 else { continue }
+                    time[voices.labels[index], default: 0] += overlap
+                    heard.append(index)
+                }
             }
             // The first heard of any that spoke equally long.
             let speaking = time.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key

@@ -17,9 +17,8 @@ local time of the build; a CI build reports `<VERSION>-dev<commit>`, and only a 
 clean` deletes.
 
 `make` also builds the speaker model `transcribe --identify-speakers` uses, `Models/SpeakerEmbedding.mlpackage`, into
-`transcribe`, one section of its binary per file of the Core ML package, so the tool is still a single file; the first
-time it is used, `transcribe` writes them back out and compiles the model for that Mac into
-`~/Library/Caches/totalrecall`. The package is WeSpeaker's ResNet34-LM (CC BY 4.0), converted from its ONNX export by
+`transcribe`: the Core ML package's model and weights, a section of its binary each, which Core ML loads from memory,
+so the tool is still a single file and writes nothing to disk. The package is WeSpeaker's ResNet34-LM (CC BY 4.0), converted from its ONNX export by
 `scripts/convert-speaker-model.py`, which checks the conversion against the original; only rerun it to change the model
 (`uv run scripts/convert-speaker-model.py`). `transcribe`'s unit tests load the package from `Models/` instead.
 

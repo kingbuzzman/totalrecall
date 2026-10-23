@@ -66,7 +66,9 @@ def main():
             traced,
             inputs=[ct.TensorType(name="features", shape=(1, ct.RangeDim(100, 1000, default=300), 80), dtype=np.float32)],
             outputs=[ct.TensorType(name="embedding", dtype=np.float32)],
-            minimum_deployment_target=ct.target.macOS14,
+            # transcribe needs macOS 26, but with coremltools 9.0's macOS 26 model format Core ML only runs the model
+            # at the default length (a BNNS convolution fails its shape deduction at any other); macOS 15's runs all.
+            minimum_deployment_target=ct.target.macOS15,
             compute_precision=ct.precision.FLOAT16,
         )
         model.short_description = (

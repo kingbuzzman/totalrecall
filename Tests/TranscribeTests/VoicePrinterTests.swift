@@ -7,11 +7,8 @@ import Testing
 /// The voice prints the speaker model makes, from the model in the repository, as the tests are not built with it
 /// inside.
 struct VoicePrinterTests {
-    /// Core ML models can predict from any thread.
-    nonisolated(unsafe) private static let model = try! SpeakerModel.load(
-        package: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appending(path: "Models/SpeakerEmbedding.mlpackage")
-    )
+    private static let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent().appending(path: "Models/SpeakerEmbedding.mlpackage")
 
     /// WeSpeaker's own print of `madeUpVoice`, from its Kaldi filterbank and its original ONNX model, rounded.
     private static let weSpeakersPrint: [Float] = [
@@ -37,15 +34,26 @@ struct VoicePrinterTests {
         -0.0700, 0.0366, 0.0272, -0.0038, 0.0091, -0.1302, 0.0572, 0.0971, 0.1212, 0.0155,
     ]
 
-    @Test func printsAVoiceAsWeSpeakerItselfDoes() throws {
-        let print = try #require(try VoicePrinter(model: Self.model).voicePrint(of: Self.madeUpVoice()[...]))
+    @Test func printsAVoiceAsWeSpeakerItselfDoes() async throws {
+        let print = try #require(try await printer().voicePrint(of: Self.madeUpVoice()[...]))
 
         #expect(print.count == VoicePrinter.printLength)
         #expect(voiceDistance(print, Self.weSpeakersPrint) < 0.001)
     }
 
-    @Test func printsNothingOfAudioWithTooLittleSpeech() throws {
-        let printer = try VoicePrinter(model: Self.model)
+    @Test func printsSpeechOfAnyLengthWithOneModel() async throws {
+        let printer = try await printer()
+        let voice = Self.madeUpVoice()
+
+        // Core ML plans the model again for each new length, from the weights it was loaded with.
+        for seconds in [1.5, 2.0, 2.5, 3.0, 2.2, 1.8] {
+            let speech = voice.prefix(Int(seconds * VoicePrinter.sampleRate))
+            #expect(try printer.voicePrint(of: speech, minimumSpeech: 0.5)?.count == VoicePrinter.printLength)
+        }
+    }
+
+    @Test func printsNothingOfAudioWithTooLittleSpeech() async throws {
+        let printer = try await printer()
         let silence = [Float](repeating: 0, count: 48_000)
         let briefly = Array(Self.madeUpVoice().prefix(8_000)) + [Float](repeating: 0, count: 40_000)
 
@@ -54,8 +62,8 @@ struct VoicePrinterTests {
         #expect(try printer.voicePrint(of: [Float](repeating: 0.1, count: 100)[...]) == nil)
     }
 
-    @Test func printsNothingOfANotificationsPing() throws {
-        let printer = try VoicePrinter(model: Self.model)
+    @Test func printsNothingOfANotificationsPing() async throws {
+        let printer = try await printer()
         let pings = (0..<48_000).map { index in
             let time = Double(index % 16_000) / 16_000
             let chime = [(2_100.0, 1.0), (4_200, 0.3), (5_800, 0.5)].map { sin(2 * Double.pi * $0 * time) * $1 }
@@ -65,8 +73,8 @@ struct VoicePrinterTests {
         #expect(try printer.voicePrint(of: pings[...]) == nil)
     }
 
-    @Test func printsNothingOfAHum() throws {
-        let printer = try VoicePrinter(model: Self.model)
+    @Test func printsNothingOfAHum() async throws {
+        let printer = try await printer()
         let hum = (0..<48_000).map { index in
             let time = Double(index) / 16_000
             return Float((sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.01)
@@ -75,8 +83,8 @@ struct VoicePrinterTests {
         #expect(try printer.voicePrint(of: hum[...]) == nil)
     }
 
-    @Test func printsAQuietVoiceOverAHum() throws {
-        let printer = try VoicePrinter(model: Self.model)
+    @Test func printsAQuietVoiceOverAHum() async throws {
+        let printer = try await printer()
         let voice = Self.madeUpVoice().enumerated().map { index, sample in
             let time = Double(index) / 16_000
             let hum = (sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.0003
@@ -107,6 +115,10 @@ struct VoicePrinterTests {
         #expect(abs(resampled.count - 16_000) < 200)
         #expect(try VoiceResampler(sampleRate: 16_000).resample(second) == second)
         #expect(throws: TranscribeError.self) { try VoiceResampler(sampleRate: 4_000) }
+    }
+
+    private func printer() async throws -> VoicePrinter {
+        try VoicePrinter(model: await SpeakerModel.load(package: Self.package))
     }
 
     /// 3 s at 16 kHz of 8 harmonics of 150 Hz, rising and falling 3 times a second, as scripts made `weSpeakersPrint`

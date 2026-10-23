@@ -26,6 +26,15 @@ struct SpeakerIdentifierTests {
         #expect(identifier.speaker(from: 7, to: 8) == "Them 1")
     }
 
+    @Test func tellsWhoSaidAShortLineRightAfterSomeoneElseByTheMiddleOfEachPrint() throws {
+        let identifier = try makeIdentifier()
+
+        feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: identifier)
+
+        // The window from 10.5 s to 13.5 s is as much one as the other; the one after it is all the second.
+        #expect(identifier.speaker(from: 12.6, to: 13.4) == "Them 2")
+    }
+
     @Test func tellsWhoSaidAShortLineAfterAPauseByItsOwnSound() throws {
         let identifier = try makeIdentifier()
         let pause = voice(0, seconds: 10)
@@ -283,6 +292,17 @@ struct SpeakerIdentifierTests {
         feed(voice(1, seconds: SpeakerIdentifier.settleSeconds), to: identifier)
 
         #expect(await settled.value == "Them 1")
+    }
+
+    @Test func settlesALineAtTheStartOfSomeoneNewOnceTheyAreRecognized() async throws {
+        let identifier = try makeIdentifier()
+
+        // Just as long as it takes to settle a line from 12.8 s to 13 s, their first words.
+        let audio = voice(1, seconds: 12) + voice(2, seconds: 1 + SpeakerIdentifier.settleSeconds)
+        feed(audio, to: identifier, saying: false)
+
+        await identifier.settle(through: 13)
+        #expect(identifier.speaker(from: 12.8, to: 13) == "Them 2")
     }
 
     @Test func settlesEverythingOnceTheAudioEnds() async throws {

@@ -1,10 +1,10 @@
 import AVFoundation
 import Accelerate
 import CoreML
-import CryptoKit
 import Foundation
 import MachO
 import Shared
+import Synchronization
 
 /// What a few seconds of someone's voice sounds like, to tell people apart by: a speaker embedding, from a neural
 /// network trained to give the same voice the same direction however it is spoken and whatever it says (WeSpeaker's
@@ -260,69 +260,46 @@ final class VoiceResampler {
 
 /// The speaker model: WeSpeaker's ResNet34-LM, trained on VoxCeleb, CC BY 4.0
 /// (https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM), converted to Core ML into
-/// Models/SpeakerEmbedding.mlpackage by scripts/convert-speaker-model.py. The Makefile builds the package's files into
-/// transcribe, as sections of its binary, so it stays one file to install; the first time, they are written back out
-/// and compiled for this Mac, into ~/Library/Caches/totalrecall, and loaded from there after.
+/// Models/SpeakerEmbedding.mlpackage by scripts/convert-speaker-model.py. The Makefile builds the package's model and
+/// weights into transcribe, as sections of its binary, so it stays one file to install, and Core ML loads them from
+/// there, in memory. They must stay there for as long as the model is used: Core ML reads the weights again whenever
+/// it plans the model for a length of speech it has not had yet.
 enum SpeakerModel {
-    /// The package's files and the sections they are built into, as the Makefile names them.
-    static let files = [
-        ("__voice_manifest", "Manifest.json"),
-        ("__voice_model", "Data/com.apple.CoreML/model.mlmodel"),
-        ("__voice_weights", "Data/com.apple.CoreML/weights/weight.bin"),
-    ]
+    /// The package's files, as the Makefile builds them in: the model, which names its weights `weights`, and those.
+    private static let model = "Data/com.apple.CoreML/model.mlmodel"
+    private static let weights = "Data/com.apple.CoreML/weights/weight.bin"
+    private static let weightsName = "weights/weight.bin"
+    /// Packages' models and weights, kept from when they are loaded on.
+    private static let loaded = Mutex<[Data]>([])
 
     /// The model built into transcribe.
-    static func builtIn() throws -> MLModel {
-        let contents = try files.map { section, path in (path, try self.section(section)) }
-        var hash = SHA256()
-        for (_, data) in contents { hash.update(data: data) }
-        let name = hash.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
-        let caches = try FileManager.default.url(
-            for: .cachesDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
+    static func builtIn() async throws -> MLModel {
+        try await load(model: section("__voice_model"), weights: section("__voice_weights"))
+    }
+
+    /// The model of a package, such as Models/SpeakerEmbedding.mlpackage for the tests.
+    static func load(package: URL) async throws -> MLModel {
+        let (model, weights) = try (
+            Data(contentsOf: package.appending(path: model)), Data(contentsOf: package.appending(path: weights))
         )
-        let compiled = caches.appending(path: "totalrecall/speaker-model-\(name).mlmodelc")
-        if !FileManager.default.fileExists(atPath: compiled.path) {
-            let package = FileManager.default.temporaryDirectory.appending(path: "speaker-model-\(UUID()).mlpackage")
-            defer { try? FileManager.default.removeItem(at: package) }
-            for (path, data) in contents {
-                let url = package.appending(path: path)
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try data.write(to: url)
-            }
-            let temporary = try MLModel.compileModel(at: package)
-            try FileManager.default.createDirectory(
-                at: compiled.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            // Another transcribe may have compiled it meanwhile; either one will do.
-            try? FileManager.default.moveItem(at: temporary, to: compiled)
-        }
-        return try load(compiled: compiled)
+        loaded.withLock { $0 += [model, weights] }
+        return try await load(model: model, weights: weights)
     }
 
-    /// A model package from a file, such as Models/SpeakerEmbedding.mlpackage for the tests.
-    static func load(package: URL) throws -> MLModel {
-        try load(compiled: MLModel.compileModel(at: package))
-    }
-
-    private static func load(compiled: URL) throws -> MLModel {
+    private static func load(model: Data, weights: Data) async throws -> MLModel {
+        let asset = try MLModelAsset(specification: model, blobMapping: [URL(string: weightsName)!: weights])
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .all
-        return try MLModel(contentsOf: compiled, configuration: configuration)
+        return try await MLModel.load(asset: asset, configuration: configuration)
     }
 
+    /// A section of transcribe's binary, where it is: mapped in for as long as transcribe runs, and never freed.
     private static func section(_ name: String) throws -> Data {
         var size: UInt = 0
         let header = #dsohandle.assumingMemoryBound(to: mach_header_64.self)
         guard let bytes = getsectiondata(header, "__TEXT", name, &size), size > 0 else {
             throw TranscribeError("this transcribe was built without its speaker model; build it with make")
         }
-        return Data(bytes: bytes, count: Int(size))
+        return Data(bytesNoCopy: bytes, count: Int(size), deallocator: .none)
     }
 }

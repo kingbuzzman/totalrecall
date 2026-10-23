@@ -164,7 +164,7 @@ do {
     var database: SpeakerDatabase?
     if options.identifiesSpeakers {
         do {
-            speakerModel = try SpeakerModel.builtIn()
+            speakerModel = try await SpeakerModel.builtIn()
         } catch {
             warnAboutVoices("cannot tell voices apart: \(error.localizedDescription)")
         }
@@ -232,7 +232,8 @@ do {
     )
 
     // Nor are what it picks up of what they say lines of yours.
-    let echoes = separatesSpeakers ? EchoFilter(pass: printer.update) : nil
+    let levels = separatesSpeakers ? ChannelLevels(sampleRate: source.sampleRate) : nil
+    let echoes = separatesSpeakers ? EchoFilter(levels: levels, pass: printer.update) : nil
 
     try await withThrowingTaskGroup(of: Void.self) { group in
         for transcriber in transcribers {
@@ -249,9 +250,15 @@ do {
         }
         let chunksReadAhead = pendingChunks
         group.addTask {
-            for chunk in chunksReadAhead { feed(chunk, to: transcribers) }
+            for chunk in chunksReadAhead {
+                levels?.add(chunk)
+                feed(chunk, to: transcribers)
+            }
             let chunkFrames = Int(source.sampleRate * chunkSeconds)
-            while let chunk = try source.read(maxFrames: chunkFrames) { feed(chunk, to: transcribers) }
+            while let chunk = try source.read(maxFrames: chunkFrames) {
+                levels?.add(chunk)
+                feed(chunk, to: transcribers)
+            }
             for transcriber in transcribers { try await transcriber.finish() }
         }
         try await group.waitForAll()

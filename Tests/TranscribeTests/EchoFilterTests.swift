@@ -72,6 +72,33 @@ struct EchoFilterTests {
         #expect(passed.updates.last?.end == 4)
     }
 
+    @Test func leavesOutWhatYourMicrophoneHeardFarQuieterThanThemHoweverGarbled() {
+        let levels = ChannelLevels(sampleRate: 1_000)
+        // 10 s: you quiet, 30 dB below them, then 10 s of you about as loud as them.
+        levels.add([[Float](repeating: 0.0005, count: 10_000), [Float](repeating: 0.015, count: 10_000)])
+        levels.add([[Float](repeating: 0.01, count: 10_000), [Float](repeating: 0.015, count: 10_000)])
+        let passed = passed
+        let filter = EchoFilter(levels: levels, pass: { passed.append($0) })
+
+        filter.update(line(.you, 2, 4, "Love you."))
+        filter.update(line(.you, 12, 14, "Sorry, I have to step out."))
+        filter.theyHaveFinished()
+
+        #expect(passed.texts == ["Sorry, I have to step out."])
+    }
+
+    @Test func keepsYourQuietLinesWhileTheSystemAudioIsSilent() {
+        let levels = ChannelLevels(sampleRate: 1_000)
+        levels.add([[Float](repeating: 0.0005, count: 10_000), [Float](repeating: 0, count: 10_000)])
+        let passed = passed
+        let filter = EchoFilter(levels: levels, pass: { passed.append($0) })
+
+        filter.update(line(.you, 2, 4, "Love you."))
+        filter.theyHaveFinished()
+
+        #expect(passed.texts == ["Love you."])
+    }
+
     @Test func passesEverythingOnceTheyHaveFinished() {
         let filter = makeFilter()
         filter.update(line(.you, 0, 3, "Welcome back to the channel."))
