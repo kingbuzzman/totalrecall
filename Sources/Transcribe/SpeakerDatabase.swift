@@ -29,6 +29,10 @@ final class SpeakerDatabase: @unchecked Sendable {
 
     /// Each speaker keeps their longest samples, this many.
     static let samplesPerSpeaker = 4
+    /// Saved voices this alike, of those heard this many prints at least, are one person: different people's are
+    /// rarely closer than 0.5.
+    static let samePerson: Float = 0.35
+    static let samePersonPrints = SpeakerIdentifier.settledPrints
 
     static var defaultURL: URL {
         if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] {
@@ -194,6 +198,38 @@ final class SpeakerDatabase: @unchecked Sendable {
             throw error
         }
         return true
+    }
+
+    /// Folds together those who are surely one person taken for two, as someone is told apart from their first few
+    /// prints, and an earlier call may have heard them differently: someone with no name into whoever sounds the most
+    /// like them, if within `samePerson` and both have been heard for at least `samePersonPrints`; and two given the
+    /// same name, if they sound alike at all. Two with different names are never folded together. Returns who was
+    /// folded into whom, in turn.
+    func unify() throws -> [(merged: Speaker, into: Speaker)] {
+        lock.lock()
+        defer { lock.unlock() }
+        var unified: [(merged: Speaker, into: Speaker)] = []
+        while true {
+            let speakers = try speakers()
+            let pairs = speakers.flatMap { merged in
+                speakers.compactMap { kept -> (Speaker, Speaker, Float)? in
+                    guard merged.id != kept.id else { return nil }
+                    let distance = voiceDistance(merged.voice, kept.voice)
+                    if let name = merged.name {
+                        guard name == kept.name, merged.prints <= kept.prints, distance < SpeakerIdentifier.soundAlike
+                        else { return nil }
+                    } else {
+                        guard distance < Self.samePerson, min(merged.prints, kept.prints) >= Self.samePersonPrints,
+                            kept.name != nil || merged.prints <= kept.prints
+                        else { return nil }
+                    }
+                    return (merged, kept, distance)
+                }
+            }
+            guard let (merged, kept, _) = pairs.min(by: { $0.2 < $1.2 }) else { return unified }
+            guard try merge(merged.id, into: kept.id) else { return unified }
+            unified.append((merged, kept))
+        }
     }
 
     /// Keeps a sample of someone's speech, `seconds` long, unless they already have `samplesPerSpeaker` longer ones.

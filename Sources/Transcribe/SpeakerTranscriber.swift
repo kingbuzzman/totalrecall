@@ -115,7 +115,10 @@ final class SpeakerTranscriber: @unchecked Sendable {
         for await var update in lines {
             let end = update.end ?? update.start
             await identifier.settle(through: end)
-            update.voice = identifier.speaker(from: update.start, to: end)
+            // Not for bare punctuation, which is no one's words.
+            if update.text.contains(where: { $0.isLetter || $0.isNumber }) {
+                update.voice = identifier.speaker(from: update.start, to: end)
+            }
             onUpdate(update)
         }
     }

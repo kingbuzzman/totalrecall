@@ -42,7 +42,12 @@ case .listSpeakers:
         let name = (speaker.name ?? (speaker.isYou ? Speaker.you.rawValue : "-")) + (speaker.isYou ? " (you)" : "")
         let count = samples[speaker.id, default: 0]
         let sampleCount = count == 0 ? "" : count == 1 ? ", 1 sample" : ", \(count) samples"
-        print("\(number) \(name)  (\(heard)\(sampleCount) since \(since))")
+        // Maybe one person, heard as two: not alike enough to be merged without being told to.
+        let alike = speakers.filter {
+            $0.id != speaker.id && voiceDistance($0.voice, speaker.voice) < SpeakerIdentifier.soundAlike
+        }
+        let soundsLike = alike.isEmpty ? "" : "  sounds like " + alike.map { String($0.id) }.joined(separator: ", ")
+        print("\(number) \(name)  (\(heard)\(sampleCount) since \(since))\(soundsLike)")
     }
     exit(0)
 case .nameSpeaker(let speaker, let name):
@@ -253,6 +258,18 @@ do {
     }
     printer.finish()
     try textFile?.close()
+    for forgotten in transcribers.compactMap(\.identifier).flatMap({ $0.forgetThoseWhoSaidTooLittle() }) {
+        fputs("transcribe: speaker \(forgotten) said too few words for how long they were heard: forgot them\n", stderr)
+    }
+    // Some heard as two people may turn out to be one, now that more of them has been heard.
+    do {
+        for (merged, kept) in try database?.unify() ?? [] {
+            let name = kept.name.map { " (\($0))" } ?? ""
+            fputs("transcribe: speaker \(merged.id) sounds the same as \(kept.id)\(name): merged them\n", stderr)
+        }
+    } catch {
+        warnAboutVoices("cannot merge speakers: \(error.localizedDescription)")
+    }
 } catch {
     fail(error.localizedDescription)
 }

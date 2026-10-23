@@ -33,11 +33,21 @@ final class SpeakerIdentifier: @unchecked Sendable {
     static let longestSample = 15.0
     /// Who spoke a stretch is taken as decided this many prints after it, as someone new is recognized in a few.
     static let sampleDelay = 4
+    /// Samples of those not saved yet, as they have said no words yet, are kept until they have, up to this many.
+    private static let unsavedSampleCount = 8
+    /// A line no print covers is printed by itself, with this much around it, and at least this long.
+    private static let lineMargin = 0.25
+    private static let shortestLine = 1.5
     /// How much of the audio is kept, to take samples from.
     private static let historySeconds = 40.0
     /// How much further than a line the audio is heard before saying who spoke it: enough for someone new to be
     /// recognized, from the windows that follow their first words.
     static let settleSeconds = windowSeconds + hopSeconds
+    /// Saved voices this alike may well be one person, heard as two: `transcribe speakers` says so.
+    static let soundAlike: Float = 0.5
+    /// Someone is saved once at least this share of their prints the transcript has caught up with have words: most
+    /// of someone talking does, and little of music, or a sound, that a word was said over now and then.
+    static let spokenShare = 1.0 / 3
 
     private let name: String
     private let isYours: Bool
@@ -52,7 +62,8 @@ final class SpeakerIdentifier: @unchecked Sendable {
     /// Until anyone has been heard: where in `pending` the first words were last tried.
     private var hasHeardAnyone = false
     private var triedFirst = 0
-    /// The last of the audio, from `historyStart` in it, for samples; only `append` and `finish` touch them.
+    /// The last of the audio, from `historyStart` in it, for samples and for lines no print covers; only `append`
+    /// changes them, under the lock, as `speaker(from:to:)` reads them.
     private var history: [Float] = []
     private var historyStart = 0
     /// How many prints have been looked at for samples, and the stretch of someone's speech going on at the last.
@@ -79,6 +90,11 @@ final class SpeakerIdentifier: @unchecked Sendable {
     private var people: [Int: Person] = [:]
     /// How many prints of each of this call's speakers have been saved.
     private var savedPrints: [Int: Int] = [:]
+    /// The prints of words in the transcript, by their place in `voices.labels`, and how far into the audio it has
+    /// said who spoke: only someone who says words is saved, not music or a noise that sounds like a voice.
+    private var spokenPrints: Set<Int> = []
+    private var wordsHeardThrough = 0.0
+    private var unsavedSamples: [(speaker: Int, audio: [Float], seconds: Double)] = []
 
     private struct Person {
         let id: Int
@@ -121,11 +137,13 @@ final class SpeakerIdentifier: @unchecked Sendable {
     func append(_ samples: [Float]) {
         let resampled = resampler.resample(samples)
         pending += resampled
-        history += resampled
-        let kept = Int(VoicePrinter.sampleRate * Self.historySeconds)
-        if history.count > kept * 3 / 2 {
-            historyStart += history.count - kept
-            history.removeFirst(history.count - kept)
+        lock.withLock {
+            history += resampled
+            let kept = Int(VoicePrinter.sampleRate * Self.historySeconds)
+            if history.count > kept * 3 / 2 {
+                historyStart += history.count - kept
+                history.removeFirst(history.count - kept)
+            }
         }
         if !hasHeardAnyone, pending.count < windowFrames,
             pending.count - triedFirst >= Int(VoicePrinter.sampleRate * Self.firstTrySeconds)
@@ -149,6 +167,27 @@ final class SpeakerIdentifier: @unchecked Sendable {
         pending = []
         takeSamples(atTheEnd: true)
         lock.withLock { hasEnded = true }
+    }
+
+    /// Once every line has said who spoke it: takes back out of the database anyone added on this call who, in the
+    /// end, said words in less than `spokenShare` of their prints, and has no name, as music, or a sound, that a word
+    /// was said over at first. Returns their numbers.
+    func forgetThoseWhoSaidTooLittle() -> [Int] {
+        lock.withLock {
+            guard let database else { return [] }
+            var forgotten: [Int] = []
+            for (number, person) in people where person.isNew {
+                let prints = voices.labels.indices.filter { voices.labels[$0] == number }
+                let words = prints.filter(spokenPrints.contains).count
+                guard Double(words) < Double(prints.count) * Self.spokenShare else { continue }
+                remember {
+                    guard try database.speaker(person.id)?.name == nil, try database.forget(person.id) else { return }
+                    forgotten.append(person.id)
+                    people[number] = nil
+                }
+            }
+            return forgotten.sorted()
+        }
     }
 
     /// Returns once who spoke up to `time` is settled: the audio has gone `settleSeconds` past it, or it has ended.
@@ -212,34 +251,60 @@ final class SpeakerIdentifier: @unchecked Sendable {
     }
 
     private func keepSample(of stretch: (speaker: Int, start: Double, end: Double)) {
-        let seconds = min(stretch.end - stretch.start, Self.longestSample)
-        let start = Int(stretch.start * VoicePrinter.sampleRate) - historyStart
+        // Each print goes by the middle of its window, as the rest of it may be someone else's.
+        let edge = (Self.windowSeconds - Self.hopSeconds) / 2
+        let seconds = min(stretch.end - stretch.start - 2 * edge, Self.longestSample)
+        let start = Int((stretch.start + edge) * VoicePrinter.sampleRate) - historyStart
         let end = start + Int(seconds * VoicePrinter.sampleRate)
-        guard seconds >= Self.shortestSample, start >= 0, end <= history.count, let database else { return }
+        guard seconds >= Self.shortestSample, start >= 0, end <= history.count else { return }
         lock.withLock {
-            guard let id = people[stretch.speaker]?.id else { return }
-            remember {
-                guard try database.speaker(id)?.name == nil else { return }
-                try database.addSample(try m4a(history[start..<end]), seconds: seconds, to: id)
+            if let id = people[stretch.speaker]?.id {
+                return saveSample(history[start..<end], seconds: seconds, of: id)
             }
+            unsavedSamples.append((stretch.speaker, Array(history[start..<end]), seconds))
+            unsavedSamples.sort { $0.seconds > $1.seconds }
+            if unsavedSamples.count > Self.unsavedSampleCount { unsavedSamples.removeLast() }
         }
     }
 
-    /// Who spoke the most between `start` and `end`, in seconds from the start of the audio: their name if they have
-    /// one, else their number, or just "Them" while they have spoken too little to be saved. Whoever spoke last if
-    /// nobody has been heard in that time yet, which happens when the transcriber settles on words before the window
-    /// they are in has been printed; nil if nobody has been heard.
+    /// Only for someone with no name, who needs one.
+    private func saveSample(_ audio: ArraySlice<Float>, seconds: Double, of id: Int) {
+        guard let database else { return }
+        remember {
+            guard try database.speaker(id)?.name == nil else { return }
+            try database.addSample(try m4a(audio), seconds: seconds, to: id)
+        }
+    }
+
+    /// Who said the words between `start` and `end`, in seconds from the start of the audio: whoever spoke the most
+    /// then, by their name if they have one, else their number, or just "Them" while they have spoken too little to be
+    /// saved. Words too few for any print to have been taken of them, as a short line after a pause, go to whoever
+    /// their own audio sounds like, else to whoever spoke just before; nil if nobody is known to have. Only once
+    /// someone has said words are they saved.
     func speaker(from start: Double, to end: Double) -> String? {
         lock.withLock {
             var time: [Int: Double] = [:]
-            for (span, speaker) in zip(spans, voices.labels).reversed() {
-                if span.end <= start { break }
-                let overlap = min(end, span.end) - max(start, span.start)
-                if overlap > 0 { time[speaker, default: 0] += overlap }
+            var heard: [Int] = []
+            for index in spans.indices.reversed() {
+                if spans[index].end <= start { break }
+                let overlap = min(end, spans[index].end) - max(start, spans[index].start)
+                guard overlap > 0 else { continue }
+                time[voices.labels[index], default: 0] += overlap
+                heard.append(index)
             }
             // The first heard of any that spoke equally long.
-            guard let speaker = time.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key ?? voices.labels.last
-            else { return nil }
+            let speaking = time.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key
+            wordsHeardThrough = max(wordsHeardThrough, end)
+            if let speaking {
+                let spoken = heard.filter { voices.labels[$0] == speaking }
+                if !spokenPrints.isSuperset(of: spoken) {
+                    spokenPrints.formUnion(spoken)
+                    save()
+                }
+            }
+            guard let speaker = speaking ?? speaker(soundingLike: start, end) ?? speaker(justBefore: start) else {
+                return nil
+            }
             // Looked up each time, so a name given while the call goes on is used from then on.
             var saved: SpeakerDatabase.Speaker?
             if let person = people[speaker] { remember { saved = try database?.speaker(person.id) } }
@@ -250,6 +315,27 @@ final class SpeakerIdentifier: @unchecked Sendable {
             // which on your microphone is what a line with no speaker would say.
             return database == nil ? "\(name) \(speaker)" : name
         }
+    }
+
+    /// Whoever the audio from `start` to `end` sounds like, of those heard so far, from a print of it alone.
+    private func speaker(soundingLike start: Double, _ end: Double) -> Int? {
+        let rate = VoicePrinter.sampleRate
+        // At least the second the speaker model takes, around the words.
+        let middle = (start + end) / 2
+        let half = max((end - start) / 2 + Self.lineMargin, Self.shortestLine / 2)
+        let first = max(Int((middle - half) * rate) - historyStart, 0)
+        let last = min(Int((middle + half) * rate) - historyStart, history.count)
+        guard last - first >= Int(Self.shortestLine * rate),
+            let print = try? printer.voicePrint(of: history[first..<last], minimumSpeech: Self.firstSpeech)
+        else { return nil }
+        let nearest = voices.speakers.min { voiceDistance(print, $0.center) < voiceDistance(print, $1.center) }
+        return nearest.flatMap { voiceDistance(print, $0.center) <= VoiceClusters.maximumRadius ? $0.number : nil }
+    }
+
+    /// Whoever was heard last, if that was right before `time`.
+    private func speaker(justBefore time: Double) -> Int? {
+        guard let last = spans.last, last.end >= time - Self.windowSeconds else { return nil }
+        return voices.labels.last
     }
 
     /// Brings the database up to date with this call's speakers: someone is added, or recognized as someone heard
@@ -263,7 +349,16 @@ final class SpeakerIdentifier: @unchecked Sendable {
             people[number] = nil
             savedPrints[number] = nil
         }
+        var (heard, spoken): ([Int: Int], [Int: Int]) = ([:], [:])
+        for (index, span) in spans.enumerated() {
+            let hasWords = spokenPrints.contains(index)
+            if hasWords || span.end <= wordsHeardThrough { heard[voices.labels[index], default: 0] += 1 }
+            if hasWords { spoken[voices.labels[index], default: 0] += 1 }
+        }
         for speaker in voices.speakers where savedPrints[speaker.number] != speaker.count {
+            let words = Double(spoken[speaker.number] ?? 0)
+            let isSpeaking = words > 0 && words >= Double(heard[speaker.number] ?? 0) * Self.spokenShare
+            guard people[speaker.number] != nil || isSpeaking else { continue }
             remember {
                 // Someone new only once they have been heard as long as it takes to tell someone new apart, so a
                 // cough or a moment of noise does not stay behind as a speaker.
@@ -289,6 +384,11 @@ final class SpeakerIdentifier: @unchecked Sendable {
                 savedPrints[speaker.number] = speaker.count
             }
         }
+        unsavedSamples.removeAll { !speakers.contains($0.speaker) }
+        for sample in unsavedSamples {
+            if let id = people[sample.speaker]?.id { saveSample(sample.audio[...], seconds: sample.seconds, of: id) }
+        }
+        unsavedSamples.removeAll { people[$0.speaker] != nil }
         // Not before it is clear who you are, so someone else who happens to speak first is not saved as you.
         guard let you, let person = people[you], !person.isYou,
             let yours = voices.speakers.first(where: { $0.number == you })?.count, yours >= Self.settledYou,
@@ -469,7 +569,8 @@ struct VoiceClusters {
     }
 
     /// Makes someone new of the largest group of alike prints that sound like nobody, if it is large enough and
-    /// sounds unlike everyone so far.
+    /// sounds unlike everyone so far; or, if it only sounds like someone known from fewer prints than that, such as
+    /// the first speaker, who is made of the first print heard, makes it theirs: that print was them on an odd moment.
     private mutating func recognizeNewSpeaker() {
         let groups = unexplained.map { member in
             unexplained.filter { voiceDistance($0.print, member.print) <= Self.alike }
@@ -481,16 +582,30 @@ struct VoiceClusters {
         }
         let spread = group.map { voiceDistance($0.print, center) }.reduce(0, +) / Float(group.count)
         let gap = max(Self.minimumGap, Self.spreadsPerGap * spread)
-        guard speakers.allSatisfy({ voiceDistance(center, $0.center) > gap }) else { return }
-        let number = (speakers.map(\.number).max() ?? 0) + 1
-        speakers.append(Speaker(number: number, center: center, spread: Self.initialSpread, count: group.count))
+        let near = speakers.indices.filter { voiceDistance(center, speakers[$0].center) <= gap }
+        let number: Int
+        if near.isEmpty {
+            number = (speakers.map(\.number).max() ?? 0) + 1
+            speakers.append(Speaker(number: number, center: center, spread: Self.initialSpread, count: group.count))
+            current = speakers.count - 1
+        } else if near.count == 1, speakers[near[0]].count < Self.newSpeakerPrints {
+            let known = speakers[near[0]]
+            let total = Float(known.count + group.count)
+            speakers[near[0]].center = zip(known.center, center).map {
+                ($0 * Float(known.count) + $1 * Float(group.count)) / total
+            }
+            speakers[near[0]].count += group.count
+            number = known.number
+            current = near[0]
+        } else {
+            return
+        }
         let members = Set(group.map(\.index))
         for index in members {
             labels[index] = number
             isSure[index] = true
         }
         unexplained.removeAll { members.contains($0.index) }
-        current = speakers.count - 1
     }
 }
 

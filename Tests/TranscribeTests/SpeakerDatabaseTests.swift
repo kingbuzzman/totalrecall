@@ -48,6 +48,27 @@ struct SpeakerDatabaseTests {
         #expect(try !database.merge(first, into: second))
     }
 
+    @Test func unifiesThoseSurelyOnePerson() throws {
+        let database = try SpeakerDatabase(url: url)
+        let ada = try database.add(voice: direction(0), prints: 20)
+        let alsoAda = try database.add(voice: direction(0, 0.2), prints: 5)
+        let notSure = try database.add(voice: direction(0, 1.2), prints: 30)
+        let heardBriefly = try database.add(voice: direction(0, 0.1), prints: 3)
+        let grace = try database.add(voice: direction(10), prints: 20)
+        let graceAgain = try database.add(voice: direction(10, 0.5), prints: 8)
+        let notGrace = try database.add(voice: direction(10, 0.1), prints: 10)
+        _ = try database.rename(ada, to: "Ada")
+        _ = try database.rename(grace, to: "Grace")
+        _ = try database.rename(graceAgain, to: "Grace")
+        _ = try database.rename(notGrace, to: "Linus")
+
+        let unified = try database.unify()
+
+        #expect(unified.map { [$0.merged.id, $0.into.id] } == [[alsoAda, ada], [graceAgain, grace]])
+        #expect(try database.speakers().map(\.id) == [ada, notSure, heardBriefly, grace, notGrace])
+        #expect(try database.unify().isEmpty)
+    }
+
     @Test func marksYouAndKeepsYouThroughAMerge() throws {
         let database = try SpeakerDatabase(url: url)
         let you = try database.add(voice: [0], prints: 1)
@@ -101,5 +122,13 @@ struct SpeakerDatabaseTests {
         #expect(try database.sampleCounts().isEmpty)
         #expect(try !database.forget(id))
         #expect(try !database.update(id, voice: [1], prints: 2))
+    }
+
+    /// A made-up voice print: direction `axis`, turned `turn` toward the next one.
+    private func direction(_ axis: Int, _ turn: Float = 0) -> [Float] {
+        var voice = [Float](repeating: 0, count: VoicePrinter.printLength)
+        voice[axis] = cos(turn)
+        voice[axis + 1] = sin(turn)
+        return voice
     }
 }
