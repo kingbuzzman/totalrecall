@@ -2,6 +2,28 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## 0.4.0
+
+### transcribe
+
+- `--identify-speakers` tells people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, ... with `--mix` or on a
+  recording without the You/Them split). It runs on both channels, so several people on your mic or on the call each
+  get their own number. Everyone is saved in `~/.transcribe/speakers.db` as they are heard, so they keep their number
+  from call to call. The speaker model is built into `transcribe`: there is nothing more to install or download, and
+  no Python.
+  - It is cautious: someone only becomes a new person after a few seconds of a voice unlike everyone so far, and only
+    stays one if they said enough words. Notification pings, hum, music and other sounds without speech are not taken
+    for people.
+  - When a run ends, people with no name who surely are the same person are merged.
+  - A voice-detection failure prints a warning on stderr; the transcript goes on without speaker numbers.
+- `transcribe speakers` lists the people it remembers, and flags pairs that sound alike. `name 3 Ada` names one,
+  `merge 5 3` makes 5 part of 3, and `forget 5` takes one out.
+- `transcribe speakers play 3` plays the 4 longest samples kept of someone with no name yet, to tell who they are;
+  `speakers save 3 <directory>` saves them as `.m4a` files. A person's samples are deleted once they are named.
+- What your microphone picks up from your speakers is left out of your lines: a line that repeats what the call was
+  saying at that moment, or one far quieter than the call, however garbled. So each of your lines waits a few seconds
+  to settle; with `--live`, it stays on the live line, in grey, until it does.
+
 ## 0.3.1
 
 - `make install` copies the tools into `~/.local/bin` instead of symlinking them to `build/bin`, so they keep working

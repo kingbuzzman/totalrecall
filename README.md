@@ -109,7 +109,7 @@ transcribe --list-languages
 | --- | --- |
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
-| `--identify-speakers` | Tell the people on the right channel apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call; your mic is always `You` |
+| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them` |
 | `speakers` | List the people `--identify-speakers` remembers; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, `forget 5` takes one out |
 | `speakers play 3`, `speakers save 3 <directory>` | Play the samples kept of someone with no name yet, their 4 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
