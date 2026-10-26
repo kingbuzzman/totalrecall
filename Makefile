@@ -43,12 +43,20 @@ CODESIGN_IDENTITY ?= TotalRecall Local
 endif
 SIGN =$(if $(CODESIGN_IDENTITY),codesign --force --sign "$(CODESIGN_IDENTITY)" --identifier local.$(notdir $@) $@)
 INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(CURDIR)/$(BUILD)/$(1)/Info.plist
+# The speaker model transcribe --identify-speakers tells voices apart with, made by scripts/convert-speaker-model.py, is
+# built into transcribe: the Core ML package's model and its weights go into a section each, as SpeakerModel reads them.
+SPEAKER_MODEL := Models/SpeakerEmbedding.mlpackage
+SPEAKER_MODEL_FILES := $(SPEAKER_MODEL)/Data/com.apple.CoreML/model.mlmodel \
+	$(SPEAKER_MODEL)/Data/com.apple.CoreML/weights/weight.bin
+SPEAKER_MODEL_SECTION = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker $(1) -Xlinker $(CURDIR)/$(SPEAKER_MODEL)/$(2)
+SPEAKER_MODEL_SECTIONS := $(call SPEAKER_MODEL_SECTION,__voice_model,Data/com.apple.CoreML/model.mlmodel) \
+	$(call SPEAKER_MODEL_SECTION,__voice_weights,Data/com.apple.CoreML/weights/weight.bin)
 # One build of the tools and the tests, instrumented for coverage. A debug build, the only kind in which SwiftPM gives the
 # tests' @testable imports of the tools their own entry point (in a release build with -enable-testing, Xcode 26's test
 # runner starts transcribe instead of the tests); the tools must come from the same build for their coverage to add up
 # with the tests'. Both tools get totalrecall's Info.plist, which only matters for their version.
 COVERAGE_FLAGS := -c debug --scratch-path $(BUILD)/swiftpm-coverage \
-	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall)
+	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall) $(SPEAKER_MODEL_SECTIONS)
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75
 COVERAGE_REPORT := $(BUILD)/coverage
@@ -74,8 +82,8 @@ $(BIN)/totalrecall: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/l
 
 # transcribe does not use speexdsp, but SwiftPM looks for its pkg-config file while loading the package, and warns when
 # it is missing; under make -j, that would race speexdsp's build.
-$(BIN)/transcribe: $(SOURCES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
-	$(STRICT) swift build $(SWIFTPM) -c release --product transcribe $(call INFO_PLIST,Transcribe)
+$(BIN)/transcribe: $(SOURCES) $(SPEAKER_MODEL_FILES) $(BUILD)/Transcribe/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+	$(STRICT) swift build $(SWIFTPM) -c release --product transcribe $(call INFO_PLIST,Transcribe) $(SPEAKER_MODEL_SECTIONS)
 	mkdir -p $(BIN)
 	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/transcribe" $@
 	$(SIGN)
@@ -109,16 +117,18 @@ $(RELEASE): $(TOOLS) README.md
 
 # Unit and end-to-end tests, the latter against the release builds; run a subset with: make test TESTS=RecorderTests
 # Tests that need the BlackHole test devices are skipped without them, except on CI.
+# MallocScribble overwrites memory the moment it is freed, so whatever is still read after, such as weights Core ML
+# reads when it plans a model again, comes out wrong in the tests rather than now and then in a long recording.
 test: $(TOOLS) $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build $(SWIFTPM) --build-tests
-	$(UNBUFFERED) swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)') </dev/null
+	MallocScribble=1 $(UNBUFFERED) swift test $(SWIFTPM) --skip-build $(if $(TESTS),--filter '$(TESTS)') </dev/null
 
 # The tests again, on the build instrumented for coverage; fails below COVERAGE_MIN. Takes TESTS like make test.
 coverage: coverage-build
 	COVERAGE_MIN=$(COVERAGE_MIN) COVERAGE_REPORT=$(COVERAGE_REPORT) scripts/coverage.sh "$$($(MAKE) -s coverage-bin)" \
 		$(UNBUFFERED) swift test --skip-build $(COVERAGE_FLAGS) $(if $(TESTS),--filter '$(TESTS)') </dev/null
 
-coverage-build: $(SOURCES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+coverage-build: $(SOURCES) $(SPEAKER_MODEL_FILES) $(BUILD)/TotalRecall/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
 	$(STRICT) swift build --build-tests $(COVERAGE_FLAGS)
 
 # Where coverage-build puts the tools, which CI grants the audio permissions to.

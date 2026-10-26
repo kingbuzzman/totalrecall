@@ -11,6 +11,9 @@ import os
 struct TranscribeTests {
     private static let you = "Good morning everyone, thanks for joining the call."
     private static let them = "Happy to be here, let's get started."
+    private static let themAtLength =
+        "Happy to be here, let's get started. The first item is the release schedule for next month. "
+        + "The second item is the budget, which we will go through line by line before the end of the call."
 
     @Test(.needsSpeechRecognition) func transcribesARecording() async throws {
         let file = try await Speech.file(saying: "The quick brown fox jumps over the lazy dog.", name: "fox.caf")
@@ -30,6 +33,54 @@ struct TranscribeTests {
         #expect(labels.allSatisfy { $0 == "You:" || $0 == "Them:" }, "\(result.standardOutput)")
         #expect(result.standardOutput.contains("You: Good morning"))
         #expect(result.standardOutput.contains("Them: Happy to be here"))
+    }
+
+    @Test(.needsSpeechRecognition) func numbersAndRemembersThePeopleOnTheRightChannelWithIdentifySpeakers()
+        async throws
+    {
+        let speakers = ["TRANSCRIBE_SPEAKERS": TestEnvironment.result("speakers-\(UUID().uuidString).db").path]
+
+        // Them long enough to be remembered; you not.
+        let result = try await ProcessResult.run(
+            TestEnvironment.transcribe,
+            ["--identify-speakers", try await conversation(them: Self.themAtLength).path],
+            environment: speakers
+        )
+        let list = try await ProcessResult.run(TestEnvironment.transcribe, ["speakers"], environment: speakers)
+
+        #expect(result.status == 0, "\(result.standardError)")
+        #expect(result.standardOutput.contains("You: Good morning"), "\(result.standardOutput)")
+        #expect(result.standardOutput.contains("Them 1: Happy to be here"), "\(result.standardOutput)")
+        #expect(list.status == 0, "\(list.standardError)")
+        #expect(list.standardOutput.split(separator: "\n").count == 1, "\(list.standardOutput)")
+        #expect(list.standardOutput.hasPrefix("1    -  ("), "\(list.standardOutput)")
+    }
+
+    @Test(.needsSpeechRecognition) func leavesOutWhatYourMicrophonePicksUpFromTheSpeakers() async throws {
+        let result = try await transcribe(try await conversation(them: Self.themAtLength, echoed: true).path)
+
+        #expect(result.status == 0, "\(result.standardError)")
+        #expect(result.standardOutput.contains("You: Good morning"), "\(result.standardOutput)")
+        #expect(result.standardOutput.contains("Them: Happy to be here"), "\(result.standardOutput)")
+        #expect(!saysTheirWords(onYourLines: result.standardOutput), "\(result.standardOutput)")
+    }
+
+    @Test(.needsSpeechRecognition) func takesWhatYourMicrophonePicksUpFromTheSpeakersForNobodyWithIdentifySpeakers()
+        async throws
+    {
+        let speakers = ["TRANSCRIBE_SPEAKERS": TestEnvironment.result("speakers-\(UUID().uuidString).db").path]
+
+        let result = try await ProcessResult.run(
+            TestEnvironment.transcribe,
+            ["--identify-speakers", try await conversation(them: Self.themAtLength, echoed: true).path],
+            environment: speakers
+        )
+        let list = try await ProcessResult.run(TestEnvironment.transcribe, ["speakers"], environment: speakers)
+
+        #expect(result.status == 0, "\(result.standardError)")
+        #expect(result.standardOutput.contains("Them 1: Happy to be here"), "\(result.standardOutput)")
+        #expect(!saysTheirWords(onYourLines: result.standardOutput), "\(result.standardOutput)")
+        #expect(list.standardOutput.split(separator: "\n").count == 1, "\(list.standardOutput)")
     }
 
     @Test(.needsSpeechRecognition) func transcribesBothChannelsTogetherWithMix() async throws {
@@ -204,14 +255,23 @@ struct TranscribeTests {
             + WAVStream.samples([speech, speech], count: speech.count)
     }
 
-    /// totalrecall's channel split: you on the left, then them on the right.
-    private func conversation() async throws -> URL {
+    /// totalrecall's channel split: you on the left, then them on the right; `echoed`, your microphone also picks them
+    /// up from the speakers, 20 dB quieter and 50 ms later, as the echo canceller leaves them.
+    private func conversation(them words: String = them, echoed: Bool = false) async throws -> URL {
         let you = try await Speech.samples(saying: Self.you)
-        let them = try await Speech.samples(saying: Self.them)
+        let them = try await Speech.samples(saying: words)
         let url = TestEnvironment.result("conversation-\(UUID().uuidString).caf")
         let silence = { [Float](repeating: 0, count: $0) }
-        try writeAudioFile([you + silence(them.count), silence(you.count) + them], sampleRate: 48_000, to: url)
+        let echo = echoed ? silence(2_400) + them.dropLast(2_400).map { $0 / 10 } : silence(them.count)
+        try writeAudioFile([you + echo, silence(you.count) + them], sampleRate: 48_000, to: url)
         return url
+    }
+
+    /// Whether a line of yours has words only they said.
+    private func saysTheirWords(onYourLines transcript: String) -> Bool {
+        transcript.lowercased().split(separator: "\n").contains { line in
+            line.contains("] you: ") && ["happy", "release", "budget"].contains { line.contains($0) }
+        }
     }
 
     private func transcribe(_ arguments: String...) async throws -> ProcessResult {

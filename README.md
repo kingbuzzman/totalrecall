@@ -98,8 +98,10 @@ totalrecall --list-mics
 | `-` as output | Only stream WAV to stdout, without saving a file |
 
 ```sh
-transcribe [--language LANG] [--mix] [--force] <audio-file> [<text-file>]
-transcribe [--language LANG] [--mix] [--force] [--live] - [<text-file>]
+transcribe [--language LANG] [--mix] [--identify-speakers] [--force] <audio-file> [<text-file>]
+transcribe [--language LANG] [--mix] [--identify-speakers] [--force] [--live] - [<text-file>]
+transcribe speakers [name <number> <name> | merge <number> <into-number> | forget <number>]
+transcribe speakers [play <number> | save <number> <directory>]
 transcribe --list-languages
 ```
 
@@ -107,6 +109,9 @@ transcribe --list-languages
 | --- | --- |
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
+| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them` |
+| `speakers` | List the people `--identify-speakers` remembers; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, `forget 5` takes one out |
+| `speakers play 3`, `speakers save 3 <directory>` | Play the samples kept of someone with no name yet, their 4 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
 | `-` as input | Transcribe a live WAV stream from stdin, such as `totalrecall -` |
 | `--live` | With `-`: show the live transcript, words still being recognized included, even with a `<text-file>` |
@@ -128,6 +133,15 @@ Both tools also take `--version` and `--help`.
 - **Lines come out as they settle.** `transcribe` writes each line the moment the recognizer is sure of it. With you and
   the others on separate channels, each has its own recognizer, so a `You` line can come out before an earlier `Them`
   line, from a file more so, as both race through it.
+- **`--identify-speakers` goes by voice alone, and is cautious.** It tells voices apart with a speaker-recognition model
+  built into `transcribe`, on this Mac, and only takes someone for a new person after a few seconds of a voice unlike
+  everyone so far: a quick "yes" from a newcomer goes to whoever they sound most like. A line where two people talk
+  goes to whoever spoke longer, which matters most with `--mix`, where the recognizer often runs two people's turns
+  into one line. Live, each line waits a few seconds after it is spoken, while the words still being recognized go on
+  showing, so a newcomer's first words are theirs too. People keep their number from call to call; name them with
+  `transcribe speakers name`. Until someone
+  has a name, a few short samples of their speech are kept in `~/.transcribe/speakers.db` too, so you can tell who they
+  are with `transcribe speakers play`; `transcribe speakers forget` deletes them along with the person.
 - **The stream ending doesn't end the recording.** With `--stream`, if the program reading it exits, `totalrecall` says
   so and keeps recording the file.
 - **AirPods sound lower quality.** Their Bluetooth call profile records at about 24 kHz. That's fine for transcripts,
@@ -136,3 +150,10 @@ Both tools also take `--version` and `--help`.
   completely.
 - **The first transcription in a language takes longer** while Apple's speech model downloads.
 - **Tell people you're recording.** Some places require everyone's consent.
+
+## Credits
+
+`transcribe --identify-speakers` tells voices apart with [WeSpeaker](https://github.com/wenet-e2e/wespeaker)'s
+[ResNet34-LM speaker model](https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM), trained on
+[VoxCeleb](https://www.robots.ox.ac.uk/~vgg/data/voxceleb/), under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); it is converted to Core ML, unchanged otherwise.

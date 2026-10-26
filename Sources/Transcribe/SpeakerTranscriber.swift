@@ -16,6 +16,13 @@ struct TranscriptUpdate {
     let start: Double
     let text: String
     let isFinal: Bool
+    /// Which of the people on the speaker's channel it is, such as "Them 2", with `--identify-speakers`.
+    var voice: String? = nil
+    /// Where a final line ends, when it is known.
+    var end: Double? = nil
+    /// A final line held back a while, to say who spoke it or whether it is an echo, sent ahead so its words can go on
+    /// showing until it comes. A final line without words then says it never will.
+    var isHeld = false
 }
 
 /// Transcribes one speaker's audio with Apple's on-device speech recognizer, reporting in-progress text as it is
@@ -23,6 +30,8 @@ struct TranscriptUpdate {
 /// results are read on another.
 final class SpeakerTranscriber: @unchecked Sendable {
     let speaker: Speaker?
+    /// Tells apart the people on this channel, with `--identify-speakers`.
+    let identifier: SpeakerIdentifier?
     let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let sourceFormat: AVAudioFormat
@@ -35,8 +44,9 @@ final class SpeakerTranscriber: @unchecked Sendable {
     private let inputStream: AsyncStream<AnalyzerInput>
     private let input: AsyncStream<AnalyzerInput>.Continuation
 
-    init(speaker: Speaker?, locale: Locale, sampleRate: Double) async throws {
+    init(speaker: Speaker?, locale: Locale, sampleRate: Double, identifier: SpeakerIdentifier? = nil) async throws {
         self.speaker = speaker
+        self.identifier = identifier
         transcriber = Self.makeModule(locale: locale)
         analyzer = SpeechAnalyzer(modules: [transcriber])
         sourceFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
@@ -60,29 +70,70 @@ final class SpeakerTranscriber: @unchecked Sendable {
         )
     }
 
-    /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in.
-    func run(onUpdate: (TranscriptUpdate) -> Void) async throws {
+    /// Starts recognizing; results go to `onUpdate` until `finish()` has been called and the last one is in. With an
+    /// identifier, only a final line says who spoke it, once who did is settled (`SpeakerIdentifier.settle`), so it
+    /// comes a few seconds later than it would, while the words still being recognized go on showing under the
+    /// channel's name. `onRecognized` gets every update the moment the recognizer makes it, and `onHeard` how far into
+    /// the audio it has listened, as it goes on, speech or not.
+    func run(
+        onUpdate: @escaping @Sendable (TranscriptUpdate) -> Void,
+        onRecognized: (@Sendable (TranscriptUpdate) -> Void)? = nil,
+        onHeard: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        if let onHeard {
+            await analyzer.setVolatileRangeChangedHandler { range, _, _ in onHeard(range.end.seconds) }
+        }
         try await analyzer.start(inputSequence: inputStream)
+        let (lines, line) = AsyncStream.makeStream(of: TranscriptUpdate.self)
+        async let labeled: Void = label(lines, onUpdate: onUpdate)
         for try await result in transcriber.results {
             let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-            onUpdate(
-                TranscriptUpdate(
-                    speaker: speaker,
-                    start: result.range.start.seconds,
-                    text: text,
-                    isFinal: result.isFinal
-                )
+            var update = TranscriptUpdate(
+                speaker: speaker,
+                start: result.range.start.seconds,
+                text: text,
+                isFinal: result.isFinal
             )
+            if result.isFinal { update.end = result.range.end.seconds }
+            onRecognized?(update)
+            if result.isFinal, identifier != nil {
+                var held = update
+                held.isHeld = true
+                onUpdate(held)
+                line.yield(update)
+            } else {
+                onUpdate(update)
+            }
+        }
+        line.finish()
+        await labeled
+    }
+
+    /// Says who spoke each line, in order, once it is settled.
+    private func label(_ lines: AsyncStream<TranscriptUpdate>, onUpdate: (TranscriptUpdate) -> Void) async {
+        guard let identifier else { return }
+        for await var update in lines {
+            let end = update.end ?? update.start
+            await identifier.settle(through: end)
+            // Not for bare punctuation, which is no one's words.
+            if update.text.contains(where: { $0.isLetter || $0.isNumber }) {
+                update.voice = identifier.speaker(from: update.start, to: end)
+            }
+            onUpdate(update)
         }
     }
 
     func append(_ samples: [Float]) {
-        guard !samples.isEmpty, let buffer = convert(samples) else { return }
+        guard !samples.isEmpty else { return }
+        // Before the recognizer hears it, so who is speaking is known by the time it settles on what they said.
+        identifier?.append(samples)
+        guard let buffer = convert(samples) else { return }
         input.yield(AnalyzerInput(buffer: buffer))
     }
 
     /// Ends the audio; `run` returns once the recognizer has finalized the rest.
     func finish() async throws {
+        identifier?.finish()
         input.finish()
         try await analyzer.finalizeAndFinishThroughEndOfInput()
     }
@@ -105,7 +156,8 @@ final class SpeakerTranscriber: @unchecked Sendable {
 /// Hands a chunk of audio to the transcribers: one channel each, or, for a single transcriber, all channels mixed.
 func feed(_ chunk: [[Float]], to transcribers: [SpeakerTranscriber]) {
     guard transcribers.count == 1 else {
-        for (transcriber, channel) in zip(transcribers, chunk) { transcriber.append(channel) }
+        // The system audio first, so your microphone's identifier knows when it had speech.
+        for (transcriber, channel) in zip(transcribers, chunk).reversed() { transcriber.append(channel) }
         return
     }
     transcribers[0].append(mixDown(chunk))

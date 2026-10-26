@@ -16,6 +16,12 @@ local time of the build; a CI build reports `<VERSION>-dev<commit>`, and only a 
 `VERSION` as is. Make sure `~/.local/bin` is on your `PATH`. Everything a build makes goes in `build/`, which `make
 clean` deletes.
 
+`make` also builds the speaker model `transcribe --identify-speakers` uses, `Models/SpeakerEmbedding.mlpackage`, into
+`transcribe`: the Core ML package's model and weights, a section of its binary each, which Core ML loads from memory,
+so the tool is still a single file and writes nothing to disk. The package is WeSpeaker's ResNet34-LM (CC BY 4.0), converted from its ONNX export by
+`scripts/convert-speaker-model.py`, which checks the conversion against the original; only rerun it to change the model
+(`uv run scripts/convert-speaker-model.py`). `transcribe`'s unit tests load the package from `Models/` instead.
+
 `make` signs both tools with the code-signing certificate `TotalRecall Local` from your keychain, so macOS keeps their
 microphone and speech permissions across rebuilds. Create it once in Keychain Access: Certificate Assistant → Create a
 Certificate, named `TotalRecall Local`, Identity Type Self-Signed Root, Certificate Type Code Signing. Use another
@@ -54,7 +60,7 @@ rerouting, and nothing to reconfigure.
 | Folder | Contents |
 | --- | --- |
 | `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
-| `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, and the transcript printer |
+| `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, telling people apart by voice, and the transcript printer |
 | `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, and the version |
 | `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 

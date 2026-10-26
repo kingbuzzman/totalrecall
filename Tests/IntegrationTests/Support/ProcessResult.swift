@@ -14,12 +14,14 @@ struct ProcessResult {
         _ executable: URL,
         _ arguments: [String],
         input: Data? = nil,
+        environment: [String: String] = [:],
         timeout: Duration = .seconds(120),
         sourceLocation: SourceLocation = #_sourceLocation
     ) async throws -> ProcessResult {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
         let (output, error) = (Pipe(), Pipe())
         process.standardOutput = output
         process.standardError = error

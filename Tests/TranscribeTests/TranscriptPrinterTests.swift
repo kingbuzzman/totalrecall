@@ -99,6 +99,72 @@ struct TranscriptPrinterTests {
         #expect(output.text == Self.clearLine + "[00:00:00] You: Right.\n" + Self.clearLine + dimmed("… Them: so the"))
     }
 
+    @Test func labelsALineWithWhoOnTheChannelSpokeIt() {
+        let printer = makePrinter(saves: true)
+        printer.update(TranscriptUpdate(speaker: .them, start: 3, text: "Hi.", isFinal: true, voice: "Them 2"))
+
+        #expect(saved.text == "[00:00:03] Them 2: Hi.\n")
+    }
+
+    @Test func clearsTheChannelsLiveTextOnceTheLineSaysWhoSpokeIt() {
+        let printer = makePrinter(live: true)
+        printer.update(TranscriptUpdate(speaker: .them, start: 0, text: "so the", isFinal: false))
+        output.clear()
+
+        printer.update(TranscriptUpdate(speaker: .them, start: 0, text: "So the.", isFinal: true, voice: "Them 2"))
+
+        #expect(output.text == Self.clearLine + "[00:00:00] Them 2: So the.\n" + Self.clearLine)
+    }
+
+    @Test func keepsShowingTheWordsAfterALineHeldBackToSayWhoSpokeIt() {
+        let printer = makePrinter(live: true)
+        printer.update(TranscriptUpdate(speaker: .them, start: 6, text: "and then", isFinal: false))
+        output.clear()
+
+        printer.update(
+            TranscriptUpdate(speaker: .them, start: 2, text: "Hello there.", isFinal: true, voice: "Them 2", end: 4)
+        )
+
+        #expect(
+            output.text == Self.clearLine + "[00:00:02] Them 2: Hello there.\n" + Self.clearLine
+                + dimmed("… Them: and then")
+        )
+    }
+
+    @Test func keepsShowingALineHeldBackUntilItComes() {
+        let printer = makePrinter(live: true)
+        printer.update(TranscriptUpdate(speaker: .them, start: 2, text: "Hello the", isFinal: false))
+        printer.update(
+            TranscriptUpdate(speaker: .them, start: 2, text: "Hello there.", isFinal: true, end: 4, isHeld: true)
+        )
+        printer.update(TranscriptUpdate(speaker: .them, start: 6, text: "and then", isFinal: false))
+        #expect(output.text.hasSuffix(dimmed("… Them: Hello there. and then")))
+        output.clear()
+
+        printer.update(
+            TranscriptUpdate(speaker: .them, start: 2, text: "Hello there.", isFinal: true, voice: "Them 2", end: 4)
+        )
+
+        #expect(
+            output.text == Self.clearLine + "[00:00:02] Them 2: Hello there.\n" + Self.clearLine
+                + dimmed("… Them: and then")
+        )
+    }
+
+    @Test func stopsShowingALineHeldBackThatNeverComes() {
+        let printer = makePrinter(live: true, saves: true)
+        printer.update(
+            TranscriptUpdate(speaker: .you, start: 2, text: "Hello there.", isFinal: true, end: 4, isHeld: true)
+        )
+        printer.update(TranscriptUpdate(speaker: .you, start: 6, text: "and then", isFinal: false))
+        output.clear()
+
+        printer.update(TranscriptUpdate(speaker: .you, start: 2, text: "", isFinal: true, end: 4))
+
+        #expect(output.text == Self.clearLine + dimmed("… You: and then"))
+        #expect(saved.text.isEmpty)
+    }
+
     @Test func keepsTheMostRecentWordsThatFitTheTerminal() {
         let printer = makePrinter(live: true, width: 21)
 
