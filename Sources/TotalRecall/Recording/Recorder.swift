@@ -134,6 +134,11 @@ final class Recorder {
         lock.withLock { track(input).secondsSinceLastBuffer }
     }
 
+    /// How many buffers the capture has delivered; it changes only when audio really arrives.
+    func deliveries(from input: Input) -> Int {
+        lock.withLock { track(input).deliveries }
+    }
+
     /// Peaks since the previous call.
     func levels() -> LevelSnapshot {
         lock.withLock {
@@ -191,7 +196,7 @@ final class Recorder {
         let end = min(samples.count, Int(endOffset.rounded(.down)))
         guard end > 0 else {
             // The capture is alive, even though its audio is from after the recording.
-            track.resetStallTimer()
+            track.noteDroppedBuffer()
             return nil
         }
         return end == samples.count ? samples : Array(samples[..<end])

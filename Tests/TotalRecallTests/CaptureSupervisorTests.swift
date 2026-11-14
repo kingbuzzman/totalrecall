@@ -1,3 +1,4 @@
+import CoreAudio
 import Testing
 
 @testable import TotalRecall
@@ -120,7 +121,7 @@ struct CaptureSupervisorTests {
         supervisor.supervise()
 
         #expect((system.stops, system.starts) == (1, 1))
-        #expect(announcements.messages == ["system audio capture restarted"])
+        #expect(announcements.messages.isEmpty)
         #expect(recorder.secondsSinceAudio(from: .system) < captureStallSeconds)
     }
 
@@ -132,6 +133,37 @@ struct CaptureSupervisorTests {
         supervisor.supervise()
 
         #expect(announcements.messages == ["system audio unavailable, retrying: tap failed"])
+    }
+
+    @Test func waitsLongerBeforeEachRetryOfSystemAudio() async throws {
+        try await Task.sleep(for: .seconds(captureStallSeconds + 0.1))
+        supervisor.supervise()
+        try await Task.sleep(for: .seconds(0.7))
+        recorder.resetStallTimer(for: .microphone)
+        supervisor.supervise()
+        #expect(system.starts == 2)
+
+        try await Task.sleep(for: .seconds(0.7))
+        recorder.resetStallTimer(for: .microphone)
+        supervisor.supervise()
+
+        #expect(system.starts == 2)
+    }
+
+    @Test func retriesSystemAudioPromptlyAgainOnceItDeliversAudio() async throws {
+        try await Task.sleep(for: .seconds(captureStallSeconds + 0.1))
+        supervisor.supervise()
+        try await Task.sleep(for: .seconds(0.7))
+        recorder.resetStallTimer(for: .microphone)
+        supervisor.supervise()
+        recorder.appendSystem([0.1], hostTime: AudioGetCurrentHostTime())
+        supervisor.supervise()
+
+        try await Task.sleep(for: .seconds(captureStallSeconds + 0.1))
+        recorder.resetStallTimer(for: .microphone)
+        supervisor.supervise()
+
+        #expect(system.starts == 3)
     }
 
     @Test func supervisesSystemAudioAloneWithoutAMic() async throws {

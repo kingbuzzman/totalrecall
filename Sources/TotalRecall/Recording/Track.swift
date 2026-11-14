@@ -18,6 +18,10 @@ final class Track {
     private var source: Int?
     private var endNanos: UInt64 = 0
 
+    /// Buffers delivered so far, including ones that were dropped: tells a capture that is alive from one that only
+    /// had its stall timer reset.
+    private(set) var deliveries = 0
+
     /// Samples waiting to be written.
     var count: Int { samples.count }
 
@@ -27,6 +31,7 @@ final class Track {
     /// When a new source (capture session) takes over, its audio is spliced in exactly where the old source's ended:
     /// a gap becomes silence and audio both sources captured is kept only once, so nothing is repeated or shifted.
     func append(_ newSamples: [Float], hostTime: UInt64, source newSource: Int = 0) {
+        deliveries += 1
         let startNanos = AudioConvertHostTimeToNanos(hostTime)
         let spliceOffset = Int(frames(inNanoseconds: Double(startNanos) - Double(endNanos)).rounded())
         var kept = newSamples[...]
@@ -71,6 +76,12 @@ final class Track {
     /// Gives a freshly restarted capture the full stall window to deliver its first buffer.
     func resetStallTimer() {
         lastBufferUptime = uptimeSeconds()
+    }
+
+    /// The capture delivered a buffer that is not kept, such as audio from after the recording.
+    func noteDroppedBuffer() {
+        deliveries += 1
+        resetStallTimer()
     }
 
     func padWithSilence(toCount count: Int) {

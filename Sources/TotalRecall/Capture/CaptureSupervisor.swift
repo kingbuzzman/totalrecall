@@ -3,19 +3,17 @@ import Foundation
 /// A capture that delivers no audio for this long has stalled.
 let captureStallSeconds = 0.6
 
-/// Rebuilds a capture when its device changed or it stopped delivering audio. Used only on the writer queue.
+/// Rebuilds a capture when its device changed or it stopped delivering audio, retrying a capture that stays down
+/// less and less often (see `CaptureOutage`). Used only on the writer queue.
 final class CaptureSupervisor {
-    /// Minimum time between two restarts of the same capture.
-    private static let restartRetrySeconds = 0.5
-
     private let recorder: Recorder
     private let systemCapture: any RestartableCapture
     private let microphoneCapture: MicrophoneCapture?
     private let announce: (String) -> Void
+    private let systemOutage: CaptureOutage
+    private let microphoneOutage: CaptureOutage
     private var microphoneNeedsRestart = false
     private var devicesChanged = false
-    private var nextMicrophoneRestart = 0.0
-    private var nextSystemRestart = 0.0
 
     init(
         recorder: Recorder,
@@ -27,6 +25,8 @@ final class CaptureSupervisor {
         self.systemCapture = systemCapture
         self.microphoneCapture = microphoneCapture
         self.announce = announce
+        systemOutage = CaptureOutage(name: "system audio", announce: announce)
+        microphoneOutage = CaptureOutage(name: "mic", announce: announce)
     }
 
     /// The system input or the device list changed; checked on the next `supervise()`.
@@ -36,6 +36,7 @@ final class CaptureSupervisor {
 
     func supervise() {
         let now = uptimeSeconds()
+        if devicesChanged { systemOutage.resetBackoff() }
         if let microphoneCapture { superviseMicrophone(microphoneCapture, now: now) }
         devicesChanged = false
         superviseSystemAudio(now: now)
@@ -51,32 +52,35 @@ final class CaptureSupervisor {
         if devicesChanged, microphoneCapture.targetDevice()?.id != microphoneCapture.device?.id {
             microphoneNeedsRestart = true
         }
+        if microphoneNeedsRestart { microphoneOutage.resetBackoff() }
+        microphoneOutage.update(deliveries: recorder.deliveries(from: .microphone), now: now)
         let stalled =
             recorder.secondsSinceAudio(from: .microphone) > captureStallSeconds
             && !microphoneCapture.isSwitching
-        guard (microphoneNeedsRestart || stalled) && now >= nextMicrophoneRestart else { return }
+        guard (microphoneNeedsRestart || stalled) && microphoneOutage.canRestart(now: now) else { return }
         microphoneNeedsRestart = false
-        nextMicrophoneRestart = now + Self.restartRetrySeconds
+        microphoneOutage.restarting(now: now)
         do {
             try microphoneCapture.start()
             recorder.resetStallTimer(for: .microphone)
         } catch {
-            announce("mic unavailable, retrying: \(error.localizedDescription)")
+            microphoneOutage.restartFailed(error)
         }
     }
 
     private func superviseSystemAudio(now: Double) {
-        guard recorder.secondsSinceAudio(from: .system) > captureStallSeconds && now >= nextSystemRestart else {
+        systemOutage.update(deliveries: recorder.deliveries(from: .system), now: now)
+        guard recorder.secondsSinceAudio(from: .system) > captureStallSeconds && systemOutage.canRestart(now: now)
+        else {
             return
         }
-        nextSystemRestart = now + Self.restartRetrySeconds
+        systemOutage.restarting(now: now)
         systemCapture.stop()
         do {
             try systemCapture.start()
             recorder.resetStallTimer(for: .system)
-            announce("system audio capture restarted")
         } catch {
-            announce("system audio unavailable, retrying: \(error.localizedDescription)")
+            systemOutage.restartFailed(error)
         }
     }
 }

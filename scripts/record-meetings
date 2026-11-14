@@ -48,6 +48,8 @@ EVENT_LINE = re.compile(
 )
 # How often to look at the calendar again while waiting, so moved or added meetings are picked up.
 RECHECK_SECONDS = 60
+# Played before each meeting: one of macOS's own sounds, at a fraction of full volume.
+CHIME = ["afplay", "--volume", "0.3", "/System/Library/Sounds/Glass.aiff"]
 # Adds a meeting to Calendar.app; the arguments are the calendar name (empty for the first writable one), the title, the
 # start as seconds since midnight today, and the length in minutes.
 NEW_EVENT_SCRIPT = """
@@ -130,7 +132,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Record and transcribe today's meetings from the calendar.")
     parser.add_argument("--calendar", action="append", help="only meetings from this calendar (repeatable)")
     parser.add_argument("--root", type=Path, default=Path.home() / "Meetings", help="where to save (default ~/Meetings)")
-    parser.add_argument("--warn", type=float, default=5, help="minutes before each meeting to say so (default 5, 0 off)")
+    parser.add_argument("--warn", type=float, default=5, help="minutes before each meeting to chime (default 5, 0 off)")
     parser.add_argument("-n", "--new", metavar="REASON", help="record one meeting for REASON starting now, then quit")
     parser.add_argument("--new-length", type=int, default=30, help="calendar length of the -n meeting (default 30)")
     parser.add_argument("--language", metavar="LANG", help="language spoken, such as es or es-MX (default en-US)")
@@ -139,7 +141,7 @@ def parse_args():
 
 
 class Warnings:
-    """Says "Core Team Daily Standup in 5 minutes" once per meeting, out loud with `say`."""
+    """Prints "Core Team Daily Standup in 5 minutes" once per meeting, with a soft chime."""
 
     def __init__(self, minutes):
         self.lead = timedelta(minutes=minutes)
@@ -154,7 +156,7 @@ class Warnings:
             title = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", meeting.title).strip()
             message = f"{title} in {minutes} minute{'' if minutes == 1 else 's'}"
             print(message)
-            subprocess.Popen(["say", message], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(CHIME, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def seconds_until_next(self):
         now = datetime.now()
