@@ -186,3 +186,7 @@ Both tools also take `--version` and `--help`.
 [ResNet34-LM speaker model](https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM), trained on
 [VoxCeleb](https://www.robots.ox.ac.uk/~vgg/data/voxceleb/), under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); it is converted to Core ML, unchanged otherwise.
+
+## License
+
+MIT; see [LICENSE](LICENSE). The speaker model keeps its own CC BY 4.0 license (see Credits).
