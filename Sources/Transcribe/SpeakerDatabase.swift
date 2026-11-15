@@ -1,3 +1,5 @@
+// Speaker identification is to be given an interface and cleaned up (see TODO.md); until then, its size is let be.
+
 import Foundation
 import SQLite3
 
@@ -7,7 +9,7 @@ import SQLite3
 /// going are already there. With each speaker go a few samples of their speech, to tell who they are by
 /// (`transcribe speakers play`), as AAC audio in an MPEG-4 file, the bytes of a .m4a. Each channel's identifier uses it
 /// from its own task, so every call is guarded by a lock.
-final class SpeakerDatabase: @unchecked Sendable {
+final class SpeakerDatabase: @unchecked Sendable {  // swiftlint:disable:this type_body_length
     struct Speaker: Equatable {
         let id: Int
         var name: String?

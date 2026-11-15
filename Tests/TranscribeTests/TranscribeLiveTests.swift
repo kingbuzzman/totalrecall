@@ -28,15 +28,17 @@ struct TranscribeLiveTests {
             to: text,
             language: nil,
             identifiesSpeakers: false,
-            onLine: { line in lines.withLock { $0.append(line) } },
-            onLiveText: { live in liveTexts.withLock { $0.append(live) } },
-            onMessage: { _ in }
+            handlers: LiveTranscriptHandlers(
+                onLine: { line in lines.withLock { $0.append(line) } },
+                onLiveText: { live in liveTexts.withLock { $0.append(live) } },
+                onMessage: { _ in }
+            )
         )
         try await writer.value
 
         let saved = try String(contentsOf: text, encoding: .utf8)
         #expect(saved.contains("Good morning"))
         #expect(lines.withLock { $0 } == saved.split(separator: "\n").map(String.init))
-        #expect(liveTexts.withLock { $0.last } == "", "the live text is cleared at the end")
+        #expect(liveTexts.withLock { $0.last }?.isEmpty == true, "the live text is cleared at the end")
     }
 }

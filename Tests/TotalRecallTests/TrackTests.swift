@@ -70,7 +70,7 @@ struct TrackTests {
         #expect(track.take(40) == ramp(40))
         #expect(track.count == 60)
         #expect(track.takeAll() == ramp(60, from: 40))
-        #expect(track.count == 0)
+        #expect(track.isEmpty)
     }
 
     @Test func padsAndTruncatesTheWaitingSamples() {

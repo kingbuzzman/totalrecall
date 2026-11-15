@@ -90,7 +90,7 @@ struct EchoFilterTests {
 
         let takenBack = passed.updates.last
         #expect(takenBack?.speaker == .you && takenBack?.isFinal == true && takenBack?.isHeld == false)
-        #expect(takenBack?.text == "" && takenBack?.start == 0)
+        #expect(takenBack?.text.isEmpty == true && takenBack?.start == 0)
         filter.theyHaveBeenHeard(through: 10)
         #expect(passed.texts.isEmpty)
     }
@@ -112,7 +112,7 @@ struct EchoFilterTests {
         filter.theirs(line(.them, 0, 4, "Welcome back to the channel, everyone."))
 
         let cleared = passed.updates.last
-        #expect(cleared?.speaker == .you && cleared?.isFinal == false && cleared?.text == "")
+        #expect(cleared?.speaker == .you && cleared?.isFinal == false && cleared?.text.isEmpty == true)
     }
 
     @Test func showsWhatYouSayWhileTheyTalk() {

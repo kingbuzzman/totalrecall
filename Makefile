@@ -68,6 +68,11 @@ COVERAGE_MIN ?= 75
 COVERAGE_REPORT := $(BUILD)/coverage
 # Lints the GitHub workflows for security problems; pinned, so CI and every machine run the same checks.
 ZIZMOR := pipx run zizmor==1.31.1
+# SwiftLint, for what swift-format does not check (complexity, length, likely bugs); see .swiftlint.yml. The release's
+# own macOS binary, pinned by version and checked against the SHA-256 of its download, into BUILD, as speexdsp is.
+SWIFTLINT_VERSION := 0.65.1
+SWIFTLINT_SHA256 := c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0
+SWIFTLINT := $(BUILD)/swiftlint/$(SWIFTLINT_VERSION)/swiftlint
 # Every build goes through it: a single warning, from any tool, fails the build.
 STRICT := scripts/no-warnings.sh
 # Runs the tests under a pseudo-terminal, so their progress is printed as it happens: into a pipe, such as CI's log, it
@@ -161,9 +166,18 @@ coverage-bin:
 format:
 	swift format --recursive --in-place Package.swift Sources Tests
 
-lint:
+lint: $(SWIFTLINT)
 	swift format lint --recursive --strict Package.swift Sources Tests
+	$(SWIFTLINT) lint --strict --quiet
 	$(ZIZMOR) .github/workflows
+
+$(SWIFTLINT):
+	mkdir -p $(dir $@)
+	curl -fsSL -o $(dir $@)portable_swiftlint.zip \
+		https://github.com/realm/SwiftLint/releases/download/$(SWIFTLINT_VERSION)/portable_swiftlint.zip
+	echo "$(SWIFTLINT_SHA256)  $(dir $@)portable_swiftlint.zip" | shasum -a 256 -c -
+	unzip -o -q $(dir $@)portable_swiftlint.zip swiftlint -d $(dir $@)
+	touch $@
 
 # Copies, not symlinks, so the installed tools outlive make clean and a rebuild. install replaces the file, or a symlink
 # left by an older make install, instead of writing through it.

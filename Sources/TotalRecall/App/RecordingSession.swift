@@ -50,28 +50,12 @@ package final class RecordingSession {
     /// Creates the partial recording and starts the stream, as the destination asks; throws if that fails. Progress
     /// goes to stderr, with a level meter on a terminal, or, given `messages`, to it, a line at a time.
     package init(options: Options, destination: Destination, messages: ((String) -> Void)? = nil) throws {
-        let partialSink = try destination.file.map { try AudioFileSink(url: $0.partialURL) }
-        let rawSink = try destination.file?.rawURL.map { try AudioFileSink(url: $0) }
-        let streamSink = destination.streams ? try WAVStreamSink(handle: destination.streamHandle) : nil
-        let encoder = destination.file.flatMap(LiveEncoder.start)
-        let fileSink: (any AudioSink)? = partialSink.map { partial in
-            encoder.map { EncodingSink(file: partial, encoder: $0) as any AudioSink } ?? partial
-        }
-        var fileAndStream: FileAndStreamSink?
-        let sink: any AudioSink
-        if let fileSink, let streamSink {
-            let both = FileAndStreamSink(file: fileSink, stream: streamSink)
-            fileAndStream = both
-            sink = both
-        } else if let fileSink {
-            sink = fileSink
-        } else {
-            // A destination always has a file, a stream or both.
-            sink = streamSink!
-        }
+        let sinks = try Sinks(for: destination)
+        let encoder = sinks.encoder
+        let fileAndStream = sinks.fileAndStream
         let recorder = Recorder(
-            writingTo: sink,
-            rawSink: rawSink,
+            writingTo: sinks.recording,
+            rawSink: sinks.raw,
             includesMicrophone: options.includesMicrophone,
             isolatesSpeakers: options.isolatesSpeakers,
             cancelsEcho: options.cancelsEcho
@@ -107,6 +91,36 @@ package final class RecordingSession {
         if let fileAndStream, let file = destination.file {
             fileAndStream.onStreamClosed = { [status] in
                 status.announce("the program reading the stream exited; still recording to \(file.url.path)")
+            }
+        }
+    }
+
+    /// What the recording is written to, as the destination asks: the partial recording, encoded into the output
+    /// file's format as it records, the stream, or both, and the raw audio with `TOTALRECALL_RAW=1`.
+    private struct Sinks {
+        let recording: any AudioSink
+        let raw: AudioFileSink?
+        let encoder: LiveEncoder?
+        /// The file and the stream, when it is both.
+        let fileAndStream: FileAndStreamSink?
+
+        init(for destination: Destination) throws {
+            let partial = try destination.file.map { try AudioFileSink(url: $0.partialURL) }
+            raw = try destination.file?.rawURL.map { try AudioFileSink(url: $0) }
+            let stream = destination.streams ? try WAVStreamSink(handle: destination.streamHandle) : nil
+            let encoder = destination.file.flatMap(LiveEncoder.start)
+            self.encoder = encoder
+            let file: (any AudioSink)? = partial.map { partial in
+                encoder.map { EncodingSink(file: partial, encoder: $0) as any AudioSink } ?? partial
+            }
+            if let file, let stream {
+                let both = FileAndStreamSink(file: file, stream: stream)
+                fileAndStream = both
+                recording = both
+            } else {
+                fileAndStream = nil
+                // A destination always has a file, a stream or both.
+                recording = file ?? stream!
             }
         }
     }
@@ -232,7 +246,7 @@ package final class RecordingSession {
         }
         guard !isOutputClosed else { return }
         ticks += 1
-        guard ticks % Self.ticksPerLevelUpdate == 0 else { return }
+        guard ticks.isMultiple(of: Self.ticksPerLevelUpdate) else { return }
         let levels = recorder.levels()
         status.showLevels(levels)
     }

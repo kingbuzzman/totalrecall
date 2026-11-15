@@ -1,0 +1,295 @@
+import AppKit
+import AppSupport
+import SwiftUI
+
+/// Access to the calendars, and for each, whether its meetings are recorded and which of them to ignore.
+struct CalendarSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var rules = AppSettings.calendarRules
+
+    var body: some View {
+        Form {
+            if model.calendar.hasAccess {
+                ForEach(accounts, id: \.self) { account in
+                    Section(account.isEmpty ? "Other" : account) {
+                        ForEach(model.calendar.calendars.filter { $0.account == account }) { calendar in
+                            CalendarRow(calendar: calendar, rules: binding(for: calendar)) { interval in
+                                model.calendar.events(onCalendar: calendar.id, in: interval)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Text(
+                        "Meetings on the calendars turned on are warned of and recorded. Holidays and birthdays start "
+                            + "off; any other calendar, added later too, starts on. A meeting in Today can be ignored "
+                            + "from then on with Always Ignore Meetings Like This."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    Text(
+                        "TotalRecall reads today's meetings from Calendar.app, with every account it has, to warn you "
+                            + "of them and record them as they start."
+                    )
+                    if model.calendar.isDenied {
+                        Text(
+                            "Access was turned down; allow TotalRecall in System Settings › Privacy & Security › "
+                                + "Calendars."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Button("Open System Settings") { model.calendar.openSystemSettings() }
+                    } else {
+                        Button("Allow Calendar Access") {
+                            Task {
+                                await model.calendar.requestAccess()
+                                model.readCalendar()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(minHeight: 260, maxHeight: 560)
+        // Such as a meeting ignored from the menu while Settings is open.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let saved = AppSettings.calendarRules
+            if saved != rules { rules = saved }
+        }
+    }
+
+    private var accounts: [String] {
+        var seen: Set<String> = []
+        return model.calendar.calendars.map(\.account).filter { seen.insert($0).inserted }
+    }
+
+    /// A calendar's rules, as set up or its defaults, saved as soon as they change.
+    private func binding(for calendar: CalendarSource.Calendar) -> Binding<CalendarRules> {
+        Binding {
+            rules[calendar.id] ?? CalendarRules.defaults(isMeetingCalendar: calendar.isMeetingCalendar)
+        } set: { newRules in
+            rules[calendar.id] = newRules
+            AppSettings.calendarRules = rules
+        }
+    }
+}
+
+/// A calendar: its color and title, and a switch for whether its meetings are recorded; when they are, what it ignores
+/// and a button to edit that, in a sheet. Every calendar is the same kind of row, so their dots and switches line up.
+private struct CalendarRow: View {
+    let calendar: CalendarSource.Calendar
+    @Binding var rules: CalendarRules
+    /// The calendar's events in an interval, to try a rule on.
+    let events: (DateInterval) -> [CalendarEvent]
+    @State private var editsRules = false
+
+    var body: some View {
+        Toggle(isOn: $rules.isRecorded) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(calendar.color.map { Color(cgColor: $0) } ?? .secondary)
+                    .frame(width: 10, height: 10)
+                Text(calendar.title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if rules.isRecorded {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Edit Rules…") { editsRules = true }
+                }
+            }
+        }
+        .help(rules.isRecorded ? "Its meetings are recorded" : "Its meetings are not recorded")
+        .sheet(isPresented: $editsRules) {
+            CalendarRulesEditor(calendarTitle: calendar.title, rules: $rules, events: events)
+        }
+    }
+
+    /// What it ignores, in a few words: "Ignores 2 phrases · focus & prep".
+    private var summary: String {
+        var parts: [String] = []
+        if !rules.ignoredPhrases.isEmpty {
+            let count = rules.ignoredPhrases.count
+            parts.append(count == 1 ? "1 phrase" : "\(count) phrases")
+        }
+        if rules.skipsFocusAndPrep { parts.append("focus & prep") }
+        return parts.isEmpty ? "Ignores nothing" : "Ignores " + parts.joined(separator: " · ")
+    }
+}
+
+/// Which of a calendar's meetings to ignore, in a sheet: focus time and prep blocks, and meetings by words, phrases or
+/// regular expressions in their titles, each of which can be tried on the calendar first.
+private struct CalendarRulesEditor: View {
+    let calendarTitle: String
+    @Binding var rules: CalendarRules
+    let events: (DateInterval) -> [CalendarEvent]
+    @Environment(\.dismiss) private var dismiss
+    @State private var newPhrase = ""
+    /// The phrase being tried, in a sheet of the meetings it would ignore.
+    @State private var tried: TriedPhrase?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    Toggle("Ignore focus time and prep blocks", isOn: $rules.skipsFocusAndPrep)
+                }
+                Section {
+                    ForEach(rules.ignoredPhrases, id: \.self) { phrase in
+                        LabeledContent {
+                            HStack {
+                                Button("Test") { tried = TriedPhrase(phrase: phrase) }
+                                    .help("Show the meetings it would ignore, two weeks back to two weeks ahead")
+                                Button("Remove") { rules.ignoredPhrases.removeAll { $0 == phrase } }
+                            }
+                        } label: {
+                            HStack {
+                                Text(phrase)
+                                    .font(CalendarRules.pattern(of: phrase) == nil ? .body : .body.monospaced())
+                                if CalendarRules.pattern(of: phrase) != nil {
+                                    Text("regex").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    LabeledContent {
+                        HStack {
+                            Button("Test") { tried = TriedPhrase(phrase: newPhrase) }
+                                .disabled(isEmpty || problem != nil)
+                                .help("Show the meetings it would ignore, before adding it")
+                            Button("Add", action: add)
+                                .disabled(isEmpty || problem != nil)
+                        }
+                    } label: {
+                        // Without a label of its own: in a form, a text field's title is laid out beside it as a
+                        // label, and the field itself squeezed to nothing.
+                        TextField(
+                            "Ignore meetings with",
+                            text: $newPhrase,
+                            prompt: Text("Word or phrase, such as 1:1, or /regex/, such as /^1:1/")
+                        )
+                        .labelsHidden()
+                        .onSubmit(add)
+                    }
+                } header: {
+                    Text("Ignore meetings whose title contains")
+                } footer: {
+                    if let problem {
+                        Label(problem, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text(
+                            "Between slashes, a regular expression; otherwise, any title containing it. Case is ignored."
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding([.horizontal, .bottom], 20)
+        }
+        .frame(width: 560, height: 420)
+        .navigationTitle("Rules for \(calendarTitle)")
+        .sheet(item: $tried) { tried in
+            let interval = MeetingSchedule.ruleTestInterval(around: Date())
+            RuleTestView(
+                phrase: tried.phrase,
+                calendarTitle: calendarTitle,
+                interval: interval,
+                meetings: MeetingSchedule.meetings(matching: tried.phrase, in: events(interval))
+            )
+        }
+    }
+
+    private var isEmpty: Bool {
+        newPhrase.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// What is wrong with the phrase being typed, a regular expression that does not compile; nil when nothing is.
+    private var problem: String? {
+        CalendarRules.problem(with: newPhrase)
+    }
+
+    private func add() {
+        // A phrase that cannot be added, such as a broken regular expression, stays in the field to be fixed.
+        if rules.ignore(newPhrase) { newPhrase = "" }
+    }
+}
+
+/// A phrase tried in `RuleTestView`.
+private struct TriedPhrase: Identifiable {
+    let phrase: String
+    var id: String { phrase }
+}
+
+/// The meetings of one calendar a rule would ignore, from two weeks back to two weeks ahead: to see what it catches
+/// before relying on it, and that it catches nothing it should not.
+private struct RuleTestView: View {
+    let phrase: String
+    let calendarTitle: String
+    let interval: DateInterval
+    let meetings: [CalendarEvent]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summary).font(.headline)
+                Text(
+                    "On \(calendarTitle), \(interval.start.formatted(date: .abbreviated, time: .omitted)) to "
+                        + "\(interval.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)): two "
+                        + "weeks back, this week, and two weeks ahead."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+            if meetings.isEmpty {
+                ContentUnavailableView(
+                    "Nothing to ignore",
+                    systemImage: "checkmark.circle",
+                    description: Text("No meeting in these five weeks matches it.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
+            } else {
+                List(Array(meetings.enumerated()), id: \.offset) { _, meeting in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(meeting.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                            .frame(width: 96, alignment: .leading)
+                        Text(meeting.start.formatted(date: .omitted, time: .shortened))
+                            .monospacedDigit()
+                            .frame(width: 64, alignment: .leading)
+                        Text(meeting.title)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    // Those already past in grey: what it would have ignored.
+                    .foregroundStyle(meeting.end < Date() ? .secondary : .primary)
+                }
+                .frame(minHeight: 220)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private var summary: String {
+        let count = meetings.count
+        let what = count == 1 ? "1 meeting" : "\(count) meetings"
+        return "“\(phrase)” would ignore \(what)"
+    }
+}

@@ -24,7 +24,7 @@ final class AppModel {
     struct Meeting: Equatable {
         let name: String
         let directory: URL
-        var scheduled: ScheduledMeeting? = nil
+        var scheduled: ScheduledMeeting?
     }
 
     /// Where one of today's meetings stands, for the menu.
@@ -109,84 +109,6 @@ final class AppModel {
         Task {
             await calendar.requestAccess()
             readCalendar()
-        }
-    }
-
-    /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
-    /// underway already.
-    var nextMeeting: ScheduledMeeting? {
-        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: now)
-    }
-
-    func status(of meeting: ScheduledMeeting) -> MeetingStatus {
-        if recordedMeetings.contains(meeting) { return .recorded }
-        if skippedMeetings.contains(meeting) { return .skipped }
-        if meeting.end <= now { return .ended }
-        return meeting.start <= now ? .underway : .upcoming
-    }
-
-    /// Records a meeting on the calendar now, such as one starting early, stopping what is being recorded first. It
-    /// goes in the meeting's own folder, and is not started again when its time comes.
-    func record(_ meeting: ScheduledMeeting) {
-        skippedMeetings.remove(meeting)
-        recordedMeetings.insert(meeting)
-        let directory = meeting.directory(root: AppSettings.recordingsFolder)
-        start(Meeting(name: meeting.shortTitle, directory: directory, scheduled: meeting))
-    }
-
-    /// Leaves out from now on every meeting of the same title on the same calendar: its title, without what is in
-    /// parentheses or brackets, becomes one of the calendar's ignored phrases.
-    func alwaysIgnore(_ meeting: ScheduledMeeting) {
-        var rules = AppSettings.calendarRules
-        let calendar = calendar.calendars.first { $0.id == meeting.calendarID }
-        var calendarRules =
-            rules[meeting.calendarID] ?? calendar.map(AppSettings.rules(for:)) ?? CalendarRules()
-        calendarRules.ignore(meeting.shortTitle)
-        rules[meeting.calendarID] = calendarRules
-        AppSettings.calendarRules = rules
-        readCalendar()
-    }
-
-    /// Leaves a meeting out of recording and warnings, or puts it back.
-    func toggleSkipped(_ meeting: ScheduledMeeting) {
-        if skippedMeetings.remove(meeting) == nil { skippedMeetings.insert(meeting) }
-    }
-
-    /// Reads today's meetings from the calendar again.
-    func readCalendar() {
-        lastCalendarRead = Date()
-        let calendars = Dictionary(calendar.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let events = calendar.todaysEvents { AppSettings.rules(for: $0).isRecorded }
-        todaysMeetings = MeetingSchedule.meetings(from: events) { id in
-            calendars[id].map(AppSettings.rules(for:)) ?? CalendarRules()
-        }
-        // Yesterday's are of no more use.
-        let today = Set(todaysMeetings)
-        recordedMeetings.formIntersection(today.union(meeting?.scheduled.map { [$0] } ?? []))
-        skippedMeetings.formIntersection(today)
-        warnedMeetings.formIntersection(today)
-        tick()
-    }
-
-    /// Every second: warns of the meetings about to start, and starts recording the next one once it has started, if
-    /// nothing is being recorded and that is on. Reads the calendar again every minute.
-    private func tick() {
-        now = Date()
-        if now.timeIntervalSince(lastCalendarRead) >= 60 { return readCalendar() }
-        let lead = TimeInterval(AppSettings.warningMinutes * 60)
-        let excluded = warnedMeetings.union(recordedMeetings).union(skippedMeetings)
-        for meeting in MeetingSchedule.warningsDue(in: todaysMeetings, lead: lead, excluding: excluded, now: now) {
-            warnedMeetings.insert(meeting)
-            let time = meeting.start.formatted(date: .omitted, time: .shortened)
-            let body =
-                AppSettings.recordsAutomatically && !isRecording
-                ? "Recording starts at \(time)." : "It starts at \(time)."
-            notifier.post(title: MeetingSchedule.warning(for: meeting, now: now), body: body)
-            chime?.stop()
-            chime?.play()
-        }
-        if AppSettings.recordsAutomatically, !isRecording, let next = nextMeeting, next.start <= now {
-            record(next)
         }
     }
 
@@ -306,6 +228,92 @@ final class AppModel {
         whenIdle()
     }
 
+}
+
+/// Today's meetings: which is next, where each stands, recording or skipping them, and, every second, warning of
+/// those about to start and starting the next once it has started.
+extension AppModel {
+    /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
+    /// underway already.
+    var nextMeeting: ScheduledMeeting? {
+        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: now)
+    }
+
+    func status(of meeting: ScheduledMeeting) -> MeetingStatus {
+        if recordedMeetings.contains(meeting) { return .recorded }
+        if skippedMeetings.contains(meeting) { return .skipped }
+        if meeting.end <= now { return .ended }
+        return meeting.start <= now ? .underway : .upcoming
+    }
+
+    /// Records a meeting on the calendar now, such as one starting early, stopping what is being recorded first. It
+    /// goes in the meeting's own folder, and is not started again when its time comes.
+    func record(_ meeting: ScheduledMeeting) {
+        skippedMeetings.remove(meeting)
+        recordedMeetings.insert(meeting)
+        let directory = meeting.directory(root: AppSettings.recordingsFolder)
+        start(Meeting(name: meeting.shortTitle, directory: directory, scheduled: meeting))
+    }
+
+    /// Leaves out from now on every meeting of the same title on the same calendar: its title, without what is in
+    /// parentheses or brackets, becomes one of the calendar's ignored phrases.
+    func alwaysIgnore(_ meeting: ScheduledMeeting) {
+        var rules = AppSettings.calendarRules
+        let calendar = calendar.calendars.first { $0.id == meeting.calendarID }
+        var calendarRules =
+            rules[meeting.calendarID] ?? calendar.map(AppSettings.rules(for:)) ?? CalendarRules()
+        calendarRules.ignore(meeting.shortTitle)
+        rules[meeting.calendarID] = calendarRules
+        AppSettings.calendarRules = rules
+        readCalendar()
+    }
+
+    /// Leaves a meeting out of recording and warnings, or puts it back.
+    func toggleSkipped(_ meeting: ScheduledMeeting) {
+        if skippedMeetings.remove(meeting) == nil { skippedMeetings.insert(meeting) }
+    }
+
+    /// Reads today's meetings from the calendar again.
+    func readCalendar() {
+        lastCalendarRead = Date()
+        let calendars = Dictionary(calendar.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let events = calendar.todaysEvents { AppSettings.rules(for: $0).isRecorded }
+        todaysMeetings = MeetingSchedule.meetings(from: events) { id in
+            calendars[id].map(AppSettings.rules(for:)) ?? CalendarRules()
+        }
+        // Yesterday's are of no more use.
+        let today = Set(todaysMeetings)
+        recordedMeetings.formIntersection(today.union(meeting?.scheduled.map { [$0] } ?? []))
+        skippedMeetings.formIntersection(today)
+        warnedMeetings.formIntersection(today)
+        tick()
+    }
+
+    /// Every second: warns of the meetings about to start, and starts recording the next one once it has started, if
+    /// nothing is being recorded and that is on. Reads the calendar again every minute.
+    private func tick() {
+        now = Date()
+        if now.timeIntervalSince(lastCalendarRead) >= 60 { return readCalendar() }
+        let lead = TimeInterval(AppSettings.warningMinutes * 60)
+        let excluded = warnedMeetings.union(recordedMeetings).union(skippedMeetings)
+        for meeting in MeetingSchedule.warningsDue(in: todaysMeetings, lead: lead, excluding: excluded, now: now) {
+            warnedMeetings.insert(meeting)
+            let time = meeting.start.formatted(date: .omitted, time: .shortened)
+            let body =
+                AppSettings.recordsAutomatically && !isRecording
+                ? "Recording starts at \(time)." : "It starts at \(time)."
+            notifier.post(title: MeetingSchedule.warning(for: meeting, now: now), body: body)
+            chime?.stop()
+            chime?.play()
+        }
+        if AppSettings.recordsAutomatically, !isRecording, let next = nextMeeting, next.start <= now {
+            record(next)
+        }
+    }
+}
+
+/// What goes on around the recordings: the speech model, downloaded ahead, and recordings a crash left unsaved.
+extension AppModel {
     /// Downloads the speech model in the background, if need be, so the first transcript does not wait for it.
     private func prepareTranscription() {
         let language = AppSettings.language

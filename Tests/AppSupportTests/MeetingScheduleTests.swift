@@ -79,14 +79,14 @@ struct MeetingScheduleTests {
         let retro = meeting("Retro", at(14, 0), at(15, 0))
         let lead: TimeInterval = 5 * 60
 
-        #expect(MeetingSchedule.warningsDue(in: [standup, retro], lead: lead, excluding: [], now: at(9, 54)) == [])
+        #expect(MeetingSchedule.warningsDue(in: [standup, retro], lead: lead, excluding: [], now: at(9, 54)).isEmpty)
         #expect(
             MeetingSchedule.warningsDue(in: [standup, retro], lead: lead, excluding: [], now: at(9, 55)) == [standup]
         )
         #expect(MeetingSchedule.warningsDue(in: [standup], lead: lead, excluding: [], now: at(9, 59)) == [standup])
-        #expect(MeetingSchedule.warningsDue(in: [standup], lead: lead, excluding: [standup], now: at(9, 56)) == [])
-        #expect(MeetingSchedule.warningsDue(in: [standup], lead: lead, excluding: [], now: at(10, 0)) == [])
-        #expect(MeetingSchedule.warningsDue(in: [standup], lead: 0, excluding: [], now: at(9, 58)) == [])
+        #expect(MeetingSchedule.warningsDue(in: [standup], lead: lead, excluding: [standup], now: at(9, 56)).isEmpty)
+        #expect(MeetingSchedule.warningsDue(in: [standup], lead: lead, excluding: [], now: at(10, 0)).isEmpty)
+        #expect(MeetingSchedule.warningsDue(in: [standup], lead: 0, excluding: [], now: at(9, 58)).isEmpty)
     }
 
     @Test(arguments: [

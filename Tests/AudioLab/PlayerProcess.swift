@@ -33,16 +33,16 @@ package final class PlayerProcess: @unchecked Sendable {
         let readiness = Readiness()
         let reader = output.fileHandleForReading
         // The player prints a line once it plays; the read is blocking, so it gets a thread of its own.
-        Thread { readiness.set(!reader.availableData.isEmpty) }.start()
+        Thread { readiness.set(reader.availableData.isEmpty ? .ended : .playing) }.start()
         let deadline = ContinuousClock.now + Self.timeout
-        while readiness.value == nil {
+        while readiness.value == .waiting {
             guard ContinuousClock.now < deadline else {
                 stop()
                 throw AudioLabError("the player for \(name) did not start within \(Self.timeout)")
             }
             try await Task.sleep(for: .milliseconds(10))
         }
-        guard readiness.value == true else {
+        guard readiness.value == .playing else {
             stop()
             throw AudioLabError("the player for \(name) failed with status \(process.terminationStatus)")
         }
@@ -77,16 +77,20 @@ extension FileHandle {
     }
 }
 
-/// Whether the player said it is playing (true) or ended without saying so (false); nil until one of them.
+/// Whether the player said it is playing, or ended without saying so; waiting until one of them.
 private final class Readiness: @unchecked Sendable {
-    private let lock = NSLock()
-    private var state: Bool?
+    enum State {
+        case waiting, playing, ended
+    }
 
-    var value: Bool? {
+    private let lock = NSLock()
+    private var state = State.waiting
+
+    var value: State {
         lock.withLock { state }
     }
 
-    func set(_ isPlaying: Bool) {
-        lock.withLock { state = isPlaying }
+    func set(_ newState: State) {
+        lock.withLock { state = newState }
     }
 }

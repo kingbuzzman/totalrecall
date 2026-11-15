@@ -12,6 +12,13 @@ make install-app  # copies it into ~/Applications (override with APP_DIR=/some/d
 make build        # builds everything: both tools and the app
 ```
 
+`make lint` runs two linters, which split the work: **swift-format** owns the layout (`make format` rewrites the code
+to it, as configured in `.swift-format`), and **SwiftLint** checks what it does not: complexity and length, likely bugs,
+and Swift that has a clearer or faster idiom, as configured in `.swiftlint.yml`, which turns its layout rules off
+(`Tests/.swiftlint.yml` raises only the length limits, for test suites). SwiftLint is downloaded into `build/` the
+first time, its release binary pinned by version and checksum. Speaker identification is let off its size rules,
+declaration by declaration, until it is cleaned up (see `TODO.md`).
+
 `make build-app` compiles the app's icons, `Resources/AppIcon.icon` (made with Icon Composer) and the menu bar icons
 in `Resources/Assets.xcassets`, with `actool`, which comes with Xcode, not the Command Line Tools. The app is signed
 like the tools, as `local.totalrecall.app`, so macOS keeps its permissions across rebuilds.

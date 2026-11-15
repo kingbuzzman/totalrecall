@@ -17,9 +17,9 @@ struct TranscriptUpdate {
     let text: String
     let isFinal: Bool
     /// Which of the people on the speaker's channel it is, such as "Them 2", with `--identify-speakers`.
-    var voice: String? = nil
+    var voice: String?
     /// Where a final line ends, when it is known.
-    var end: Double? = nil
+    var end: Double?
     /// A final line held back a while, to say who spoke it or whether it is an echo, sent ahead so its words can go on
     /// showing until it comes. A final line without words then says it never will.
     var isHeld = false

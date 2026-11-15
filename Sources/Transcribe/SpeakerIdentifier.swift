@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// Speaker identification is to be given an interface and cleaned up (see TODO.md); until then, its size is let be.
+
 import AVFoundation
 import Foundation
 
@@ -10,7 +13,7 @@ import Foundation
 /// Once that is clear, your voice is saved as you, and known as "You" wherever else it is heard, such as on a
 /// recording without totalrecall's channel split. Audio comes in through `append` and `finish` from one task while the transcribers ask `speaker(from:to:)` from theirs, so what it has worked out, and
 /// the database, are guarded by a lock.
-final class SpeakerIdentifier: @unchecked Sendable {
+final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this type_body_length
     static let windowSeconds = 3.0
     static let hopSeconds = 1.5
     /// Until anyone has been heard, a window with this little speech will do, and what has come in of the first one
@@ -282,7 +285,7 @@ final class SpeakerIdentifier: @unchecked Sendable {
     /// saved. Words too few for any print to have been taken of them, as a short line after a pause, go to whoever
     /// their own audio sounds like, else to whoever spoke just before; nil if nobody is known to have. Only once
     /// someone has said words are they saved.
-    func speaker(from start: Double, to end: Double) -> String? {
+    func speaker(from start: Double, to end: Double) -> String? {  // swiftlint:disable:this cyclomatic_complexity
         lock.withLock {
             // By the middle `hopSeconds` of each print's window, as the rest of it may be someone else's: one print's
             // at each moment. A line in none of them, at the edge of speech, goes by the whole windows.
@@ -348,7 +351,7 @@ final class SpeakerIdentifier: @unchecked Sendable {
 
     /// Brings the database up to date with this call's speakers: someone is added, or recognized as someone heard
     /// before, the moment they are first told apart, and their voice is saved with every print of it.
-    private func save() {
+    private func save() {  // swiftlint:disable:this cyclomatic_complexity function_body_length
         guard let database else { return }
         let speakers = Set(voices.speakers.map(\.number))
         // Folded into someone else, as one person heard two ways at first: someone added for them is taken back out.

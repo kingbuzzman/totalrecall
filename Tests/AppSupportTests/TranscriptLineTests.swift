@@ -40,6 +40,6 @@ struct TranscriptLineTests {
                     TranscriptLine(time: "", speaker: "Them", text: "Hi there"),
                 ]
         )
-        #expect(TranscriptLine.parsing(liveText: "") == [])
+        #expect(TranscriptLine.parsing(liveText: "").isEmpty)
     }
 }

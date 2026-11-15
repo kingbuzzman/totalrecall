@@ -69,79 +69,83 @@ struct MenuContent: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        Group {
+            switch model.state {
+            case .idle:
+                Text("Not recording")
+            case .starting:
+                Text("Starting “\(model.meeting?.name ?? "")”…")
+            case .recording:
+                Text("Recording “\(model.meeting?.name ?? "")” · \(model.elapsed)")
+            }
+            if model.savingCount > 0 {
+                Text(model.savingCount == 1 ? "Saving a recording…" : "Saving \(model.savingCount) recordings…")
+            }
+            if model.finishingTranscripts > 0 {
+                Text(
+                    model.finishingTranscripts == 1
+                        ? "Finishing a transcript…" : "Finishing \(model.finishingTranscripts) transcripts…"
+                )
+            }
+
+            Divider()
+
+            schedule
+
+            Divider()
+
+            if model.isRecording {
+                Button("Stop Recording") { model.stop() }
+                    .keyboardShortcut(".")
+            } else {
+                Button("Start Recording") { model.startMeeting(named: "") }
+                    .keyboardShortcut("r")
+                if let meeting = model.meeting {
+                    Button("Continue “\(meeting.name)”") { model.continueMeeting() }
+                }
+            }
+            Button(model.isRecording ? "Stop and Start a New Meeting…" : "New Meeting…") {
+                if let name = askForMeetingName() { model.startMeeting(named: name) }
+            }
+            .keyboardShortcut("n")
+
+            if !model.unsavedRecordings.isEmpty {
+                let count = model.unsavedRecordings.count
+                Button(count == 1 ? "Save 1 Unsaved Recording" : "Save \(count) Unsaved Recordings") {
+                    model.saveUnsavedRecordings()
+                }
+            }
+
+            Divider()
+
+            // Only while there is a transcript to show; a window already open stays, with the last one.
+            if model.isRecording {
+                Button("Show Transcript") {
+                    openWindow(id: Self.transcriptWindow)
+                    WindowFocus.bringToFront(Self.transcriptWindow)
+                }
+                .keyboardShortcut("t")
+            }
+            Button("Open Recordings Folder") {
+                let folder = model.meeting?.directory ?? AppSettings.recordingsFolder
+                let existing =
+                    FileManager.default.fileExists(atPath: folder.path) ? folder : AppSettings.recordingsFolder
+                NSWorkspace.shared.open(existing)
+            }
+
+            Divider()
+
+            Button("Settings…") {
+                openSettings()
+                WindowFocus.bringToFront(Self.settingsWindow)
+            }
+            .keyboardShortcut(",")
+            Button("Quit TotalRecall") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+
+        }
         // In case AppKit made the icon's window afresh, such as after the menu bar was rebuilt.
-        let _ = MenuBarIconSharing.apply()
-        switch model.state {
-        case .idle:
-            Text("Not recording")
-        case .starting:
-            Text("Starting “\(model.meeting?.name ?? "")”…")
-        case .recording:
-            Text("Recording “\(model.meeting?.name ?? "")” · \(model.elapsed)")
-        }
-        if model.savingCount > 0 {
-            Text(model.savingCount == 1 ? "Saving a recording…" : "Saving \(model.savingCount) recordings…")
-        }
-        if model.finishingTranscripts > 0 {
-            Text(
-                model.finishingTranscripts == 1
-                    ? "Finishing a transcript…" : "Finishing \(model.finishingTranscripts) transcripts…"
-            )
-        }
-
-        Divider()
-
-        schedule
-
-        Divider()
-
-        if model.isRecording {
-            Button("Stop Recording") { model.stop() }
-                .keyboardShortcut(".")
-        } else {
-            Button("Start Recording") { model.startMeeting(named: "") }
-                .keyboardShortcut("r")
-            if let meeting = model.meeting {
-                Button("Continue “\(meeting.name)”") { model.continueMeeting() }
-            }
-        }
-        Button(model.isRecording ? "Stop and Start a New Meeting…" : "New Meeting…") {
-            if let name = askForMeetingName() { model.startMeeting(named: name) }
-        }
-        .keyboardShortcut("n")
-
-        if !model.unsavedRecordings.isEmpty {
-            let count = model.unsavedRecordings.count
-            Button(count == 1 ? "Save 1 Unsaved Recording" : "Save \(count) Unsaved Recordings") {
-                model.saveUnsavedRecordings()
-            }
-        }
-
-        Divider()
-
-        // Only while there is a transcript to show; a window already open stays, with the last one.
-        if model.isRecording {
-            Button("Show Transcript") {
-                openWindow(id: Self.transcriptWindow)
-                WindowFocus.bringToFront(Self.transcriptWindow)
-            }
-            .keyboardShortcut("t")
-        }
-        Button("Open Recordings Folder") {
-            let folder = model.meeting?.directory ?? AppSettings.recordingsFolder
-            let existing = FileManager.default.fileExists(atPath: folder.path) ? folder : AppSettings.recordingsFolder
-            NSWorkspace.shared.open(existing)
-        }
-
-        Divider()
-
-        Button("Settings…") {
-            openSettings()
-            WindowFocus.bringToFront(Self.settingsWindow)
-        }
-        .keyboardShortcut(",")
-        Button("Quit TotalRecall") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
+        .onAppear { MenuBarIconSharing.apply() }
     }
 
     /// The next meeting on the calendar, to start now, as when a meeting starts early, and today's meetings.

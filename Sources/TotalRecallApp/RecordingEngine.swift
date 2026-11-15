@@ -100,17 +100,7 @@ private final class Recording: @unchecked Sendable {
         _ request: RecordingEngine.Request,
         report: @escaping @Sendable (RecordingEngine.Event) -> Void
     ) throws -> Recording {
-        guard requestSystemAudioAccess() else {
-            throw AppError(
-                "TotalRecall may not record system audio. Allow it in System Settings › Privacy & Security › "
-                    + "Screen & System Audio Recording › System Audio Recording Only, then quit and reopen TotalRecall."
-            )
-        }
-        guard requestMicrophoneAccess() else {
-            throw AppError(
-                "TotalRecall may not use the microphone. Allow it in System Settings › Privacy & Security › Microphone."
-            )
-        }
+        try checkPermissions()
         try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
         let (audio, transcript) = RecordingFolder.freePaths(
             in: request.directory,
@@ -140,10 +130,37 @@ private final class Recording: @unchecked Sendable {
             throw error
         }
 
-        // The transcript goes on to the end of the stream, after the recording stops. If it stops early, its end of
-        // the pipe is closed, so the recording goes on without it rather than wait for it.
-        let input = pipe.fileHandleForReading
         let isDiscarded = OSAllocatedUnfairLock(initialState: false)
+        transcribe(pipe.fileHandleForReading, to: transcript, for: request, isDiscarded: isDiscarded, report: report)
+        return Recording(session: session, pipe: pipe, audio: audio, isDiscarded: isDiscarded, report: report)
+    }
+
+    /// Asks for the permissions recording needs, the first time, and throws if either is not given.
+    private static func checkPermissions() throws {
+        guard requestSystemAudioAccess() else {
+            throw AppError(
+                "TotalRecall may not record system audio. Allow it in System Settings › Privacy & Security › "
+                    + "Screen & System Audio Recording › System Audio Recording Only, then quit and reopen TotalRecall."
+            )
+        }
+        guard requestMicrophoneAccess() else {
+            throw AppError(
+                "TotalRecall may not use the microphone. Allow it in System Settings › Privacy & Security › Microphone."
+            )
+        }
+    }
+
+    /// Transcribes the recording streamed into `input` to `transcript`, in a task of its own. The transcript goes on to
+    /// the end of the stream, after the recording stops. If it stops early, its end of the pipe is closed, so the
+    /// recording goes on without it rather than wait for it. A recording discarded, stopped before it started, leaves
+    /// no transcript behind.
+    private static func transcribe(
+        _ input: FileHandle,
+        to transcript: URL,
+        for request: RecordingEngine.Request,
+        isDiscarded: OSAllocatedUnfairLock<Bool>,
+        report: @escaping @Sendable (RecordingEngine.Event) -> Void
+    ) {
         report(.transcriptStarted)
         Task.detached(priority: .userInitiated) {
             defer {
@@ -156,16 +173,17 @@ private final class Recording: @unchecked Sendable {
                     to: transcript,
                     language: request.language,
                     identifiesSpeakers: request.identifiesSpeakers,
-                    onLine: { report(.line($0)) },
-                    onLiveText: { report(.liveText($0)) },
-                    onMessage: { report(.message($0)) }
+                    handlers: LiveTranscriptHandlers(
+                        onLine: { report(.line($0)) },
+                        onLiveText: { report(.liveText($0)) },
+                        onMessage: { report(.message($0)) }
+                    )
                 )
                 report(.transcriptFinished(nil))
             } catch {
                 report(.transcriptFinished(error.localizedDescription))
             }
         }
-        return Recording(session: session, pipe: pipe, audio: audio, isDiscarded: isDiscarded, report: report)
     }
 
     /// Stops recording at once, ends the stream so the transcript can finish, and saves the file in the background.

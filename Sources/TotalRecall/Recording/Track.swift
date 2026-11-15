@@ -24,6 +24,7 @@ final class Track {
 
     /// Samples waiting to be written.
     var count: Int { samples.count }
+    var isEmpty: Bool { samples.isEmpty }
 
     var secondsSinceLastBuffer: Double { uptimeSeconds() - lastBufferUptime }
 

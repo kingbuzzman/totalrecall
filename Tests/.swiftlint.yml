@@ -1,0 +1,8 @@
+# Tests: a suite lists many test cases, which makes it long without making it complex, so only the length limits are
+# raised here; every other rule is as in the repository's .swiftlint.yml.
+type_body_length:
+  warning: 400
+  error: 600
+file_length:
+  warning: 600
+  error: 1000

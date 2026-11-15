@@ -52,14 +52,14 @@ final class FakeMicrophones {
         MicrophoneCapture(
             preferredName: preferredName,
             onSamples: onSamples,
-            findTarget: { [unowned self] name in
-                preferredNames.append(name)
-                return target
+            findTarget: { [weak self] name in
+                self?.preferredNames.append(name)
+                return self?.target
             },
-            makeSession: { [unowned self] device, id, onSamples, onDeviceChange in
-                if let failure { throw failure }
+            makeSession: { [weak self] device, id, onSamples, onDeviceChange in
+                if let failure = self?.failure { throw failure }
                 let session = Session(device: device, id: id, onSamples: onSamples, onDeviceChange: onDeviceChange)
-                sessions.append(session)
+                self?.sessions.append(session)
                 return session
             }
         )

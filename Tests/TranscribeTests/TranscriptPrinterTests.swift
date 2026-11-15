@@ -39,7 +39,7 @@ struct TranscriptPrinterTests {
         printer.finish()
 
         #expect(live.text == "You: Good mor\nYou: Good mor  |  Them: Hi\nThem: Hi\n\n")
-        #expect(output.text == "", "nothing goes to stdout")
+        #expect(output.text.isEmpty, "nothing goes to stdout")
     }
 
     @Test func writesLinesInTheOrderTheySettleNotByTime() {
