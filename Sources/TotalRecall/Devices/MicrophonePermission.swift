@@ -1,7 +1,7 @@
 import AVFoundation
 
 /// Returns whether this process may record the microphone, asking the user the first time.
-func requestMicrophoneAccess() -> Bool {
+package func requestMicrophoneAccess() -> Bool {
     switch AVCaptureDevice.authorizationStatus(for: .audio) {
     case .authorized:
         return true

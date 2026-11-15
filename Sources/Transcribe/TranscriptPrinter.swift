@@ -9,6 +9,7 @@ final class TranscriptPrinter: @unchecked Sendable {
     private let isLive: Bool
     private let write: (String) -> Void
     private let save: ((String) -> Void)?
+    private let showLive: ((String) -> Void)?
     private let terminalWidth: () -> Int
     private let lock = NSLock()
     /// Each speaker's words still being recognized, and when they start, after their lines held back, by when those
@@ -17,7 +18,9 @@ final class TranscriptPrinter: @unchecked Sendable {
     private var heldLines: [String: [(start: Double, text: String)]] = [:]
 
     /// `printsLines` prints each line to stdout, and `isLive` also shows the text still being recognized there, drawn
-    /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file.
+    /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file,
+    /// and `showLive`, for an app, the text still being recognized, as plain text, whenever it changes ("" once there is
+    /// none).
     init(
         printsLines: Bool,
         isLive: Bool,
@@ -26,13 +29,15 @@ final class TranscriptPrinter: @unchecked Sendable {
             fputs($0, stdout)
             fflush(stdout)
         },
-        save: ((String) -> Void)? = nil
+        save: ((String) -> Void)? = nil,
+        showLive: ((String) -> Void)? = nil
     ) {
         self.printsLines = printsLines
         self.isLive = isLive && printsLines
         self.terminalWidth = terminalWidth
         self.write = write
         self.save = save
+        self.showLive = showLive
     }
 
     func update(_ update: TranscriptUpdate) {
@@ -66,7 +71,10 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     func finish() {
-        lock.withLock { clearLiveLine() }
+        lock.withLock {
+            clearLiveLine()
+            showLive?("")
+        }
     }
 
     private static func line(_ update: TranscriptUpdate) -> String {
@@ -81,13 +89,15 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     private func drawLiveLine() {
-        guard isLive else { return }
+        guard isLive || showLive != nil else { return }
         let keys = Set(volatileText.keys).union(heldLines.keys).sorted(by: >)
         let parts = keys.compactMap { key -> String? in
             let texts = (heldLines[key] ?? []).map(\.text) + [volatileText[key]?.text].compactMap { $0 }
             let text = texts.filter { !$0.isEmpty }.joined(separator: " ")
             return text.isEmpty ? nil : key.isEmpty ? text : "\(key): \(text)"
         }
+        showLive?(parts.joined(separator: "  |  "))
+        guard isLive else { return }
         clearLiveLine()
         guard !parts.isEmpty else { return }
         // Keep it to one line, showing the most recent words.

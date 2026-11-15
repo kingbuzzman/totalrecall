@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>local.totalrecall.app</string>
+  <key>CFBundleName</key><string>TotalRecall</string>
+  <key>CFBundleDisplayName</key><string>TotalRecall</string>
+  <key>CFBundleExecutable</key><string>TotalRecall</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <!-- Lives in the menu bar only: no Dock icon, no app menu. -->
+  <key>LSUIElement</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Record your side of meetings</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Record system audio from meetings</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe meetings as they are recorded</string>
+</dict></plist>

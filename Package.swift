@@ -5,22 +5,37 @@ let package = Package(
     name: "totalrecall",
     platforms: [.macOS("26.0")],
     products: [
-        .executable(name: "totalrecall", targets: ["TotalRecall"]),
-        .executable(name: "transcribe", targets: ["Transcribe"]),
+        .executable(name: "totalrecall", targets: ["TotalRecallCommand"]),
+        .executable(name: "transcribe", targets: ["TranscribeCommand"]),
+        // The menu bar app; the Makefile wraps it into TotalRecall.app (make build-app).
+        .executable(name: "TotalRecallApp", targets: ["TotalRecallApp"]),
     ],
     targets: [
         // Built from source by the Makefile, which points PKG_CONFIG_PATH at it.
         .systemLibrary(name: "CSpeexDSP", pkgConfig: "speexdsp"),
         .target(name: "Shared"),
-        .executableTarget(name: "TotalRecall", dependencies: ["CSpeexDSP", "Shared"], exclude: ["Info.plist"]),
-        .executableTarget(name: "Transcribe", dependencies: ["Shared"], exclude: ["Info.plist"]),
+        // The recorder and the transcriber are libraries, each with a command-line tool on top, so that the app runs
+        // both in its own process. Their Info.plists are the tools'.
+        .target(name: "TotalRecall", dependencies: ["CSpeexDSP", "Shared"], exclude: ["Info.plist"]),
+        .executableTarget(name: "TotalRecallCommand", dependencies: ["TotalRecall", "Shared"]),
+        .target(name: "Transcribe", dependencies: ["Shared"], exclude: ["Info.plist"]),
+        .executableTarget(name: "TranscribeCommand", dependencies: ["Transcribe"]),
+        // What the app decides without a user interface (where recordings go, the formats it offers), kept apart so it
+        // can be tested.
+        .target(name: "AppSupport"),
+        .executableTarget(
+            name: "TotalRecallApp",
+            dependencies: ["TotalRecall", "Transcribe", "Shared", "AppSupport"],
+            exclude: ["Info.plist"]
+        ),
         .target(name: "AudioLab", path: "Tests/AudioLab"),
         // Plays the integration tests' fake speakers and microphones, each in a process of its own.
         .executableTarget(name: "AudioLabPlayer", dependencies: ["AudioLab"], path: "Tests/AudioLabPlayer"),
         .testTarget(name: "SharedTests", dependencies: ["Shared", "AudioLab"]),
         .testTarget(name: "TotalRecallTests", dependencies: ["TotalRecall", "Shared"]),
-        .testTarget(name: "TranscribeTests", dependencies: ["Transcribe", "AudioLab"]),
+        .testTarget(name: "TranscribeTests", dependencies: ["Transcribe", "AudioLab", "Shared"]),
         .testTarget(name: "AudioLabTests", dependencies: ["AudioLab"]),
+        .testTarget(name: "AppSupportTests", dependencies: ["AppSupport"]),
         .testTarget(name: "IntegrationTests", dependencies: ["AudioLab", "AudioLabPlayer", "Shared"]),
     ]
 )

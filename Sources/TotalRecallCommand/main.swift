@@ -1,7 +1,9 @@
 import Foundation
 import Shared
+import TotalRecall
 
-// The only place that ends the process: everything below main.swift reports failures by throwing.
+// The command-line tool, on top of the TotalRecall library, and the only place that ends the process: the library
+// reports failures by throwing.
 
 func fail(_ message: String) -> Never {
     // On a terminal, start on a clean line, like every other message (see StatusLine).

@@ -25,6 +25,23 @@ struct TranscriptPrinterTests {
         )
     }
 
+    @Test func showsTheTextStillBeingRecognizedAsPlainTextToAnApp() {
+        let live = Output()
+        let printer = TranscriptPrinter(
+            printsLines: false,
+            isLive: false,
+            write: output.append,
+            showLive: { live.append($0 + "\n") }
+        )
+        printer.update(TranscriptUpdate(speaker: .you, start: 0, text: "Good mor", isFinal: false))
+        printer.update(TranscriptUpdate(speaker: .them, start: 1, text: "Hi", isFinal: false))
+        printer.update(TranscriptUpdate(speaker: .you, start: 0, text: "Good morning.", isFinal: true))
+        printer.finish()
+
+        #expect(live.text == "You: Good mor\nYou: Good mor  |  Them: Hi\nThem: Hi\n\n")
+        #expect(output.text == "", "nothing goes to stdout")
+    }
+
     @Test func writesLinesInTheOrderTheySettleNotByTime() {
         let printer = makePrinter(saves: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 5, text: "Fine, thanks.", isFinal: true))

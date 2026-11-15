@@ -66,10 +66,10 @@ jobs:
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
 
-      # Builds the release tarball too, so the release job can publish the binaries tested here, and the build
-      # instrumented for coverage.
+      # Builds the release tarball too, so the release job can publish the binaries tested here, the build
+      # instrumented for coverage, and the menu bar app, signed ad hoc.
       - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
+        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build build-app
 
       # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions

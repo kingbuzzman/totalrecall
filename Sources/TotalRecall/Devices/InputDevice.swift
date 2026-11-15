@@ -1,11 +1,11 @@
-import CoreAudio
+package import CoreAudio
 
-struct InputDevice {
-    let id: AudioDeviceID
-    let name: String
+package struct InputDevice {
+    package let id: AudioDeviceID
+    package let name: String
 
     /// Every device that has at least one input channel.
-    static func all() -> [InputDevice] {
+    package static func all() -> [InputDevice] {
         allDevices()
             .filter { inputChannelCount($0) > 0 }
             .compactMap { device in
@@ -14,7 +14,7 @@ struct InputDevice {
     }
 
     /// Input devices whose name contains `query`, ignoring case and curly apostrophes.
-    static func matching(_ query: String) -> [InputDevice] {
+    package static func matching(_ query: String) -> [InputDevice] {
         all().filter { normalizedName($0.name).contains(normalizedName(query)) }
     }
 

@@ -35,3 +35,25 @@ var aacSettings: [String: Any] {
         AVEncoderBitRateKey: 128_000,
     ]
 }
+
+/// Lossless, about half the size of 16-bit PCM.
+var flacSettings: [String: Any] {
+    [
+        AVFormatIDKey: kAudioFormatFLAC,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: 2,
+        AVEncoderBitDepthHintKey: 16,
+    ]
+}
+
+/// How macOS itself encodes the format a file extension names, or nil when it cannot and ffmpeg has to (.mp3, .ogg,
+/// ...). A .caf is the partial recording's own format, so it needs no encoding at all.
+func nativeSettings(forExtension fileExtension: String) -> [String: Any]? {
+    switch fileExtension.lowercased() {
+    case "wav", "wave": pcmSettings(bigEndian: false)
+    case "aif", "aiff": pcmSettings(bigEndian: true)
+    case "m4a", "mp4", "aac": aacSettings
+    case "flac": flacSettings
+    default: nil
+    }
+}

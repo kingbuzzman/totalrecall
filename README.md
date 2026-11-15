@@ -57,12 +57,38 @@ tar -xzf totalrecall-*-macos-arm64.tar.gz -C ~/.local/bin totalrecall transcribe
 
 - If you downloaded the tarball in a browser, run `xattr -d com.apple.quarantine totalrecall-*.tar.gz` first (the
   binaries aren't notarized).
-- For `.mp3` or `.flac` output, run `brew install ffmpeg`. `.m4a`, `.wav`, `.aiff` and `.caf` work without it.
+- For `.mp3` output, run `brew install ffmpeg`. `.m4a`, `.flac`, `.wav`, `.aiff` and `.caf` work without it.
 - To build from source, run `make && make install`. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+- For the menu bar app, see [Menu bar app](#menu-bar-app).
 
 On the first run, macOS asks your terminal for two permissions: **Microphone** and **System Audio Recording**. After you
 allow system audio, quit and reopen the terminal. If you clicked "Don't Allow", turn them on in System Settings ›
 Privacy & Security.
+
+## Menu bar app
+
+`TotalRecall.app` does what `scripts/record-meetings -n` does, from the menu bar instead of a terminal: it records your
+mic and system audio, transcribes them as they're recorded, and saves both. It runs the recorder and the transcriber
+itself, so it doesn't need the command-line tools.
+
+- **Start Recording** starts right away. **New Meeting…** asks for a name first. **Stop Recording** stops at once, and
+  the next recording can start straight after. The file is saved and the last words written in the background.
+- **Continue "…"** records the last meeting again, into its folder, as `rec-2` and `transcript-2`.
+- **Show Transcript** opens a window with the transcript as it's written, and the words still being recognized in grey.
+- A notification says when a recording starts and when it's saved. Click the "saved" one to show the file in Finder.
+  While it records, the menu bar icon has a red dot.
+- **Settings** sets where recordings go (`~/Meetings` by default), their format, the mic, the language, and whether to
+  identify speakers. Recordings go in `other/WEEK-YEAR/MM-DD/HHhMM-name/`, the same tree `record-meetings` uses.
+- After a crash or a forced quit, the menu offers to save any recording that was left unsaved.
+
+It needs Xcode to build (`make build-app`, or `make build` for the tools and the app together, then `make install-app`
+to copy it into `~/Applications`). On its first recording,
+macOS asks it for Microphone and System Audio Recording.
+
+**Formats.** Every format but CAF costs a conversion. Recordings are captured as CAF (48 kHz, 16-bit PCM), about 690 MB
+an hour, and converted while they record, so stopping takes no time. But converting uses CPU the whole time, and a
+conversion that falls behind is done over when the recording stops. For the best results, use CAF: no conversion and
+nothing lost. For small files, use M4A, which macOS converts itself (about 60 MB an hour). MP3 needs ffmpeg.
 
 ## Recipes
 
@@ -142,6 +168,9 @@ Both tools also take `--version` and `--help`.
   `transcribe speakers name`. Until someone
   has a name, a few short samples of their speech are kept in `~/.transcribe/speakers.db` too, so you can tell who they
   are with `transcribe speakers play`; `transcribe speakers forget` deletes them along with the person.
+- **Saving is quick.** `totalrecall` records into `<output>.partial.caf` and converts to the format you asked for as it
+  records, so Ctrl-C saves in well under a second instead of about 15 s per hour of audio. `.caf` needs no conversion.
+  If converting fails or falls behind, it converts the whole recording when you stop instead, as before.
 - **The stream ending doesn't end the recording.** With `--stream`, if the program reading it exits, `totalrecall` says
   so and keeps recording the file.
 - **AirPods sound lower quality.** Their Bluetooth call profile records at about 24 kHz. That's fine for transcripts,

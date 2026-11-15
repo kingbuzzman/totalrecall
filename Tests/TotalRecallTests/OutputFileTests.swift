@@ -79,6 +79,7 @@ struct OutputFileTests {
         ("wav", kAudioFormatLinearPCM),
         ("aiff", kAudioFormatLinearPCM),
         ("m4a", kAudioFormatMPEG4AAC),
+        ("flac", kAudioFormatFLAC),
     ])
     func convertsThePartialRecordingToTheFormatOfTheExtension(fileExtension: String, format: AudioFormatID) throws {
         try withTemporaryDirectory { directory in
@@ -124,16 +125,32 @@ struct OutputFileTests {
     @Test(.enabled(if: FFmpeg.isInstalled, "needs ffmpeg"))
     func convertsOtherFormatsWithFFmpeg() throws {
         try withTemporaryDirectory { directory in
-            let output = OutputFile(path: directory.appendingPathComponent("out.flac").path)
+            let output = OutputFile(path: directory.appendingPathComponent("out.mp3").path)
             try writePartialRecording(for: output)
 
             try output.save()
 
-            #expect(try AVAudioFile(forReading: output.url).formatID == kAudioFormatFLAC)
+            #expect(try AVAudioFile(forReading: output.url).formatID == kAudioFormatMPEGLayer3)
         }
     }
 
-    @Test func keepsThePartialRecordingWhenFFmpegFails() throws {
+    @Test func savesWhatWasEncodedWhileRecordingInsteadOfConverting() throws {
+        try withTemporaryDirectory { directory in
+            let output = OutputFile(path: directory.appendingPathComponent("out.wav").path)
+            try writePartialRecording(for: output)
+            let encoded = directory.appendingPathComponent("out.encoding.wav")
+            try Data("already encoded".utf8).write(to: encoded)
+
+            try output.save(encoded: encoded)
+
+            #expect(try String(contentsOf: output.url, encoding: .utf8) == "already encoded")
+            #expect(!FileManager.default.fileExists(atPath: encoded.path))
+            #expect(!FileManager.default.fileExists(atPath: output.partialURL.path))
+        }
+    }
+
+    @Test(.enabled(if: FFmpeg.isInstalled, "needs ffmpeg"))
+    func keepsThePartialRecordingWhenFFmpegFails() throws {
         try withTemporaryDirectory { directory in
             let output = OutputFile(path: directory.appendingPathComponent("out.not-a-format").path)
             try writePartialRecording(for: output)

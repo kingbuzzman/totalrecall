@@ -9,19 +9,15 @@ protocol AudioSink: AnyObject {
     func close()
 }
 
-/// A 16-bit PCM CAF file, which stays readable if the process dies.
+/// An audio file; by default a 16-bit PCM CAF file, which stays readable if the process dies.
 final class AudioFileSink: AudioSink {
     private var file: AVAudioFile?
     /// Reused from one write to the next.
     private var buffer: AVAudioPCMBuffer?
 
-    init(url: URL) throws {
-        file = try AVAudioFile(
-            forWriting: url,
-            settings: pcmSettings(bigEndian: false),
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
+    /// The file's type follows the extension of `url`, its format `settings`.
+    init(url: URL, settings: [String: Any] = pcmSettings(bigEndian: false)) throws {
+        file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
     }
 
     func write(left: [Float], right: [Float], count: Int) throws {
@@ -46,6 +42,28 @@ final class AudioFileSink: AudioSink {
         let copied = min(samples.count, count)
         destination.update(from: samples, count: copied)
         (destination + copied).update(repeating: 0, count: count - copied)
+    }
+}
+
+/// The partial recording, plus its encoding into the output file's format as it is recorded (see `LiveEncoder`). Only
+/// writing the partial recording can fail: the encoder deals with its own failures.
+final class EncodingSink: AudioSink {
+    private let file: any AudioSink
+    private let encoder: LiveEncoder
+
+    init(file: any AudioSink, encoder: LiveEncoder) {
+        self.file = file
+        self.encoder = encoder
+    }
+
+    func write(left: [Float], right: [Float], count: Int) throws {
+        try file.write(left: left, right: right, count: count)
+        encoder.append(left: left, right: right, count: count)
+    }
+
+    /// Closes the partial recording; the encoding is finished when the recording is saved.
+    func close() {
+        file.close()
     }
 }
 

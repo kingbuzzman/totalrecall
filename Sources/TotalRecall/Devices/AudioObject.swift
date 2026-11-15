@@ -1,4 +1,4 @@
-import CoreAudio
+package import CoreAudio
 import Foundation
 
 // Thin helpers over the Core Audio object property API.
@@ -53,7 +53,7 @@ func stringProperty(_ object: AudioObjectID, _ selector: AudioObjectPropertySele
     return value?.takeRetainedValue() as String?
 }
 
-func defaultInputDevice() -> AudioDeviceID {
+package func defaultInputDevice() -> AudioDeviceID {
     let address = propertyAddress(kAudioHardwarePropertyDefaultInputDevice)
     let unknown = AudioDeviceID(kAudioObjectUnknown)
     return (try? readProperty(systemObject, address, initialValue: unknown)) ?? unknown
@@ -63,15 +63,22 @@ func allDevices() -> [AudioDeviceID] {
     (try? readObjectIDs(systemObject, propertyAddress(kAudioHardwarePropertyDevices))) ?? []
 }
 
-/// Calls `handler` on `queue` whenever the system input, the system output, or the list of devices changes.
-func onSystemDeviceChange(queue: DispatchQueue, _ handler: @escaping () -> Void) {
-    let selectors = [
+/// Calls `handler` on `queue` whenever the system input, the system output, or the list of devices changes, until the
+/// returned function is called.
+func onSystemDeviceChange(queue: DispatchQueue, _ handler: @escaping () -> Void) -> () -> Void {
+    let addresses = [
         kAudioHardwarePropertyDefaultInputDevice,
         kAudioHardwarePropertyDefaultOutputDevice,
         kAudioHardwarePropertyDevices,
-    ]
-    for selector in selectors {
-        var address = propertyAddress(selector)
-        AudioObjectAddPropertyListenerBlock(systemObject, &address, queue) { _, _ in handler() }
+    ].map { propertyAddress($0) }
+    // Removing a listener takes the very block that was added.
+    let listener: AudioObjectPropertyListenerBlock = { _, _ in handler() }
+    for var address in addresses {
+        AudioObjectAddPropertyListenerBlock(systemObject, &address, queue, listener)
+    }
+    return {
+        for var address in addresses {
+            AudioObjectRemovePropertyListenerBlock(systemObject, &address, queue, listener)
+        }
     }
 }

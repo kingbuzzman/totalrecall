@@ -1,6 +1,6 @@
 import Foundation
 
-let usage = """
+package let usage = """
     usage: totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] [--force]
                        [--stream] <output-file>
            totalrecall [--mic NAME | --no-mic] [--no-speaker-isolation] [--no-echo-cancellation] -
@@ -10,7 +10,8 @@ let usage = """
     Records all system audio plus a microphone until Ctrl-C, then saves <output-file>.
     By default your microphone goes to the left channel and everyone else (system audio) to the right.
     The microphone follows the system input, so plugging in or removing AirPods switches it mid-recording.
-    Format follows the extension: .m4a .wav .aiff .caf natively, anything else (.mp3, .flac, ...) via ffmpeg.
+    Format follows the extension: .m4a .wav .aiff .flac .caf natively, anything else (.mp3, ...) via ffmpeg. It is
+    recorded as .caf and converted as it records, so saving takes no time; .caf needs no conversion at all.
     With --stream it also streams the recording to stdout as WAV: totalrecall meeting.mp3 --stream | transcribe -
     With - instead of <output-file> it only streams, saving no file: totalrecall - | transcribe -
 
@@ -23,14 +24,30 @@ let usage = """
       --stream                  also stream the recording to stdout while saving <output-file>
     """
 
-struct Options: Equatable {
-    var microphoneQuery: String?
-    var includesMicrophone = true
-    var isolatesSpeakers = true
-    var cancelsEcho = true
-    var overwrite = false
+package struct Options: Equatable {
+    package var microphoneQuery: String?
+    package var includesMicrophone = true
+    package var isolatesSpeakers = true
+    package var cancelsEcho = true
+    package var overwrite = false
     /// With an output file, also stream the recording to stdout (`--stream`).
-    var streams = false
+    package var streams = false
+
+    package init(
+        microphoneQuery: String? = nil,
+        includesMicrophone: Bool = true,
+        isolatesSpeakers: Bool = true,
+        cancelsEcho: Bool = true,
+        overwrite: Bool = false,
+        streams: Bool = false
+    ) {
+        self.microphoneQuery = microphoneQuery
+        self.includesMicrophone = includesMicrophone
+        self.isolatesSpeakers = isolatesSpeakers
+        self.cancelsEcho = cancelsEcho
+        self.overwrite = overwrite
+        self.streams = streams
+    }
 }
 
 /// Invalid command-line arguments; the description ends with the usage text.
@@ -40,7 +57,7 @@ struct UsageError: LocalizedError {
     var errorDescription: String? { "\(problem)\n\(usage)" }
 }
 
-enum Command: Equatable {
+package enum Command: Equatable {
     case record(outputPath: String, options: Options)
     case listMicrophones
     case help
@@ -48,7 +65,7 @@ enum Command: Equatable {
 
     /// Parses the arguments after the program name. `--list-mics`, `--help` and `--version` win over anything
     /// after them.
-    static func parse(_ arguments: ArraySlice<String>) throws -> Command {
+    package static func parse(_ arguments: ArraySlice<String>) throws -> Command {
         var arguments = arguments
         var options = Options()
         var outputPath: String?

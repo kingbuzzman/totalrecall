@@ -57,6 +57,12 @@ SPEAKER_MODEL_SECTIONS := $(call SPEAKER_MODEL_SECTION,__voice_model,Data/com.ap
 # with the tests'. Both tools get totalrecall's Info.plist, which only matters for their version.
 COVERAGE_FLAGS := -c debug --scratch-path $(BUILD)/swiftpm-coverage \
 	-Xswiftc -profile-generate -Xswiftc -profile-coverage-mapping $(call INFO_PLIST,TotalRecall) $(SPEAKER_MODEL_SECTIONS)
+# The menu bar app: the TotalRecallApp product in a bundle, with its Info.plist and its icons, which actool compiles from
+# Resources; actool comes with Xcode, not the Command Line Tools. Signed like the tools, or ad hoc without a certificate,
+# so macOS keeps its permissions across rebuilds. make install-app copies it into APP_DIR.
+APP := $(BUILD)/TotalRecall.app
+APP_RESOURCES := $(shell find Resources -type f)
+APP_DIR ?= $(HOME)/Applications
 # Lowest line coverage, in percent, that make coverage accepts.
 COVERAGE_MIN ?= 75
 COVERAGE_REPORT := $(BUILD)/coverage
@@ -69,6 +75,9 @@ STRICT := scripts/no-warnings.sh
 UNBUFFERED := script -q /dev/null
 
 all: $(TOOLS)
+
+# Everything: the tools and the app, which needs Xcode (see APP). Phony, as build is also the build folder.
+build: $(TOOLS) $(APP)
 
 # make totalrecall or make transcribe builds just that one.
 totalrecall transcribe: %: $(BIN)/%
@@ -87,6 +96,20 @@ $(BIN)/transcribe: $(SOURCES) $(SPEAKER_MODEL_FILES) $(BUILD)/Transcribe/Info.pl
 	mkdir -p $(BIN)
 	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/transcribe" $@
 	$(SIGN)
+
+# The app has the speaker model built in too, for --identify-speakers; the version is in the bundle's Info.plist.
+build-app: $(APP)
+
+$(APP): $(SOURCES) $(SPEAKER_MODEL_FILES) $(APP_RESOURCES) $(BUILD)/TotalRecallApp/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a
+	$(STRICT) swift build $(SWIFTPM) -c release --product TotalRecallApp $(SPEAKER_MODEL_SECTIONS)
+	mkdir -p $@/Contents/MacOS $@/Contents/Resources
+	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/TotalRecallApp" $@/Contents/MacOS/TotalRecall
+	cp $(BUILD)/TotalRecallApp/Info.plist $@/Contents/Info.plist
+	xcrun actool Resources/Assets.xcassets Resources/AppIcon.icon --compile $@/Contents/Resources \
+		--platform macosx --minimum-deployment-target $(MACOS_MIN) --app-icon AppIcon \
+		--output-partial-info-plist $(BUILD)/TotalRecallApp/assets.plist > /dev/null
+	codesign --force --sign "$(or $(CODESIGN_IDENTITY),-)" --identifier local.totalrecall.app $@
+	touch $@
 
 # Only the library, its headers and its pkg-config file, with warnings as errors: speexdsp's own test programs have
 # warnings of their own. lt_cv_apple_cc_single_mod=no skips libtool's check of -single_module, which ld warns is obsolete.
@@ -145,10 +168,17 @@ lint:
 # Copies, not symlinks, so the installed tools outlive make clean and a rebuild. install replaces the file, or a symlink
 # left by an older make install, instead of writing through it.
 install: $(TOOLS)
+
+# Everything: the tools and the app, which needs Xcode (see APP). Phony, as build is also the build folder.
+build: $(TOOLS) $(APP)
 	mkdir -p $(PREFIX)/bin
 	install -m 755 $(TOOLS) $(PREFIX)/bin/
+
+install-app: $(APP)
+	mkdir -p $(APP_DIR)
+	ditto $(APP) $(APP_DIR)/TotalRecall.app
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all totalrecall transcribe release test coverage coverage-build coverage-bin format lint install clean
+.PHONY: all build build-app totalrecall transcribe release test coverage coverage-build coverage-bin format lint install install-app clean

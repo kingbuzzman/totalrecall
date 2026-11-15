@@ -2,6 +2,29 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## Unreleased
+
+### TotalRecall.app
+
+- A menu bar app that records and transcribes meetings, like `scripts/record-meetings -n`: Start Recording, New
+  Meeting… (with a name), Stop Recording, and Continue for the last meeting, which records into its folder as `rec-2`.
+  A window shows the transcript as it's written. Notifications say when a recording starts and when it's saved.
+  Settings set the save folder, the audio format (with what each one costs), the mic, the language, identifying
+  speakers, and opening at login. It runs the recorder and the transcriber in its own process. Build it with
+  `make build-app` (needs Xcode) and install it with `make install-app`.
+- Stopping returns at once: the file is saved and the transcript finished in the background, so the next recording can
+  start straight away.
+- After a crash or a forced quit, the menu offers to save recordings that were left unsaved. It never replaces a file
+  that already exists, and it leaves alone any recording written to in the last two minutes.
+
+### totalrecall
+
+- Converts to the output format while it records, so Ctrl-C saves in well under a second instead of about 15 s per
+  hour of audio (16 s an hour for `.mp3`, 20 s for `.m4a`). The `.partial.caf` is still written, and if converting
+  fails or falls behind, the whole recording is converted when you stop instead, as before.
+- `.flac` is encoded by macOS itself, without ffmpeg. Only `.mp3` and other formats macOS can't write still need it.
+- ffmpeg is found in Homebrew's folders even when it isn't on the `PATH`.
+
 ## 0.4.0
 
 ### transcribe

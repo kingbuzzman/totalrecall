@@ -36,7 +36,7 @@ private func tccFunction<Function>(_ name: String, as type: Function.Type) -> Fu
 /// Returns whether this process may record system audio, requesting the permission when it is not granted: the system
 /// prompt appears if the user has not answered it yet. Also true when the undocumented API is unavailable, since the
 /// permission cannot be checked then.
-func requestSystemAudioAccess() -> Bool {
+package func requestSystemAudioAccess() -> Bool {
     guard
         let preflight = tccFunction("TCCAccessPreflight", as: TCCAccessPreflight.self),
         let request = tccFunction("TCCAccessRequest", as: TCCAccessRequest.self)

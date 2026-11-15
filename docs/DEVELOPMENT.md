@@ -5,9 +5,16 @@
 Needs macOS 26 or later and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
-make            # builds build/bin/totalrecall and build/bin/transcribe
-make install    # copies both into ~/.local/bin (override with PREFIX=/some/dir)
+make              # builds build/bin/totalrecall and build/bin/transcribe
+make install      # copies both into ~/.local/bin (override with PREFIX=/some/dir)
+make build-app    # builds build/TotalRecall.app, the menu bar app; needs Xcode, for actool
+make install-app  # copies it into ~/Applications (override with APP_DIR=/some/dir)
+make build        # builds everything: both tools and the app
 ```
+
+`make build-app` compiles the app's icons, `Resources/AppIcon.icon` (made with Icon Composer) and the menu bar icons
+in `Resources/Assets.xcassets`, with `actool`, which comes with Xcode, not the Command Line Tools. The app is signed
+like the tools, as `local.totalrecall.app`, so macOS keeps its permissions across rebuilds.
 
 The tools are a Swift package (`Package.swift`) built through `make`, which first downloads and compiles
 [speexdsp](https://speex.org/) (echo cancellation) for the package to link into totalrecall, so the binary needs nothing
@@ -43,8 +50,11 @@ rerouting, and nothing to reconfigure.
   recording until the new one delivers real audio, which hides the ~2 s AirPods need to switch Bluetooth into their
   call profile. If a capture stops delivering audio it is rebuilt, and any gap is filled with silence so the two
   channels stay in sync.
-- **Crash safety.** While recording it writes raw audio to `<output>.partial.caf`; on Ctrl-C it converts that to the
-  requested format and deletes it.
+- **Crash safety and quick saving.** While recording it writes raw audio to `<output>.partial.caf`, which a crash
+  leaves readable. At the same time `LiveEncoder` converts the audio into the requested format, into
+  `<name>.encoding.<ext>`, on a queue of its own, with AVFoundation or, for `.mp3`, an ffmpeg fed on its stdin. So on
+  Ctrl-C saving only finishes that file and renames it. If converting fails, or falls more than 2 minutes behind,
+  the partial recording is converted instead, as before. `.caf` needs no conversion.
 - **Start of recording.** Recording starts once the microphone is actually on and totalrecall has heard a second of the
   room, so that its noise suppression starts out tuned to the background. The counter starts at that moment and the
   file covers exactly the time it shows.
@@ -55,12 +65,17 @@ rerouting, and nothing to reconfigure.
 
 ## Code layout
 
-`make` builds two binaries from `Sources/`, plus the code they share:
+`make` builds two binaries from `Sources/`, plus the code they share. The recorder and the transcriber are libraries,
+each with a small command-line target on top, so the menu bar app runs both in its own process:
 
 | Folder | Contents |
 | --- | --- |
-| `TotalRecall/` | The recorder (layout below) and its `Info.plist` |
-| `Transcribe/` | The transcriber: arguments, audio sources (file or stdin stream), speaker detection, one recognizer per speaker, telling people apart by voice, and the transcript printer |
+| `TotalRecall/` | The recorder library (layout below), and `totalrecall`'s `Info.plist` |
+| `TotalRecallCommand/` | `totalrecall`'s entry point, and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
+| `Transcribe/` | The transcriber library: arguments and the command-line tool (`CommandLineTool.swift`), the transcription the tool and the app share (`Transcription.swift`), audio sources (file or stream), speaker detection, one recognizer per speaker, telling people apart by voice, and the transcript printer |
+| `TranscribeCommand/` | `transcribe`'s entry point |
+| `TotalRecallApp/` | The menu bar app: the menu, the transcript window, Settings, notifications, and `RecordingEngine`, which records and transcribes as `record-meetings` pipes the tools, but streaming through a pipe in the same process |
+| `AppSupport/` | What the app decides without a user interface, so it can be tested: the folders recordings go in, matching `record-meetings`, and the formats it offers |
 | `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, and the version |
 | `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 
@@ -68,10 +83,9 @@ Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
 
 | Folder | Contents |
 | --- | --- |
-| `main.swift` | Entry point and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
 | `App/` | Command-line options, the recording session (startup, writer timer, saving), stop signals, status output |
 | `Capture/` | System-audio tap, microphone capture with make-before-break switching, and the supervisor that restarts stalled captures |
-| `Recording/` | Per-channel timelines, echo cancellation, the file or stream it writes to, and export to the final format |
+| `Recording/` | Per-channel timelines, echo cancellation, the file or stream it writes to, the live encoder, and export to the final format |
 | `Devices/` | Core Audio property helpers, input-device discovery, microphone permission |
 | `Common.swift` | The shared error type and clock |
 
