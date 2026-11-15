@@ -59,7 +59,11 @@ tar -xzf totalrecall-*-macos-arm64.tar.gz -C ~/.local/bin totalrecall transcribe
   binaries aren't notarized).
 - For `.mp3` output, run `brew install ffmpeg`. `.m4a`, `.flac`, `.wav`, `.aiff` and `.caf` work without it.
 - To build from source, run `make && make install`. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
-- For the menu bar app, see [Menu bar app](#menu-bar-app).
+- For the menu bar app, download `TotalRecall-*-macos-arm64.zip` from the same release
+  (`gh release download --repo kingbuzzman/totalrecall --pattern '*.zip'`), unzip it, and move `TotalRecall.app` to
+  Applications. It isn't notarized either: run `xattr -dr com.apple.quarantine TotalRecall.app` first, or open it once
+  with right-click › Open. Each release is signed afresh, so after updating, macOS asks for its permissions again. See
+  [Menu bar app](#menu-bar-app).
 
 On the first run, macOS asks your terminal for two permissions: **Microphone** and **System Audio Recording**. After you
 allow system audio, quit and reopen the terminal. If you clicked "Don't Allow", turn them on in System Settings ›

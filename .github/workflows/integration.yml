@@ -66,10 +66,10 @@ jobs:
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
 
-      # Builds the release tarball too, so the release job can publish the binaries tested here, the build
-      # instrumented for coverage, and the menu bar app, signed ad hoc.
+      # Builds the release tarball and the zipped menu bar app too, signed ad hoc, so the release job can publish what
+      # was built and tested here, and the build instrumented for coverage.
       - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build build-app
+        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
 
       # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions
@@ -100,11 +100,13 @@ jobs:
           system_profiler SPAudioDataType || true
           log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
 
-      - name: Upload the release tarball
+      - name: Upload the release tarball and app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
-          path: build/totalrecall-*-macos-*.tar.gz*
+          path: |
+            build/totalrecall-*-macos-*.tar.gz*
+            build/TotalRecall-*-macos-*.zip*
           if-no-files-found: error
           retention-days: 1
 

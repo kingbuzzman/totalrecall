@@ -1,5 +1,5 @@
 import CoreAudio
-package import Foundation
+import Foundation
 
 /// Stopped before the captures were live and the recording started, so there is nothing to save.
 package struct StoppedBeforeRecording: LocalizedError {

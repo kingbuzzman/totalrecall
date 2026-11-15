@@ -10,8 +10,9 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
   Meeting… (with a name), Stop Recording, and Continue for the last meeting, which records into its folder as `rec-2`.
   A window shows the transcript as it's written. Notifications say when a recording starts and when it's saved.
   Settings set the save folder, the audio format (with what each one costs), the mic, the language, identifying
-  speakers, and opening at login. It runs the recorder and the transcriber in its own process. Build it with
-  `make build-app` (needs Xcode) and install it with `make install-app`.
+  speakers, and opening at login. It runs the recorder and the transcriber in its own process. Each release has it as
+  `TotalRecall-<version>-macos-arm64.zip`; or build it with `make build-app` (needs Xcode) and install it with
+  `make install-app`.
 - Reads today's meetings from Calendar.app, with every account it has, through EventKit, so it needs no icalbuddy:
   warns of each a few minutes before (5 unless changed), with a chime, and records it when it starts, if nothing else
   is being recorded, into the same folders `record-meetings` uses. It never stops a recording on its own. The menu shows

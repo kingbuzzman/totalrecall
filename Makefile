@@ -19,6 +19,9 @@ TOOLS := $(BIN)/totalrecall $(BIN)/transcribe
 # Every swift command takes it, so SwiftPM builds in BUILD rather than its default .build.
 SWIFTPM := --scratch-path $(BUILD)/swiftpm
 RELEASE := $(BUILD)/totalrecall-$(VERSION)-macos-$(ARCH).tar.gz
+# The menu bar app, as release.yml publishes it beside the tarball: zipped with ditto, which keeps the bundle and its
+# signature as Finder does.
+RELEASE_APP := $(BUILD)/TotalRecall-$(VERSION)-macos-$(ARCH).zip
 # Oldest macOS the tools run on, as in Package.swift; older versions refuse to launch them.
 MACOS_MIN := 26.0
 # speexdsp is built from source for MACOS_MIN and linked statically, so the binary runs without Homebrew.
@@ -136,11 +139,15 @@ $(BUILD)/%/Info.plist: Sources/%/Info.plist $(SOURCES) VERSION Makefile
 	cp $< $@
 	plutil -replace CFBundleShortVersionString -string "$(BUILD_VERSION)" $@
 
-# Both tools and the README, as published by .github/workflows/release.yml.
-release: $(RELEASE)
+# Both tools and the README, and the app, as published by .github/workflows/release.yml.
+release: $(RELEASE) $(RELEASE_APP)
 
 $(RELEASE): $(TOOLS) README.md
 	tar -czf $@ -C $(BIN) totalrecall transcribe -C $(CURDIR) README.md
+	cd $(dir $@) && shasum -a 256 $(notdir $@) > $(notdir $@).sha256
+
+$(RELEASE_APP): $(APP)
+	ditto -c -k --keepParent $(APP) $@
 	cd $(dir $@) && shasum -a 256 $(notdir $@) > $(notdir $@).sha256
 
 # Unit and end-to-end tests, the latter against the release builds; run a subset with: make test TESTS=RecorderTests

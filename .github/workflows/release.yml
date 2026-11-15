@@ -44,14 +44,14 @@ jobs:
             echo "is-new=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download the tarball
+      - name: Download the tarball and app
         if: steps.version.outputs.is-new == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
           path: build
 
-      - name: Check the tarball
+      - name: Check the tarball and app
         if: steps.version.outputs.is-new == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -67,6 +67,15 @@ jobs:
               exit 1
             fi
           done
+          # The app too, whose version is in its bundle's Info.plist.
+          ls TotalRecall-"$VERSION"-macos-*.zip > /dev/null
+          shasum -a 256 -c TotalRecall-"$VERSION"-macos-*.zip.sha256
+          ditto -x -k TotalRecall-"$VERSION"-macos-*.zip app
+          app_version=$(plutil -extract CFBundleShortVersionString raw app/TotalRecall.app/Contents/Info.plist)
+          if [ "$app_version" != "$VERSION" ]; then
+            echo "::error::TotalRecall.app is built as $app_version, not $VERSION"
+            exit 1
+          fi
 
       - name: Create the release and tag
         if: steps.version.outputs.is-new == 'true'
@@ -84,4 +93,5 @@ jobs:
             notes=(--generate-notes)
           fi
           gh release create "v$VERSION" build/totalrecall-"$VERSION"-macos-*.tar.gz* \
+            build/TotalRecall-"$VERSION"-macos-*.zip* \
             --target "$GITHUB_SHA" --title "totalrecall $VERSION" "${notes[@]}"
