@@ -7,7 +7,9 @@ import Transcribe
 import os
 
 /// What the app is doing, for the menu, the transcript window and the notifications: starts and stops recordings on the
-/// `RecordingEngine`, and follows the transcript of the latest one.
+/// `RecordingEngine`, and follows the transcript of the latest one. Like `scripts/record-meetings`, it warns of each of
+/// today's meetings on the calendar shortly before it, and starts recording it when it starts if nothing is being
+/// recorded; it never stops a recording itself.
 @MainActor @Observable
 final class AppModel {
     enum State: Equatable {
@@ -17,17 +19,24 @@ final class AppModel {
         case recording(since: Date)
     }
 
-    /// A meeting being recorded, or the last one: its name and the folder its recordings go in.
+    /// A meeting being recorded, or the last one: its name, the folder its recordings go in, and the meeting on the
+    /// calendar it is, if any.
     struct Meeting: Equatable {
         let name: String
         let directory: URL
+        var scheduled: ScheduledMeeting? = nil
+    }
+
+    /// Where one of today's meetings stands, for the menu.
+    enum MeetingStatus {
+        case upcoming, underway, recorded, skipped, ended
     }
 
     private(set) var state = State.idle
     /// The meeting being recorded, or the last one, which Continue records into again.
     private(set) var meeting: Meeting?
     /// The transcript of the latest recording so far, line by line, and the words still being recognized.
-    private(set) var transcript: [String] = []
+    private(set) var transcript: [TranscriptLine] = []
     private(set) var liveText = ""
     private(set) var lastMessage = ""
     /// Recordings being saved, after they stopped, and transcripts going on, including the one being recorded, until
@@ -36,8 +45,13 @@ final class AppModel {
     private(set) var transcribingCount = 0
     /// Partial recordings a crash or a forced quit left unsaved, which the menu offers to save.
     private(set) var unsavedRecordings: [(partial: URL, output: URL)] = []
-    /// Now, every second while recording, so the elapsed time shown updates.
+    /// Now, every second, so the times shown update.
     private(set) var now = Date()
+    /// Today's meetings on the calendar, and those recorded (or being recorded) or skipped, which are not started again.
+    private(set) var todaysMeetings: [ScheduledMeeting] = []
+    private(set) var recordedMeetings: Set<ScheduledMeeting> = []
+    private(set) var skippedMeetings: Set<ScheduledMeeting> = []
+    let calendar: CalendarSource
 
     var isRecording: Bool { state != .idle }
     var isBusy: Bool { savingCount > 0 || transcribingCount > 0 }
@@ -50,13 +64,130 @@ final class AppModel {
     /// The latest recording's number: events of earlier ones, still finishing, leave the transcript shown alone.
     private var recordingID = 0
     private var clock: Timer?
+    /// The meetings already warned of, and when the calendar was last read.
+    private var warnedMeetings: Set<ScheduledMeeting> = []
+    private var lastCalendarRead = Date.distantPast
+    private var observers: [any NSObjectProtocol] = []
+    /// Played with each warning, as `record-meetings` does: one of macOS's own sounds, softly.
+    private let chime: NSSound? = {
+        let sound = NSSound(contentsOfFile: "/System/Library/Sounds/Glass.aiff", byReference: true)
+        sound?.volume = 0.3
+        return sound
+    }()
     /// Called once nothing is being saved or transcribed any more, for quitting.
     private var whenIdle: (() -> Void)?
 
     init() {
+        calendar = CalendarSource()
+        calendar.onChange = { [weak self] in self?.readCalendar() }
         notifier.requestPermission()
         prepareTranscription()
         findUnsavedRecordings()
+        // For every run loop mode: an open menu runs the run loop in its own, in which a timer of the default mode
+        // waits, so the elapsed time in the menu would stand still until it is opened again.
+        let clock = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(clock, forMode: .common)
+        self.clock = clock
+        // A Mac that slept through a meeting's start records it on waking; the calendar may have changed meanwhile.
+        observers.append(
+            NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.readCalendar() } }
+        )
+        // Such as calendars turned off in Settings.
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.readCalendar() } }
+        )
+        Task {
+            await calendar.requestAccess()
+            readCalendar()
+        }
+    }
+
+    /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
+    /// underway already.
+    var nextMeeting: ScheduledMeeting? {
+        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: now)
+    }
+
+    func status(of meeting: ScheduledMeeting) -> MeetingStatus {
+        if recordedMeetings.contains(meeting) { return .recorded }
+        if skippedMeetings.contains(meeting) { return .skipped }
+        if meeting.end <= now { return .ended }
+        return meeting.start <= now ? .underway : .upcoming
+    }
+
+    /// Records a meeting on the calendar now, such as one starting early, stopping what is being recorded first. It
+    /// goes in the meeting's own folder, and is not started again when its time comes.
+    func record(_ meeting: ScheduledMeeting) {
+        skippedMeetings.remove(meeting)
+        recordedMeetings.insert(meeting)
+        let directory = meeting.directory(root: AppSettings.recordingsFolder)
+        start(Meeting(name: meeting.shortTitle, directory: directory, scheduled: meeting))
+    }
+
+    /// Leaves out from now on every meeting of the same title on the same calendar: its title, without what is in
+    /// parentheses or brackets, becomes one of the calendar's ignored phrases.
+    func alwaysIgnore(_ meeting: ScheduledMeeting) {
+        var rules = AppSettings.calendarRules
+        let calendar = calendar.calendars.first { $0.id == meeting.calendarID }
+        var calendarRules =
+            rules[meeting.calendarID] ?? calendar.map(AppSettings.rules(for:)) ?? CalendarRules()
+        calendarRules.ignore(meeting.shortTitle)
+        rules[meeting.calendarID] = calendarRules
+        AppSettings.calendarRules = rules
+        readCalendar()
+    }
+
+    /// Leaves a meeting out of recording and warnings, or puts it back.
+    func toggleSkipped(_ meeting: ScheduledMeeting) {
+        if skippedMeetings.remove(meeting) == nil { skippedMeetings.insert(meeting) }
+    }
+
+    /// Reads today's meetings from the calendar again.
+    func readCalendar() {
+        lastCalendarRead = Date()
+        let calendars = Dictionary(calendar.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let events = calendar.todaysEvents { AppSettings.rules(for: $0).isRecorded }
+        todaysMeetings = MeetingSchedule.meetings(from: events) { id in
+            calendars[id].map(AppSettings.rules(for:)) ?? CalendarRules()
+        }
+        // Yesterday's are of no more use.
+        let today = Set(todaysMeetings)
+        recordedMeetings.formIntersection(today.union(meeting?.scheduled.map { [$0] } ?? []))
+        skippedMeetings.formIntersection(today)
+        warnedMeetings.formIntersection(today)
+        tick()
+    }
+
+    /// Every second: warns of the meetings about to start, and starts recording the next one once it has started, if
+    /// nothing is being recorded and that is on. Reads the calendar again every minute.
+    private func tick() {
+        now = Date()
+        if now.timeIntervalSince(lastCalendarRead) >= 60 { return readCalendar() }
+        let lead = TimeInterval(AppSettings.warningMinutes * 60)
+        let excluded = warnedMeetings.union(recordedMeetings).union(skippedMeetings)
+        for meeting in MeetingSchedule.warningsDue(in: todaysMeetings, lead: lead, excluding: excluded, now: now) {
+            warnedMeetings.insert(meeting)
+            let time = meeting.start.formatted(date: .omitted, time: .shortened)
+            let body =
+                AppSettings.recordsAutomatically && !isRecording
+                ? "Recording starts at \(time)." : "It starts at \(time)."
+            notifier.post(title: MeetingSchedule.warning(for: meeting, now: now), body: body)
+            chime?.stop()
+            chime?.play()
+        }
+        if AppSettings.recordsAutomatically, !isRecording, let next = nextMeeting, next.start <= now {
+            record(next)
+        }
     }
 
     /// How long the recording has been going, as H:MM:SS.
@@ -85,8 +216,6 @@ final class AppModel {
         guard isRecording else { return }
         engine.stop()
         state = .idle
-        clock?.invalidate()
-        clock = nil
     }
 
     /// Stops recording and calls `done` once every file is saved and every transcript finished, for quitting.
@@ -129,9 +258,6 @@ final class AppModel {
             guard isLatest, state == .starting else { return }
             state = .recording(since: Date())
             now = Date()
-            clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.now = Date() }
-            }
             notifier.post(title: "Recording “\(meeting?.name ?? "")”", body: "Stop it from the menu bar.")
         case .failedToStart(let reason):
             log.error("could not start recording: \(reason, privacy: .public)")
@@ -155,7 +281,7 @@ final class AppModel {
             notifier.post(title: "Could not save the recording", body: reason)
             becameIdleIfDone()
         case .line(let line):
-            if isLatest { transcript.append(line) }
+            if isLatest { transcript.append(TranscriptLine(parsing: line)) }
         case .liveText(let text):
             if isLatest { liveText = text }
         case .message(let message):

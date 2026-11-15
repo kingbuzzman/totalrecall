@@ -12,6 +12,24 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
   Settings set the save folder, the audio format (with what each one costs), the mic, the language, identifying
   speakers, and opening at login. It runs the recorder and the transcriber in its own process. Build it with
   `make build-app` (needs Xcode) and install it with `make install-app`.
+- Reads today's meetings from Calendar.app, with every account it has, through EventKit, so it needs no icalbuddy:
+  warns of each a few minutes before (5 unless changed), with a chime, and records it when it starts, if nothing else
+  is being recorded, into the same folders `record-meetings` uses. It never stops a recording on its own. The menu shows
+  the next meeting, with Start Now for one that starts early, and lists today's, to record one now or skip it.
+  Recording automatically, the warning, and which calendars count are in Settings.
+- Each calendar is set up on its own in Settings, told apart from others of the same title: whether its meetings are
+  recorded (holidays and birthdays start off), whether focus time and prep blocks are ignored, and words or phrases
+  to ignore meetings by, such as "1:1", or regular expressions between slashes, such as `/^1:1/`. Test shows the
+  meetings a rule would ignore on that calendar, from two weeks back to two weeks ahead. Always Ignore Meetings Like
+  This, on a meeting in Today, adds its title.
+- Settings has tabs: General, Calendars, Recording, Transcript, and About, with the version.
+- Turning on Identify Speakers asks first, and says why: it saves everyone's voiceprints, which laws such as
+  Illinois's BIPA and the GDPR only allow with their consent.
+- The transcript window is a table of time, speaker and words, your lines in blue and everyone else's in orange. It
+  asks macOS to keep it out of screenshots and screen sharing (on unless turned off in Settings), which some
+  screen-sharing apps may not honor. So is the menu bar icon, with its red dot while recording.
+- Show Transcript is in the menu only while recording. While the transcript or Settings is open, the app is in the Dock
+  and Cmd-Tab.
 - Stopping returns at once: the file is saved and the transcript finished in the background, so the next recording can
   start straight away.
 - After a crash or a forced quit, the menu offers to save recordings that were left unsaved. It never replaces a file

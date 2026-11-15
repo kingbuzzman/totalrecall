@@ -1,24 +1,45 @@
 import AppKit
+import AppSupport
 import SwiftUI
 
-/// The transcript of the recording going on, or the last one, as it is written: each line as it settles, and the words
-/// still being recognized, in grey, below them.
+/// The transcript of the recording going on, or the last one, as it is written: each line as it settles, in a table that
+/// follows the latest line while it is scrolled to the bottom, and the words still being recognized, in grey, in a strip
+/// of their own at the bottom of the window.
 struct TranscriptView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture = true
+    /// Whether the table is scrolled to the bottom, to offer a way back there when it is not.
+    @State private var isAtBottom = true
+    /// Counts the clicks of the button back to the latest line, which the table scrolls on.
+    @State private var latestRequests = 0
+    /// Whether the window is open. SwiftUI keeps a closed window's views for when it opens again, so the table, and
+    /// all it holds, goes once the window closes, and is made afresh when it opens.
+    @State private var isOpen = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if model.transcript.isEmpty && model.liveText.isEmpty {
+            if model.transcript.isEmpty {
                 ContentUnavailableView(
                     model.isRecording ? "Listening…" : "No transcript yet",
                     systemImage: "text.bubble",
                     description: Text("What is said shows up here as it is recognized.")
                 )
                 .frame(maxHeight: .infinity)
-            } else {
+            } else if isOpen {
                 lines
+            } else {
+                Spacer()
+            }
+            let liveLines = TranscriptLine.parsing(liveText: model.liveText)
+            if !liveLines.isEmpty {
+                Divider()
+                VStack(spacing: 0) {
+                    ForEach(Array(liveLines.enumerated()), id: \.offset) { _, line in
+                        TranscriptRow(line: line, isLive: true)
+                    }
+                }
             }
             if !model.lastMessage.isEmpty {
                 Divider()
@@ -32,6 +53,9 @@ struct TranscriptView: View {
             }
         }
         .frame(minWidth: 420, minHeight: 300)
+        .onAppear { isOpen = true }
+        .onDisappear { isOpen = false }
+        .hiddenFromCapture(hidesFromCapture)
     }
 
     private var header: some View {
@@ -44,6 +68,18 @@ struct TranscriptView: View {
                 Text(model.elapsed).monospacedDigit().foregroundStyle(.secondary)
             }
             Spacer()
+            // The same setting as in Settings › Transcript, at hand for when a screenshot of it is wanted.
+            Button {
+                hidesFromCapture.toggle()
+            } label: {
+                Image(systemName: hidesFromCapture ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(
+                hidesFromCapture
+                    ? "Hidden from screenshots and screen sharing; click to show it"
+                    : "Shown in screenshots and screen sharing; click to hide it"
+            )
             if let directory = model.meeting?.directory {
                 Button("Show in Finder") { NSWorkspace.shared.open(directory) }
                     .disabled(!FileManager.default.fileExists(atPath: directory.path))
@@ -52,31 +88,62 @@ struct TranscriptView: View {
         .padding(12)
     }
 
+    /// The lines so far, in a native table (see `TranscriptTable`), with a button back to the latest line when
+    /// scrolled up.
     private var lines: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(model.transcript.enumerated()), id: \.offset) { index, line in
-                        Text(line).id(index)
+        TranscriptTable(lines: model.transcript, isAtBottom: $isAtBottom, scrollToLatestRequests: latestRequests)
+            .overlay(alignment: .bottomTrailing) {
+                if !isAtBottom {
+                    Button {
+                        latestRequests += 1
+                    } label: {
+                        Label("Latest", systemImage: "arrow.down")
                     }
-                    if !model.liveText.isEmpty {
-                        Text(model.liveText).foregroundStyle(.secondary).id("live")
-                    }
+                    .padding(10)
                 }
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
             }
-            .onChange(of: model.transcript.count) { scrollToEnd(proxy) }
-            .onChange(of: model.liveText) { scrollToEnd(proxy) }
+    }
+}
+
+/// A line of the words still being recognized, in the strip below the table, laid out like its rows.
+private struct TranscriptRow: View {
+    static let timeWidth: CGFloat = 64
+    static let speakerWidth: CGFloat = 84
+
+    let line: TranscriptLine
+    var isLive = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(line.time)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: Self.timeWidth, alignment: .leading)
+            Text(line.speaker)
+                .fontWeight(.semibold)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .frame(width: Self.speakerWidth, alignment: .leading)
+            Text(line.text)
+                .italic(isLive)
+                .foregroundStyle(isLive ? .secondary : .primary)
+                // The words still being recognized keep to a few lines, showing the latest.
+                .lineLimit(isLive ? 3 : nil)
+                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .background(color.opacity(line.side == .unknown ? 0 : isLive ? 0.05 : 0.12))
     }
 
-    private func scrollToEnd(_ proxy: ScrollViewProxy) {
-        if !model.liveText.isEmpty {
-            proxy.scrollTo("live", anchor: .bottom)
-        } else if !model.transcript.isEmpty {
-            proxy.scrollTo(model.transcript.count - 1, anchor: .bottom)
+    /// You in blue, everyone else in orange: a pair that stays apart in light and dark mode, and for color blindness.
+    private var color: Color {
+        switch line.side {
+        case .you: .blue
+        case .them: .orange
+        case .unknown: .secondary
         }
     }
 }

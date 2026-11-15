@@ -11,9 +11,10 @@
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIconName</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
-  <!-- Lives in the menu bar only: no Dock icon, no app menu. -->
+  <!-- Lives in the menu bar: in the Dock only while one of its windows is open (see DockPresence). -->
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Record your side of meetings</string>
   <key>NSAudioCaptureUsageDescription</key><string>Record system audio from meetings</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe meetings as they are recorded</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>See today's meetings, to warn you of them and record them when they start</string>
 </dict></plist>

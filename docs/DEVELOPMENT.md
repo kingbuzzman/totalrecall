@@ -74,8 +74,8 @@ each with a small command-line target on top, so the menu bar app runs both in i
 | `TotalRecallCommand/` | `totalrecall`'s entry point, and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
 | `Transcribe/` | The transcriber library: arguments and the command-line tool (`CommandLineTool.swift`), the transcription the tool and the app share (`Transcription.swift`), audio sources (file or stream), speaker detection, one recognizer per speaker, telling people apart by voice, and the transcript printer |
 | `TranscribeCommand/` | `transcribe`'s entry point |
-| `TotalRecallApp/` | The menu bar app: the menu, the transcript window, Settings, notifications, and `RecordingEngine`, which records and transcribes as `record-meetings` pipes the tools, but streaming through a pipe in the same process |
-| `AppSupport/` | What the app decides without a user interface, so it can be tested: the folders recordings go in, matching `record-meetings`, and the formats it offers |
+| `TotalRecallApp/` | The menu bar app: the menu, the transcript window, Settings, notifications, today's meetings from Calendar.app through EventKit (`CalendarSource`), and `RecordingEngine`, which records and transcribes as `record-meetings` pipes the tools, but streaming through a pipe in the same process |
+| `AppSupport/` | What the app decides without a user interface, so it can be tested, as `record-meetings` decides it: which events are meetings, which to record next and when to warn of them (`MeetingSchedule`), the folders recordings go in, and the formats it offers |
 | `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, and the version |
 | `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 

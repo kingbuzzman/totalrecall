@@ -9,7 +9,7 @@ struct RecordingFolderTests {
     private static let utc = TimeZone(identifier: "UTC")!
 
     @Test(arguments: [
-        ("Core Pod Sprint Retro (webcam ON)", "core-pod-sprint-retro"),
+        ("Weekly Design Review (camera on)", "weekly-design-review"),
         ("Café [x] Größe – Ünïcode!!", "cafe-groe-unicode"),
         ("((()))", "meeting"),
         ("", "meeting"),

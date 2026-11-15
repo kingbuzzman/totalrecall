@@ -141,7 +141,7 @@ def parse_args():
 
 
 class Warnings:
-    """Prints "Core Team Daily Standup in 5 minutes" once per meeting, with a soft chime."""
+    """Prints "Daily Standup in 5 minutes" once per meeting, with a soft chime."""
 
     def __init__(self, minutes):
         self.lead = timedelta(minutes=minutes)
@@ -171,7 +171,7 @@ class Warnings:
 
 
 def todays_meetings(calendars):
-    # Without -nc, icalbuddy puts the calendar after the title: "Title (javier@multimediallc.com)".
+    # Without -nc, icalbuddy puts the calendar after the title: "Title (someone@example.com)".
     command = ["icalbuddy", "-nrd", "-ea", "-b", "@@", "-ps", "| ~~ |", "-iep", "datetime,title"]
     command += ["-po", "datetime,title", "-df", "%Y-%m-%d", "-tf", "%H:%M"]
     if calendars:
@@ -223,7 +223,7 @@ def meeting_dir(root, meeting):
 
 
 def short_name(title, max_length=40):
-    """"Core Pod Sprint Retro (webcam ON)" -> "core-pod-sprint-retro"."""
+    """"Weekly Design Review (camera on)" -> "weekly-design-review"."""
     title = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", title)
     title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
     name = ""

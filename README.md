@@ -67,23 +67,41 @@ Privacy & Security.
 
 ## Menu bar app
 
-`TotalRecall.app` does what `scripts/record-meetings -n` does, from the menu bar instead of a terminal: it records your
+`TotalRecall.app` does what `scripts/record-meetings` does, from the menu bar instead of a terminal: it records your
 mic and system audio, transcribes them as they're recorded, and saves both. It runs the recorder and the transcriber
-itself, so it doesn't need the command-line tools.
+itself, so it doesn't need the command-line tools, and it reads your calendar straight from Calendar.app, so it doesn't
+need icalbuddy.
 
+- **Today's meetings.** A few minutes before each meeting a notification says "Standup in 5 minutes", with a soft
+  chime, and when it starts, recording starts, if nothing else is being recorded. A recording never stops on its own:
+  only when you stop it. Then the app waits for the next meeting, or records right away the one already underway.
+  All-day events are left out, and by default so are focus time and prep blocks, as `record-meetings` leaves them
+  out. Each calendar can be turned on or off, and set to ignore meetings whose title contains a word or phrase, such
+  as "1:1", or matches a regular expression between slashes, such as `/^1:1/`; **Test** shows which of the
+  calendar's meetings, from two weeks back to two weeks ahead, a rule would ignore. **Always Ignore Meetings Like
+  This**, on a meeting in **Today**, adds its title to its calendar's.
+- **Next: Standup at 10:00** shows in the menu, with **Start Now** for a meeting that starts early. **Today** lists
+  every meeting of the day, to record one now or skip it.
 - **Start Recording** starts right away. **New Meeting…** asks for a name first. **Stop Recording** stops at once, and
   the next recording can start straight after. The file is saved and the last words written in the background.
 - **Continue "…"** records the last meeting again, into its folder, as `rec-2` and `transcript-2`.
-- **Show Transcript** opens a window with the transcript as it's written, and the words still being recognized in grey.
+- **Show Transcript**, while recording, opens a window with the transcript as it's written, as a table of time, speaker
+  and words, your lines in blue and everyone else's in orange, and the words still being recognized in grey. While it's
+  open, the app is in the Dock and Cmd-Tab like any other. It asks macOS to keep it out of screenshots and screen
+  sharing, which some screen-sharing apps may not honor; turn that off in Settings to take a screenshot of it. The menu
+  bar icon, red dot and all, is kept out of them the same way, unless turned off in Settings.
 - A notification says when a recording starts and when it's saved. Click the "saved" one to show the file in Finder.
   While it records, the menu bar icon has a red dot.
-- **Settings** sets where recordings go (`~/Meetings` by default), their format, the mic, the language, and whether to
-  identify speakers. Recordings go in `other/WEEK-YEAR/MM-DD/HHhMM-name/`, the same tree `record-meetings` uses.
+- **Settings** has a tab each for where recordings go (`~/Meetings` by default) and when they start, which calendars,
+  the format and the mic, the transcript's language and identifying speakers, and the version. Recordings go in the
+  same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a meeting on the calendar, by when it was
+  meant to start, so a restarted meeting lands next to the first recording, and `other/...` for one started from the
+  menu.
 - After a crash or a forced quit, the menu offers to save any recording that was left unsaved.
 
 It needs Xcode to build (`make build-app`, or `make build` for the tools and the app together, then `make install-app`
 to copy it into `~/Applications`). On its first recording,
-macOS asks it for Microphone and System Audio Recording.
+macOS asks it for Microphone and System Audio Recording; it asks for Calendars when it first opens.
 
 **Formats.** Every format but CAF costs a conversion. Recordings are captured as CAF (48 kHz, 16-bit PCM), about 690 MB
 an hour, and converted while they record, so stopping takes no time. But converting uses CPU the whole time, and a
@@ -135,7 +153,7 @@ transcribe --list-languages
 | --- | --- |
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
-| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them` |
+| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them`. Voiceprints are biometric data; see [Recording laws](#recording-laws) |
 | `speakers` | List the people `--identify-speakers` remembers; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, `forget 5` takes one out |
 | `speakers play 3`, `speakers save 3 <directory>` | Play the samples kept of someone with no name yet, their 4 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
@@ -178,7 +196,28 @@ Both tools also take `--version` and `--help`.
 - **Headphones beat echo cancellation.** Echo cancellation reduces the "everyone twice" effect a lot, but not
   completely.
 - **The first transcription in a language takes longer** while Apple's speech model downloads.
-- **Tell people you're recording.** Some places require everyone's consent.
+- **Tell people you're recording.** Some places require everyone's consent; see [Recording laws](#recording-laws).
+
+## Recording laws
+
+totalrecall runs only on your Mac, so nothing is sent to anyone, but you are the one recording, and following the law
+where you and the people on the call are is up to you. This is a summary, not legal advice:
+
+- **Recording a call.** US federal law, and most states, let you record a conversation you're part of. California,
+  Florida, Illinois, Maryland, Massachusetts, Montana, Nevada, New Hampshire, Pennsylvania, Washington and a few more
+  require *everyone's* consent. When people are in different places, follow the strictest. In the EU and the UK, the
+  GDPR requires telling people they're recorded, and at work your employer's policy decides whether you may. In
+  Germany, secretly recording a private conversation is a crime, even one you're part of.
+- **Keeping it.** Recordings, transcripts and summaries of them are all personal data under the GDPR: keep them only
+  as long as you need them. Deleting a recording afterwards doesn't make it legal to have made it.
+- **Identifying speakers.** `--identify-speakers`, and Identify Speakers in the app, save a voiceprint of everyone
+  they hear in `~/.transcribe/speakers.db`, to recognize them in later calls. A voiceprint is biometric data. Illinois's
+  BIPA requires each person's written consent before you collect one, and Texas, Washington and the GDPR have rules of
+  their own. Use it only on calls where everyone has agreed. `transcribe speakers forget` deletes a person, their
+  voiceprint and their samples.
+
+The simplest way to be safe anywhere: say at the start of the call that you're recording and transcribing it, and stop
+if anyone objects.
 
 ## Credits
 

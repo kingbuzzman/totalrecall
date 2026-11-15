@@ -60,16 +60,95 @@ struct EchoFilterTests {
         #expect(passed.texts == ["Welcome back to the channel."])
     }
 
-    @Test func showsYourLineWhileItIsHeldAndStopsIfItIsAnEcho() {
+    @Test func showsYourLineWhileItIsHeld() {
+        let filter = makeFilter()
+
+        filter.update(line(.you, 0, 3, "Welcome back to the channel."))
+
+        #expect(passed.updates.map(\.isHeld) == [true])
+        #expect(passed.updates.map(\.text) == ["Welcome back to the channel."])
+    }
+
+    @Test func neverShowsAHeldLineThatAlreadyLooksLikeAnEcho() {
         let filter = makeFilter()
         filter.theirs(line(.them, 0, 4, "Welcome back to the channel, everyone."))
 
         filter.update(line(.you, 0, 4, "Welcome back to the channel."))
-        #expect(passed.updates.map(\.isHeld) == [true])
+        #expect(passed.updates.isEmpty, "nothing of it is shown while it is held")
         filter.theyHaveBeenHeard(through: 10)
 
-        #expect(passed.updates.map(\.text) == ["Welcome back to the channel.", ""])
+        #expect(passed.updates.map(\.text) == [""], "it never comes")
         #expect(passed.updates.last?.end == 4)
+    }
+
+    @Test func takesBackAHeldLineOnceTheyAreHeardSayingIt() {
+        let filter = makeFilter()
+        filter.update(line(.you, 0, 4, "Welcome back to the channel."))
+        #expect(passed.updates.map(\.isHeld) == [true])
+
+        filter.theirs(line(.them, 0, 4, "Welcome back to the channel, everyone."))
+
+        let takenBack = passed.updates.last
+        #expect(takenBack?.speaker == .you && takenBack?.isFinal == true && takenBack?.isHeld == false)
+        #expect(takenBack?.text == "" && takenBack?.start == 0)
+        filter.theyHaveBeenHeard(through: 10)
+        #expect(passed.texts.isEmpty)
+    }
+
+    @Test func hidesYourWordsStillBeingRecognizedThatTheyAreSaying() {
+        let filter = makeFilter()
+        filter.theirs(TranscriptUpdate(speaker: .them, start: 0, text: "Welcome back to the channel", isFinal: false))
+
+        filter.update(TranscriptUpdate(speaker: .you, start: 0, text: "Welcome back", isFinal: false))
+
+        #expect(passed.updates.allSatisfy { $0.text.isEmpty })
+    }
+
+    @Test func takesBackYourWordsStillBeingRecognizedOnceTheyAreHeardSayingThem() {
+        let filter = makeFilter()
+        filter.update(TranscriptUpdate(speaker: .you, start: 0, text: "Welcome back to the", isFinal: false))
+        #expect(passed.updates.map(\.text) == ["Welcome back to the"])
+
+        filter.theirs(line(.them, 0, 4, "Welcome back to the channel, everyone."))
+
+        let cleared = passed.updates.last
+        #expect(cleared?.speaker == .you && cleared?.isFinal == false && cleared?.text == "")
+    }
+
+    @Test func showsWhatYouSayWhileTheyTalk() {
+        let filter = makeFilter()
+        filter.theirs(line(.them, 0, 5, "Start by heating some olive oil in a large pan."))
+
+        filter.update(TranscriptUpdate(speaker: .you, start: 1, text: "Sorry, I have to step", isFinal: false))
+        filter.update(line(.you, 1, 3, "Sorry, I have to step out for a minute."))
+
+        #expect(passed.updates.map(\.text) == ["Sorry, I have to step", "Sorry, I have to step out for a minute."])
+        #expect(passed.updates.map(\.isHeld) == [false, true])
+    }
+
+    @Test func hidesYourWordsStillBeingRecognizedThatAreFarQuieterThanThem() {
+        let levels = ChannelLevels(sampleRate: 1_000)
+        // You 30 dB below them, as the speakers come through.
+        levels.add([[Float](repeating: 0.0005, count: 10_000), [Float](repeating: 0.015, count: 10_000)])
+        let passed = passed
+        let filter = EchoFilter(levels: levels, pass: { passed.append($0) })
+
+        filter.update(TranscriptUpdate(speaker: .you, start: 2, text: "Love you", isFinal: false))
+        filter.update(line(.you, 2, 4, "Love you."))
+
+        #expect(passed.updates.allSatisfy { $0.text.isEmpty })
+    }
+
+    @Test func stillWritesALineOfYoursHiddenWhileHeldThatTurnsOutNotToBeAnEcho() {
+        let filter = makeFilter()
+        filter.theirs(line(.them, 0, 3, "Shall we ship the release today?"))
+
+        // All their words, but too few to be taken for an echo once settled: only hidden while it is held.
+        filter.update(line(.you, 3, 4, "Ship the release."))
+        #expect(passed.updates.isEmpty)
+        filter.theyHaveBeenHeard(through: 10)
+
+        #expect(passed.texts == ["Ship the release."])
     }
 
     @Test func leavesOutWhatYourMicrophoneHeardFarQuieterThanThemHoweverGarbled() {
