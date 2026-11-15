@@ -189,9 +189,6 @@ $(SWIFTLINT):
 # Copies, not symlinks, so the installed tools outlive make clean and a rebuild. install replaces the file, or a symlink
 # left by an older make install, instead of writing through it.
 install: $(TOOLS)
-
-# Everything: the tools and the app, which needs Xcode (see APP). Phony, as build is also the build folder.
-build: $(TOOLS) $(APP)
 	mkdir -p $(PREFIX)/bin
 	install -m 755 $(TOOLS) $(PREFIX)/bin/
 

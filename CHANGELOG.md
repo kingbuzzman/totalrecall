@@ -2,7 +2,7 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
-## Unreleased
+## 0.5.0
 
 ### TotalRecall.app
 
