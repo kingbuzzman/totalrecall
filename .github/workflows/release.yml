@@ -67,13 +67,13 @@ jobs:
               exit 1
             fi
           done
-          # The app too, whose version is in its bundle's Info.plist.
+          # The app too, whose version is in its bundle's Info.plist; read out of the zip with unzip, as this runs on
+          # Linux, which has neither ditto nor plutil.
           ls TotalRecall-"$VERSION"-macos-*.zip > /dev/null
           shasum -a 256 -c TotalRecall-"$VERSION"-macos-*.zip.sha256
-          ditto -x -k TotalRecall-"$VERSION"-macos-*.zip app
-          app_version=$(plutil -extract CFBundleShortVersionString raw app/TotalRecall.app/Contents/Info.plist)
-          if [ "$app_version" != "$VERSION" ]; then
-            echo "::error::TotalRecall.app is built as $app_version, not $VERSION"
+          if ! unzip -p TotalRecall-"$VERSION"-macos-*.zip TotalRecall.app/Contents/Info.plist \
+            | grep -q -F "<string>$VERSION</string>"; then
+            echo "::error::TotalRecall.app in the zip is not built as $VERSION"
             exit 1
           fi
 
