@@ -47,19 +47,21 @@ struct MemorySoakTests {
             let peak = try await transcribe(minutes: minutes, of: audio, identifiesSpeakers: identifiesSpeakers)
             try await Task.sleep(for: .seconds(10))
             let after = Memory.now()
+            // As the app does once a recording has wholly finished: gives back what it freed.
+            let relieved = Memory.afterPressureRelief()
             print(
                 String(
-                    format: "  meeting %d of %.0f min: peak %.0f MB, 10 s after %.0f MB (in use %.0f MB)",
+                    format: "  meeting %d of %.0f min: peak %.0f MB, 10 s after %.0f MB (in use %.0f MB), "
+                        + "given back %.0f MB",
                     meeting,
                     minutes,
                     peak,
                     after.footprint,
-                    after.inUse
+                    after.inUse,
+                    relieved.footprint
                 )
             )
         }
-        let relieved = Memory.afterPressureRelief()
-        print(String(format: "  after pressure relief %.0f MB (in use %.0f MB)", relieved.footprint, relieved.inUse))
     }
 
     /// Transcribes `minutes` of the conversation, coming in at `speed` times real time; returns the peak footprint.

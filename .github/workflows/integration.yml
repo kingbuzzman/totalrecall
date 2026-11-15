@@ -1,8 +1,18 @@
 name: integration
 
+# Not for a change to documentation alone, which nothing here builds or tests: a Mac for minutes, to no end. Run by hand
+# (workflow_dispatch) to check one anyway.
 on:
   push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   workflow_dispatch:
 
 # Read-only; nothing here writes to the repository.
@@ -16,13 +26,13 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  # Every test, on the binaries that are released: builds the release tarball and the zipped menu bar app, signed ad
-  # hoc, tests them, and hands them on to the release job. The coverage job runs the same tests at the same time.
+  # One pass, in order: lint, one build step, one run of the tests, which measures coverage as it goes, and the release
+  # tarball and app handed on to the release job.
   integration:
     name: integration
     # The binaries need macOS 26 or later.
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 20
     outputs:
       final: ${{ steps.version.outputs.final }}
     env:
@@ -74,127 +84,22 @@ jobs:
         id: toolchain
         run: echo "hash=$(xcrun swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      # The Swift build of the last run, on this branch or master, so a push compiles only what it changed, the SDK's
-      # modules included. The final build, which is released, never uses it: it builds afresh.
-      - name: Cache the Swift build
+      # The Swift builds of the last run, on this branch or master, so a push compiles only what it changed, the SDK's
+      # modules included. The final build, which is released, never uses them: it builds afresh.
+      - name: Cache the Swift builds
         if: env.FINAL != '1'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: build/swiftpm
+          path: |
+            build/swiftpm
+            build/swiftpm-coverage
           key: swiftpm-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.swift', 'Makefile', 'Sources/**', 'Tests/**', 'Models/**') }}
           restore-keys: swiftpm-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-
 
+      # One step for both builds, side by side: the release tarball and the zipped menu bar app, signed ad hoc, which
+      # are released, and the build instrumented for coverage, which the tests run on.
       - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" release
-
-      # The tests launch totalrecall from Swift's test runners, so they get the grant too.
-      - name: Grant audio permissions
-        run: |
-          toolchain=$(dirname "$(xcrun --find swift)")
-          sudo --preserve-env=CI .github/scripts/grant-audio-permissions.sh \
-            "$PWD/build/bin/totalrecall" \
-            "$toolchain/swift-test" "$(cd "$toolchain/../libexec/swift/pm" && pwd)/swiftpm-testing-helper" \
-            "$(xcrun --find xctest)"
-
-      - name: Wait for ffmpeg
-        timeout-minutes: 10
-        run: |
-          until [ -f "$RUNNER_TEMP/ffmpeg.status" ]; do sleep 1; done
-          cat "$RUNNER_TEMP/ffmpeg.log"
-          exit "$(cat "$RUNNER_TEMP/ffmpeg.status")"
-
-      - name: Run the tests
-        run: make test
-
-      - name: Diagnostics
-        if: failure()
-        run: |
-          system_profiler SPAudioDataType || true
-          log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
-
-      - name: Upload the release tarball and app
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release
-          path: |
-            build/totalrecall-*-macos-*.tar.gz*
-            build/TotalRecall-*-macos-*.zip*
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload recordings and logs
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: integration-recordings
-          path: build/test-results
-          if-no-files-found: ignore
-          retention-days: 1
-
-  # The same tests, on the build instrumented for coverage, at the same time as the integration job: fails below the
-  # coverage the Makefile asks for. Its binaries are not released.
-  coverage:
-    name: coverage
-    runs-on: macos-26
-    timeout-minutes: 10
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: 1
-      HOMEBREW_NO_INSTALL_CLEANUP: 1
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Only a push to master whose VERSION has no release yet builds the final version, which the release job then
-      # publishes; every other build reports VERSION-dev<commit>.
-      - name: Decide the version
-        id: version
-        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
-        run: |
-          version=$(tr -d '[:space:]' < VERSION)
-          if ! git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
-            echo "Building the final $version for release."
-            echo "FINAL=1" >> "$GITHUB_ENV"
-            echo "final=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install test audio devices
-        run: |
-          brew install --cask blackhole-2ch blackhole-16ch blackhole-64ch
-          sudo killall coreaudiod || true
-
-      # Only the tests need ffmpeg, so it installs while the build runs; "Wait for ffmpeg" collects it.
-      - name: Start installing ffmpeg
-        run: |
-          nohup sh -c 'brew install ffmpeg; echo $? > "$RUNNER_TEMP/ffmpeg.tmp"; mv "$RUNNER_TEMP/ffmpeg.tmp" "$RUNNER_TEMP/ffmpeg.status"' \
-            > "$RUNNER_TEMP/ffmpeg.log" 2>&1 &
-
-      # Its folder is named after its version and macOS minimum, so an older cache is harmless: make builds afresh.
-      - name: Cache speexdsp
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/speexdsp
-          key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
-          restore-keys: speexdsp-${{ runner.os }}-${{ runner.arch }}-
-
-      # The Swift compiler's version, so that a build cached by another compiler, as after the runner's Xcode is
-      # updated, is never used.
-      - name: Identify the Swift toolchain
-        id: toolchain
-        run: echo "hash=$(xcrun swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      # The Swift build of the last run, on this branch or master, so a push compiles only what it changed, the SDK's
-      # modules included. The final build, which is released, never uses it: it builds afresh.
-      - name: Cache the Swift build
-        if: env.FINAL != '1'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: build/swiftpm-coverage
-          key: swiftpm-coverage-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.swift', 'Makefile', 'Sources/**', 'Tests/**', 'Models/**') }}
-          restore-keys: swiftpm-coverage-${{ runner.os }}-${{ steps.toolchain.outputs.hash }}-
-
-      - name: Build
-        run: make -j"$(sysctl -n hw.ncpu)" coverage-build
+        run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
 
       # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions
@@ -212,14 +117,26 @@ jobs:
           cat "$RUNNER_TEMP/ffmpeg.log"
           exit "$(cat "$RUNNER_TEMP/ffmpeg.status")"
 
-      - name: Check coverage
-        run: RESULTS="$PWD/build/test-results/coverage" make coverage
+      # Every test, once, on the instrumented build, and the coverage of that run: fails if a test does, or below the
+      # coverage the Makefile asks for.
+      - name: Run the tests and check coverage
+        run: RESULTS="$PWD/build/test-results" make coverage
 
       - name: Diagnostics
         if: failure()
         run: |
           system_profiler SPAudioDataType || true
           log show --last 15m --style compact --predicate 'subsystem == "com.apple.TCC"' | tail -200 || true
+
+      - name: Upload the release tarball and app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            build/totalrecall-*-macos-*.tar.gz*
+            build/TotalRecall-*-macos-*.zip*
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload the coverage report
         if: always()
@@ -234,14 +151,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: coverage-recordings
+          name: integration-recordings
           path: build/test-results
           if-no-files-found: ignore
           retention-days: 1
 
-  # Starts only once both passes of the tests pass, and only for a final build.
+  # Starts only once the tests above pass, and only for a final build.
   release:
-    needs: [integration, coverage]
+    needs: integration
     if: needs.integration.outputs.final == 'true'
     permissions:
       contents: write # to create the release and its tag
