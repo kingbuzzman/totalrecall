@@ -100,14 +100,47 @@ struct MeetingScheduleTests {
         #expect(MeetingSchedule.warning(for: standup, now: now) == expected)
     }
 
+    @Test func readsTodayFromMidnightToMidnight() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.utc
+
+        let monday = MeetingSchedule.day(containing: at(23, 59), calendar: calendar)
+        let tuesday = MeetingSchedule.day(containing: at(0, 0, day: 17), calendar: calendar)
+
+        #expect(monday == DateInterval(start: at(0, 0), end: at(0, 0, day: 17)))
+        #expect(tuesday.start == monday.end, "a minute after midnight, it is the new day's meetings")
+    }
+
+    @Test(arguments: [(8, 3, 23.0), (1, 11, 25.0), (16, 11, 24.0)])
+    func takesTheDaysTheClocksChangeAsTheyAre(day: Int, month: Int, hours: Double) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let noon = calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12))!
+
+        #expect(MeetingSchedule.day(containing: noon, calendar: calendar).duration == hours * 3_600)
+    }
+
+    @Test func recordsTomorrowsStandupThoughTodaysOfTheSameNameAndTimeWasRecorded() {
+        let mondays = meeting("Daily Standup", at(10, 0), at(10, 15))
+        let tuesdays = meeting("Daily Standup", at(10, 0, day: 17), at(10, 15, day: 17))
+
+        #expect(mondays != tuesdays, "a recurring meeting is a meeting a day")
+        #expect(MeetingSchedule.next(in: [tuesdays], excluding: [mondays], now: at(9, 0, day: 17)) == tuesdays)
+        // Its folder is the day it is on.
+        #expect(
+            tuesdays.directory(root: URL(filePath: "/r"), timeZone: Self.utc).path
+                == "/r/work/47-2026/11-17/10h00-daily-standup"
+        )
+    }
+
     private func meeting(_ title: String, _ start: Date, _ end: Date) -> ScheduledMeeting {
         ScheduledMeeting(title: title, start: start, end: end, calendar: "work")
     }
 
-    /// 2026-11-16 (a Monday, ISO week 47) at `hour`:`minute` UTC.
-    private func at(_ hour: Int, _ minute: Int) -> Date {
+    /// 2026-11-`day` (16, a Monday of ISO week 47, unless given) at `hour`:`minute` UTC.
+    private func at(_ hour: Int, _ minute: Int, day: Int = 16) -> Date {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = Self.utc
-        return calendar.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: hour, minute: minute))!
+        return calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
     }
 }

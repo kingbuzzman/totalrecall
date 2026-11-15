@@ -147,4 +147,11 @@ package enum MeetingSchedule {
         events.filter { !$0.isAllDay && $0.end > $0.start && CalendarRules.matches($0.title, phrase: phrase) }
             .sorted { ($0.start, $0.title) < ($1.start, $1.title) }
     }
+
+    /// The day `now` is in, midnight to midnight as `calendar` has it: what "today's meetings" are read from, again
+    /// every minute, so a new day's come once it starts. Not always 24 hours: a day the clocks change is 23 or 25.
+    package static func day(containing now: Date, calendar: Calendar = .current) -> DateInterval {
+        calendar.dateInterval(of: .day, for: now)
+            ?? DateInterval(start: calendar.startOfDay(for: now), duration: 86_400)
+    }
 }

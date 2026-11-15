@@ -65,11 +65,10 @@ final class CalendarSource {
     /// without access.
     func todaysEvents(now: Date = Date(), on isRecorded: (Calendar) -> Bool) -> [CalendarEvent] {
         guard hasAccess else { return [] }
-        let start = Foundation.Calendar.current.startOfDay(for: now)
-        guard let end = Foundation.Calendar.current.date(byAdding: .day, value: 1, to: start) else { return [] }
+        let day = MeetingSchedule.day(containing: now)
         let included = store.calendars(for: .event).filter { isRecorded(Self.calendar($0)) }
         guard !included.isEmpty else { return [] }
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: included)
+        let predicate = store.predicateForEvents(withStart: day.start, end: day.end, calendars: included)
         return store.events(matching: predicate).map { event in
             CalendarEvent(
                 title: event.title ?? "",
