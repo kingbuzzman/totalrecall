@@ -30,8 +30,10 @@ jobs:
   # tarball and app handed on to the release job.
   integration:
     name: integration
-    # The binaries need macOS 26 or later.
-    runs-on: macos-26
+    # The image with the newest Xcode, so CI builds with the compiler a Mac kept up to date does: a newer one warns about
+    # things an older one does not, and the other way around, and warnings fail the build. A preview image for now; the
+    # binaries still run on macOS 26.
+    runs-on: xcode-27
     timeout-minutes: 20
     outputs:
       final: ${{ steps.version.outputs.final }}
@@ -55,6 +57,13 @@ jobs:
             echo "FINAL=1" >> "$GITHUB_ENV"
             echo "final=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # The newest released Xcode on the image, not its default, which lags behind; betas are left out.
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -E '/Xcode_[0-9]+\.[0-9]+\.[0-9]+\.app$' | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
 
       - name: Lint
         run: make lint
