@@ -58,6 +58,36 @@ struct TranscriptPrinterTests {
         #expect(lines.text == "mine [00:00:00] Javier: Good morning.\ntheirs [00:00:02] Them: Hi.\n")
     }
 
+    @Test func writesTheTranscriptAgainAsEachLineIsLabelledNow() {
+        let shown = Output()
+        let printer = TranscriptPrinter(
+            printsLines: false,
+            isLive: false,
+            write: output.append,
+            showAll: { lines in shown.append(lines.map { "\($0.isYours ? "mine" : "theirs") \($0.line)\n" }.joined()) }
+        )
+        // A line split in two as it was written, another channel's line between its parts, and one without words.
+        var first = TranscriptUpdate(speaker: .them, start: 3, text: "Ready?", isFinal: true)
+        first.voice = "Them 1"
+        first.lineStart = 3
+        var second = TranscriptUpdate(speaker: .them, start: 4, text: "Yes, go.", isFinal: true)
+        second.voice = "Them 2"
+        second.lineStart = 3
+        printer.update(first)
+        printer.update(TranscriptUpdate(speaker: .you, start: 3.5, text: "Hm.", isFinal: true))
+        printer.update(second)
+        printer.update(TranscriptUpdate(speaker: .them, start: 9, text: "...", isFinal: true))
+
+        let text = printer.rewritten { line in
+            var relabelled = line
+            relabelled.voice = line.speaker == .them ? "Ada" : nil
+            return [relabelled]
+        }
+
+        #expect(text == "[00:00:03] Ada: Ready? Yes, go.\n[00:00:03] You: Hm.\n")
+        #expect(shown.text == "theirs [00:00:03] Ada: Ready? Yes, go.\nmine [00:00:03] You: Hm.\n")
+    }
+
     @Test func writesLinesInTheOrderTheySettleNotByTime() {
         let printer = makePrinter(saves: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 5, text: "Fine, thanks.", isFinal: true))

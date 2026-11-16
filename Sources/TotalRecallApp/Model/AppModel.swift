@@ -259,6 +259,10 @@ final class AppModel {
             becameIdleIfDone()
         case .line(let line, let isYours):
             if isLatest { transcript.append(TranscriptLine(parsing: line, heardOn: isYours ? .you : .them)) }
+        case .rewritten(let lines):
+            if isLatest {
+                transcript = lines.map { TranscriptLine(parsing: $0.line, heardOn: $0.isYours ? .you : .them) }
+            }
         case .liveText(let text):
             if isLatest { liveText = text }
         case .message(let message):

@@ -31,6 +31,7 @@ struct TranscribeLiveTests {
             handlers: LiveTranscriptHandlers(
                 onLine: { line, _ in lines.withLock { $0.append(line) } },
                 onLiveText: { live in liveTexts.withLock { $0.append(live) } },
+                onRewrite: { _ in },
                 onMessage: { _ in }
             )
         )

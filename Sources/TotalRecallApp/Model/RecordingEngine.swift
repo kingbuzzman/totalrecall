@@ -29,6 +29,8 @@ final class RecordingEngine: Sendable {
         case line(String, isYours: Bool)
         /// The words still being recognized; "" once there are none.
         case liveText(String)
+        /// All the lines again, once the call is over, each said by whoever turned out to say it.
+        case rewritten([(line: String, isYours: Bool)])
         /// News from the recorder or the transcriber, such as a microphone switch.
         case message(String)
         /// The transcript started; it goes on until the recording stops and the last words are written.
@@ -168,6 +170,7 @@ private final class Recording: @unchecked Sendable {
                     handlers: LiveTranscriptHandlers(
                         onLine: { report(.line($0, isYours: $1)) },
                         onLiveText: { report(.liveText($0)) },
+                        onRewrite: { report(.rewritten($0)) },
                         onMessage: { report(.message($0)) }
                     )
                 )

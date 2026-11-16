@@ -30,11 +30,14 @@ local time of the build; a CI build reports `<VERSION>-dev<commit>`, and only a 
 `VERSION` as is. Make sure `~/.local/bin` is on your `PATH`. Everything a build makes goes in `build/`, which `make
 clean` deletes.
 
-`make` also builds the speaker model `transcribe --identify-speakers` uses, `Models/SpeakerEmbedding.mlpackage`, into
-`transcribe`: the Core ML package's model and weights, a section of its binary each, which Core ML loads from memory,
-so the tool is still a single file and writes nothing to disk. The package is WeSpeaker's ResNet34-LM (CC BY 4.0), converted from its ONNX export by
-`scripts/convert-speaker-model.py`, which checks the conversion against the original; only rerun it to change the model
-(`uv run scripts/convert-speaker-model.py`). `transcribe`'s unit tests load the package from `Models/` instead.
+`make` also builds the speaker models `transcribe --identify-speakers` uses into `transcribe`: each Core ML package's
+model and weights, a section of its binary each, which Core ML loads from memory, so the tool is still a single file and
+writes nothing to disk. `Models/SpeakerEmbedding.mlpackage` is WeSpeaker's ResNet34-LM (CC BY 4.0), which tells voices
+apart, converted from its ONNX export by `scripts/convert-speaker-model.py`; `Models/SpeakerSegmentation.mlpackage` is
+pyannote's segmentation-3.0 (MIT), which finds who talks when, rebuilt from its ONNX export's weights by
+`scripts/convert-segmentation-model.py`. Both scripts check the conversion against the original; only rerun one to
+change its model (`uv run scripts/convert-speaker-model.py`). `transcribe`'s unit tests load the packages from
+`Models/` instead.
 
 `make` signs both tools with the code-signing certificate `TotalRecall Local` from your keychain, so macOS keeps their
 microphone and speech permissions across rebuilds. Create it once in Keychain Access: Certificate Assistant → Create a

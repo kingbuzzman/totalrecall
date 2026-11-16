@@ -82,7 +82,7 @@ private func listSpeakers() {
     }
     for person in people {
         let theirs = voicesOf[person.id] ?? []
-        let seconds = Double(theirs.reduce(0) { $0 + $1.prints }) * SpeakerIdentifier.hopSeconds
+        let seconds = Double(theirs.reduce(0) { $0 + $1.prints }) * SpeakerIdentifier.secondsPerPrint
         let heard = seconds < 60 ? "\(Int(seconds)) s" : "\(Int((seconds / 60).rounded())) min"
         let since = person.createdAt.formatted(date: .abbreviated, time: .omitted)
         let number = String(person.id).padding(toLength: 4, withPad: " ", startingAt: 0)
@@ -207,7 +207,7 @@ func speakerSamples(_ speaker: Int) -> [SpeakerDatabase.Clip] {
     guard exists else { failNoSpeaker(speaker) }
     guard !clips.isEmpty else {
         fail(
-            "no clips of speaker \(speaker): they are kept from stretches of \(Int(SpeakerIdentifier.shortestSample)) s or more"
+            "no clips of speaker \(speaker): they are kept from stretches of \(Int(ClipCollector.shortest)) s or more"
         )
     }
     return clips

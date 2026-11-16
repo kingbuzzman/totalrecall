@@ -166,7 +166,7 @@ transcribe --list-languages
 | --- | --- |
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
-| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them`. Voiceprints are biometric data; see [Recording laws](#recording-laws) |
+| `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Once the call ends, the text file is written again by who turned out to say each line, and everyone who said words is saved, in `~/.transcribe/speakers.db`, so they keep their number from call to call; until then, someone new goes by a letter (`Them A`). It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them`. Voiceprints are biometric data; see [Recording laws](#recording-laws) |
 | `speakers` | List the people `--identify-speakers` remembers, with the voices of those heard more than one way; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, keeping each voice as it was (two who don't sound alike need `--anyway`), `split 7` takes voice 7 back out into a person of its own, `forget 5` takes one out |
 | `speakers play 3`, `speakers save 3 <directory>` | Play the clips kept of someone, their 20 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
@@ -190,12 +190,12 @@ Both tools also take `--version` and `--help`.
 - **Lines come out as they settle.** `transcribe` writes each line the moment the recognizer is sure of it. With you and
   the others on separate channels, each has its own recognizer, so a `You` line can come out before an earlier `Them`
   line, from a file more so, as both race through it.
-- **`--identify-speakers` goes by voice alone, and is cautious.** It tells voices apart with a speaker-recognition model
-  built into `transcribe`, on this Mac, and only takes someone for a new person after a few seconds of a voice unlike
-  everyone so far: a quick "yes" from a newcomer goes to whoever they sound most like. A line where two people talk
-  goes to whoever spoke longer, which matters most with `--mix`, where the recognizer often runs two people's turns
-  into one line. Live, each line waits a few seconds after it is spoken, while the words still being recognized go on
-  showing, so a newcomer's first words are theirs too. People keep their number from call to call; name them with
+- **`--identify-speakers` goes by voice alone, and is cautious.** Two models built into `transcribe` run on this Mac:
+  one finds who talks when, two at once included, the other tells their voices apart. A line where two people talk is
+  split where who speaks changes, by when each word was said; a turn under 3 words or a second goes to the speaker
+  around it. Live, each line waits a few seconds after it is spoken, while the words still being recognized go on
+  showing, and goes by the voices heard so far; once the call ends, every voice is sorted again, all heard, and the
+  text file written again. Someone heard for less than about 15 s in all goes to whoever they sound most like. People keep their number from call to call; name them with
   `transcribe speakers name`. Short clips of everyone's speech are kept in `~/.transcribe/speakers.db` too, so you can tell who
   they are with `transcribe speakers play`; `transcribe speakers forget` deletes them along with the person.
 - **Saving is quick.** `totalrecall` records into `<output>.partial.caf` and converts to the format you asked for as it
@@ -237,8 +237,11 @@ if anyone objects.
 `transcribe --identify-speakers` tells voices apart with [WeSpeaker](https://github.com/wenet-e2e/wespeaker)'s
 [ResNet34-LM speaker model](https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM), trained on
 [VoxCeleb](https://www.robots.ox.ac.uk/~vgg/data/voxceleb/), under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); it is converted to Core ML, unchanged otherwise.
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), and finds who talks when with
+[pyannote](https://github.com/pyannote/pyannote-audio)'s
+[segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) model, under the MIT license; both are converted
+to Core ML, unchanged otherwise.
 
 ## License
 
-MIT; see [LICENSE](LICENSE). The speaker model keeps its own CC BY 4.0 license (see Credits).
+MIT; see [LICENSE](LICENSE). The speaker models keep their own licenses (see Credits).

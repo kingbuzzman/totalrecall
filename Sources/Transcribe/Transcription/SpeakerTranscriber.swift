@@ -10,16 +10,27 @@ enum Speaker: String {
     case them = "Them"
 }
 
+/// A word of a line, with what follows it up to the next word, such as a space or punctuation, and when it was said.
+struct TimedWord: Equatable {
+    var text: String
+    let start: Double
+    let end: Double
+}
+
 /// A piece of transcript: volatile while the recognizer may still revise it, final once it no longer will.
 struct TranscriptUpdate {
     let speaker: Speaker?
-    let start: Double
-    let text: String
+    var start: Double
+    var text: String
     let isFinal: Bool
     /// Which of the people on the speaker's channel it is, such as "Them 2", with `--identify-speakers`.
     var voice: String?
     /// Where a final line ends, when it is known.
     var end: Double?
+    /// A final line's words, in order, when the recognizer says when each was said: they make up its text.
+    var words: [TimedWord] = []
+    /// Where the line this is part of starts, split where who speaks changes (`SpeakerIdentifier.parts(of:)`).
+    var lineStart: Double?
     /// A final line held back a while, to say who spoke it or whether it is an echo, sent ahead so its words can go on
     /// showing until it comes. A final line without words then says it never will.
     var isHeld = false
@@ -94,7 +105,10 @@ final class SpeakerTranscriber: @unchecked Sendable {
                 text: text,
                 isFinal: result.isFinal
             )
-            if result.isFinal { update.end = result.range.end.seconds }
+            if result.isFinal {
+                update.end = result.range.end.seconds
+                update.words = Self.words(of: result.text)
+            }
             onRecognized?(update)
             if result.isFinal, identifier != nil {
                 var held = update
@@ -109,18 +123,37 @@ final class SpeakerTranscriber: @unchecked Sendable {
         await labeled
     }
 
-    /// Says who spoke each line, in order, once it is settled.
+    /// Says who spoke each line, in order, once it is settled: split where who speaks changes.
     private func label(_ lines: AsyncStream<TranscriptUpdate>, onUpdate: (TranscriptUpdate) -> Void) async {
         guard let identifier else { return }
-        for await var update in lines {
-            let end = update.end ?? update.start
-            await identifier.settle(through: end)
+        for await update in lines {
+            await identifier.settle(through: update.end ?? update.start)
             // Not for bare punctuation, which is no one's words.
-            if update.text.hasWords {
-                update.voice = identifier.speaker(from: update.start, to: end)
+            guard update.text.hasWords else {
+                onUpdate(update)
+                continue
             }
-            onUpdate(update)
+            for part in identifier.parts(of: update) { onUpdate(part) }
         }
+    }
+
+    /// The words of a line, by the times the recognizer gives them; none if it gives none. What has no time of its
+    /// own, such as a space or punctuation, goes with the word before it.
+    static func words(of text: AttributedString) -> [TimedWord] {
+        var words: [TimedWord] = []
+        var leading = ""
+        for run in text.runs {
+            let piece = String(text[run.range].characters)
+            if let range = run.audioTimeRange {
+                words.append(TimedWord(text: leading + piece, start: range.start.seconds, end: range.end.seconds))
+                leading = ""
+            } else if words.isEmpty {
+                leading += piece
+            } else {
+                words[words.count - 1].text += piece
+            }
+        }
+        return words
     }
 
     func append(_ samples: [Float]) {

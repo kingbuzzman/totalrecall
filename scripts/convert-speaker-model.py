@@ -62,9 +62,18 @@ def main():
             raise SystemExit(f"{URL} is not the model this script was written for")
 
         traced = torch.jit.trace(onnx2torch.convert(onnx.load(onnx_path)).eval(), torch.randn(1, 300, 80))
+        # 1 s to 10 s, in whole seconds, as VoicePrinter cuts them: a model that takes any length runs on the CPU or
+        # the GPU, at 3 to 12 ms of CPU a print; one that takes a few, on the Neural Engine, at 0.2 ms.
+        lengths = [(1, frames, 80) for frames in range(100, 1001, 100)]
         model = ct.convert(
             traced,
-            inputs=[ct.TensorType(name="features", shape=(1, ct.RangeDim(100, 1000, default=300), 80), dtype=np.float32)],
+            inputs=[
+                ct.TensorType(
+                    name="features",
+                    shape=ct.EnumeratedShapes(shapes=lengths, default=(1, 300, 80)),
+                    dtype=np.float32,
+                )
+            ],
             outputs=[ct.TensorType(name="embedding", dtype=np.float32)],
             # transcribe needs macOS 26, but with coremltools 9.0's macOS 26 model format Core ML only runs the model
             # at the default length (a BNNS convolution fails its shape deduction at any other); macOS 15's runs all.
@@ -79,7 +88,7 @@ def main():
         # Within rounding of the original, for any length the model takes.
         session = onnxruntime.InferenceSession(str(onnx_path))
         random = np.random.default_rng(0)
-        for frames in (100, 300, 1000):
+        for frames in (100, 300, 700, 1000):
             features = random.standard_normal((1, frames, 80)).astype(np.float32) * 3
             want = session.run(None, {"feats": features})[0][0]
             got = model.predict({"features": features})["embedding"].reshape(-1)

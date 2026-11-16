@@ -3,8 +3,9 @@ import Shared
 
 /// Writes the transcript as it comes in: each line ("[00:01:23] Them: ...") the moment the recognizer settles on it, in
 /// the order they settle, never reordered. Lines go to stdout, to a text file, or both; live, stdout also shows the text
-/// still being recognized on a last line that is redrawn in place. Updates arrive from one task per speaker, so
-/// everything is guarded by a lock.
+/// still being recognized on a last line that is redrawn in place. Once it is over, it can be written again, each line
+/// said by whoever turned out to say it (`rewritten`). Updates arrive from one task per speaker, so everything is
+/// guarded by a lock.
 final class TranscriptPrinter: @unchecked Sendable {
     private let printsLines: Bool
     private let isLive: Bool
@@ -12,17 +13,21 @@ final class TranscriptPrinter: @unchecked Sendable {
     private let save: ((String) -> Void)?
     private let showLive: ((String) -> Void)?
     private let showLine: ((_ line: String, _ isYours: Bool) -> Void)?
+    private let showAll: (([(line: String, isYours: Bool)]) -> Void)?
     private let terminalWidth: () -> Int
     private let lock = NSLock()
     /// Each speaker's words still being recognized, and when they start, after their lines held back, by when those
     /// start.
     private var volatileText: [String: (start: Double, text: String)] = [:]
     private var heldLines: [String: [(start: Double, text: String)]] = [:]
+    /// The lines written, as they came.
+    private var written: [TranscriptUpdate] = []
 
     /// `printsLines` prints each line to stdout, and `isLive` also shows the text still being recognized there, drawn
     /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file;
     /// for an app, `showLine` gets it too, without its newline, and whether it was heard on your microphone, and
-    /// `showLive` the text still being recognized, as plain text, whenever it changes ("" once there is none).
+    /// `showLive` the text still being recognized, as plain text, whenever it changes ("" once there is none); and,
+    /// written again, `showAll` gets all of them.
     init(
         printsLines: Bool,
         isLive: Bool,
@@ -33,7 +38,8 @@ final class TranscriptPrinter: @unchecked Sendable {
         },
         save: ((String) -> Void)? = nil,
         showLine: ((_ line: String, _ isYours: Bool) -> Void)? = nil,
-        showLive: ((String) -> Void)? = nil
+        showLive: ((String) -> Void)? = nil,
+        showAll: (([(line: String, isYours: Bool)]) -> Void)? = nil
     ) {
         self.printsLines = printsLines
         self.isLive = isLive && printsLines
@@ -42,6 +48,7 @@ final class TranscriptPrinter: @unchecked Sendable {
         self.save = save
         self.showLive = showLive
         self.showLine = showLine
+        self.showAll = showAll
     }
 
     func update(_ update: TranscriptUpdate) {
@@ -59,6 +66,7 @@ final class TranscriptPrinter: @unchecked Sendable {
                 heldLines[key]?.removeAll { $0.start == update.start }
                 if !followsIt { volatileText[key] = nil }
                 if hasWords {
+                    written.append(update)
                     let line = Self.line(update) + "\n"
                     save?(line)
                     showLine?(Self.line(update), update.speaker == .you)
@@ -78,6 +86,32 @@ final class TranscriptPrinter: @unchecked Sendable {
         lock.withLock {
             clearLiveLine()
             showLive?("")
+        }
+    }
+
+    /// The transcript written again, in the same order, each line as `relabel` splits it where who speaks changes and
+    /// says who spoke each part now; an app is shown it too. The parts of a line split as it was written are one line
+    /// again first.
+    func rewritten(relabel: (TranscriptUpdate) -> [TranscriptUpdate]) -> String {
+        lock.withLock {
+            var lines: [TranscriptUpdate] = []
+            var lineOf: [String: Int] = [:]
+            for part in written {
+                let key = "\(part.speaker?.rawValue ?? "") \(part.lineStart ?? part.start)"
+                guard let index = lineOf[key] else {
+                    lineOf[key] = lines.count
+                    var line = part
+                    line.start = part.lineStart ?? part.start
+                    lines.append(line)
+                    continue
+                }
+                lines[index].words += part.words
+                lines[index].text += " " + part.text
+                lines[index].end = part.end ?? lines[index].end
+            }
+            let parts = lines.flatMap(relabel).filter(\.text.hasWords)
+            showAll?(parts.map { (Self.line($0), $0.speaker == .you) })
+            return parts.map { Self.line($0) + "\n" }.joined()
         }
     }
 

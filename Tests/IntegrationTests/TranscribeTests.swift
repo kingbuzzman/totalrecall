@@ -39,20 +39,21 @@ struct TranscribeTests {
         async throws
     {
         let speakers = ["TRANSCRIBE_SPEAKERS": TestEnvironment.result("speakers-\(UUID().uuidString).db").path]
+        let text = TestEnvironment.result("speakers-\(UUID().uuidString).txt")
 
         // Them long enough to be remembered; you not.
         let result = try await ProcessResult.run(
             TestEnvironment.transcribe,
-            ["--identify-speakers", try await conversation(them: Self.themAtLength).path],
+            ["--identify-speakers", try await conversation(them: Self.themAtLength).path, text.path],
             environment: speakers
         )
         let list = try await ProcessResult.run(TestEnvironment.transcribe, ["speakers"], environment: speakers)
+        let transcript = try String(contentsOf: text, encoding: .utf8)
 
         #expect(result.status == 0, "\(result.standardError)")
-        #expect(result.standardOutput.contains("You: Good morning"), "\(result.standardOutput)")
-        // Numbered once a clip of them is kept, which their first words come before.
-        #expect(result.standardOutput.contains("Them: Happy to be here"), "\(result.standardOutput)")
-        #expect(result.standardOutput.contains("Them 1: "), "\(result.standardOutput)")
+        // Once the call is over, remembered, by their number.
+        #expect(transcript.contains("You: Good morning"), "\(transcript)")
+        #expect(transcript.contains("Them 1: Happy to be here"), "\(transcript)")
         #expect(list.status == 0, "\(list.standardError)")
         #expect(list.standardOutput.split(separator: "\n").count == 1, "\(list.standardOutput)")
         #expect(list.standardOutput.hasPrefix("1    -  ("), "\(list.standardOutput)")
@@ -71,17 +72,19 @@ struct TranscribeTests {
         async throws
     {
         let speakers = ["TRANSCRIBE_SPEAKERS": TestEnvironment.result("speakers-\(UUID().uuidString).db").path]
+        let text = TestEnvironment.result("speakers-\(UUID().uuidString).txt")
 
         let result = try await ProcessResult.run(
             TestEnvironment.transcribe,
-            ["--identify-speakers", try await conversation(them: Self.themAtLength, echoed: true).path],
+            ["--identify-speakers", try await conversation(them: Self.themAtLength, echoed: true).path, text.path],
             environment: speakers
         )
         let list = try await ProcessResult.run(TestEnvironment.transcribe, ["speakers"], environment: speakers)
+        let transcript = try String(contentsOf: text, encoding: .utf8)
 
         #expect(result.status == 0, "\(result.standardError)")
-        #expect(result.standardOutput.contains("Them 1: "), "\(result.standardOutput)")
-        #expect(!saysTheirWords(onYourLines: result.standardOutput), "\(result.standardOutput)")
+        #expect(transcript.contains("Them 1: "), "\(transcript)")
+        #expect(!saysTheirWords(onYourLines: transcript), "\(transcript)")
         #expect(list.standardOutput.split(separator: "\n").count == 1, "\(list.standardOutput)")
     }
 

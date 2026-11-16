@@ -2,7 +2,7 @@ import AppKit
 import Shared
 import SwiftUI
 
-/// The version, and the credit the speaker model's license asks for.
+/// The version, and the credit the speaker models' licenses ask for.
 struct AboutSettings: View {
     var body: some View {
         VStack(spacing: 10) {
@@ -24,7 +24,8 @@ struct AboutSettings: View {
             Divider().padding(.vertical, 4)
             Text(
                 "Identify Speakers uses WeSpeaker's ResNet34-LM speaker model, trained on VoxCeleb, under the "
-                    + "Creative Commons Attribution 4.0 license."
+                    + "Creative Commons Attribution 4.0 license, and pyannote's segmentation-3.0 model, under the "
+                    + "MIT license."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -36,6 +37,7 @@ struct AboutSettings: View {
                     destination: URL(string: "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM")!
                 )
                 Link("License", destination: URL(string: "https://creativecommons.org/licenses/by/4.0/")!)
+                Link("Segmentation", destination: URL(string: "https://huggingface.co/pyannote/segmentation-3.0")!)
             }
             .font(.caption)
         }

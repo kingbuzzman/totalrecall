@@ -97,6 +97,7 @@ struct MemorySoakTests {
             handlers: LiveTranscriptHandlers(
                 onLine: { _, _ in lines.withLock { $0 += 1 } },
                 onLiveText: { _ in },
+                onRewrite: { _ in },
                 onMessage: { _ in }
             )
         )

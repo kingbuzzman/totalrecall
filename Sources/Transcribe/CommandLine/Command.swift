@@ -18,8 +18,9 @@ let usage = """
       --list-languages     list the languages the speech recognizer supports; * marks installed models
       --mix                transcribe both channels together, without speaker labels
       --identify-speakers  tell the people on the right channel apart by voice, as Them 1, Them 2, ..., or everyone,
-                           as Speaker 1, Speaker 2, ..., on a recording without the split or with --mix; they are
-                           remembered as they are heard, so each keeps their number, or name, from call to call
+                           as Speaker 1, Speaker 2, ..., on a recording without the split or with --mix; once it
+                           ends, <text-file> is written again by who turned out to say each line, and they are
+                           remembered, so each keeps their number, or name, from call to call
       --live               show the live transcript, including the words still being recognized, even with a <text-file>
       --force              overwrite <text-file> if it exists
 

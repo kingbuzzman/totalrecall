@@ -11,32 +11,35 @@ struct VoicePrinterTests {
     private static let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent().appending(path: "Models/SpeakerEmbedding.mlpackage")
 
-    /// WeSpeaker's own print of `madeUpVoice`, from its Kaldi filterbank and its original ONNX model, rounded.
+    /// WeSpeaker's own print of the middle 2 s of `madeUpVoice`, as `VoicePrinter` prints 3 s of audio, in whole
+    /// seconds: from its Kaldi filterbank and its original ONNX model, rounded.
     private static let weSpeakersPrint: [Float] = [
-        0.0515, 0.1081, -0.0269, -0.0479, 0.0027, -0.0089, 0.0363, 0.0505, 0.0147, 0.0143, 0.0665, 0.1878, -0.1293,
-        -0.0075, 0.0297, 0.1008, 0.1084, -0.0126, 0.0679, 0.0807, -0.0136, -0.0959, 0.0210, 0.0452, 0.0225, 0.0415,
-        -0.0912, -0.1078, 0.0306, 0.0566, 0.0266, 0.0327, 0.1011, 0.0021, 0.0233, 0.0908, -0.0183, 0.0342, -0.0562,
-        0.0671, -0.0206, 0.0425, -0.0207, -0.0527, -0.0715, 0.0715, 0.0046, -0.0346, 0.0282, 0.1007, 0.0740, -0.0557,
-        0.0781, 0.0197, 0.0014, 0.0355, 0.0814, 0.0445, -0.0060, -0.0087, 0.0173, -0.0231, 0.0526, -0.0441, -0.0576,
-        -0.0385, -0.0738, -0.0131, 0.0625, -0.0486, -0.0181, -0.1020, 0.0738, -0.0094, 0.0829, -0.0163, -0.0132,
-        -0.0828, -0.0097, 0.0985, 0.1087, -0.0062, -0.0285, -0.0313, 0.0566, -0.0597, -0.0792, -0.0007, -0.0172, 0.0501,
-        -0.0751, 0.0111, 0.0017, 0.0485, 0.0140, 0.0036, -0.0168, 0.0930, 0.0086, 0.0236, 0.0449, -0.0968, -0.0219,
-        -0.0277, -0.0381, 0.0581, -0.0113, -0.0342, -0.0899, -0.0261, 0.0173, -0.0628, 0.0544, 0.0272, -0.0426, -0.0421,
-        -0.1280, 0.0673, -0.0119, 0.1416, 0.0164, 0.0282, 0.1191, -0.1209, -0.0646, 0.0243, -0.1569, 0.0354, -0.0201,
-        -0.0321, -0.0941, 0.0258, 0.0398, -0.0856, 0.0340, 0.0678, 0.0588, 0.0208, 0.0142, -0.0588, 0.0140, -0.0515,
-        0.0619, 0.0109, -0.1016, 0.0430, -0.0493, 0.0024, 0.0624, -0.0285, 0.0300, -0.0105, -0.0533, -0.0061, -0.0856,
-        -0.0614, 0.1134, -0.0738, 0.0009, -0.0231, -0.0052, 0.0527, 0.0029, -0.0027, -0.0164, -0.0687, -0.0619, 0.0093,
-        -0.0114, 0.0135, -0.0015, 0.0364, 0.0969, 0.0818, -0.0067, -0.0109, -0.0638, 0.0334, -0.1362, -0.0025, -0.1226,
-        0.0526, -0.0423, -0.0613, -0.1881, 0.0356, 0.0453, 0.0679, 0.0383, -0.0928, -0.0263, -0.1458, -0.0574, -0.0771,
-        0.0192, 0.0303, 0.0300, -0.0209, -0.0909, -0.0228, -0.0471, 0.1043, 0.0388, 0.0051, -0.0571, -0.0692, 0.0119,
-        -0.0617, 0.0855, 0.0270, 0.0402, 0.0804, 0.1336, 0.1080, -0.0871, -0.0217, 0.0507, 0.1163, -0.0624, -0.0686,
-        -0.0811, 0.0177, 0.0241, 0.0408, -0.0612, -0.0714, -0.0039, -0.0485, 0.0797, -0.0561, -0.0896, 0.0336, -0.0362,
-        0.0416, 0.0965, 0.0041, -0.0870, -0.0378, -0.0526, 0.0751, -0.0483, 0.1458, 0.0249, -0.0146, -0.0097, -0.0219,
-        -0.0700, 0.0366, 0.0272, -0.0038, 0.0091, -0.1302, 0.0572, 0.0971, 0.1212, 0.0155,
+        0.0494, 0.1177, -0.0196, -0.0081, -0.0025, 0.0089, 0.0364, 0.0487, 0.0224, 0.0052, 0.0708, 0.1711, -0.1419,
+        -0.0014, 0.0260, 0.1064, 0.1156, -0.0212, 0.0664, 0.0747, -0.0209, -0.0907, -0.0042, 0.0603, 0.0120, 0.0087,
+        -0.0909, -0.0973, 0.0334, 0.0582, 0.0108, 0.0346, 0.1115, 0.0096, 0.0202, 0.0878, -0.0237, 0.0525, -0.0399,
+        0.0715, -0.0082, 0.0416, -0.0205, -0.0567, -0.0613, 0.0580, -0.0051, -0.0414, 0.0267, 0.0935, 0.0894, -0.0513,
+        0.0495, 0.0167, 0.0182, 0.0323, 0.0952, 0.0489, 0.0072, -0.0128, 0.0108, -0.0515, 0.0614, -0.0444, -0.0653,
+        -0.0616, -0.0834, -0.0095, 0.0618, -0.0738, -0.0156, -0.0984, 0.0599, -0.0034, 0.0855, -0.0303, -0.0281,
+        -0.0728, -0.0164, 0.1144, 0.1134, -0.0112, -0.0318, -0.0097, 0.0546, -0.0336, -0.0729, -0.0096, -0.0075, 0.0646,
+        -0.0758, 0.0092, -0.0017, 0.0400, 0.0152, 0.0009, -0.0204, 0.0869, 0.0163, 0.0401, 0.0505, -0.0731, -0.0431,
+        -0.0182, -0.0449, 0.0730, -0.0019, -0.0364, -0.0852, -0.0477, 0.0300, -0.0601, 0.0426, 0.0201, -0.0304, -0.0556,
+        -0.1393, 0.0810, -0.0046, 0.1522, 0.0054, 0.0272, 0.1415, -0.1038, -0.0718, 0.0090, -0.1602, 0.0227, -0.0072,
+        -0.0251, -0.0859, 0.0261, 0.0451, -0.0745, 0.0342, 0.0733, 0.0867, 0.0234, 0.0535, -0.0547, 0.0180, -0.0342,
+        0.0518, -0.0043, -0.0847, 0.0515, -0.0505, 0.0178, 0.0545, -0.0280, 0.0326, -0.0216, -0.0366, -0.0075, -0.0687,
+        -0.0795, 0.1188, -0.0832, -0.0140, -0.0343, -0.0114, 0.0410, -0.0037, -0.0088, -0.0253, -0.0649, -0.0730,
+        -0.0096, -0.0200, 0.0118, -0.0056, 0.0188, 0.0956, 0.0727, -0.0017, 0.0191, -0.0447, 0.0256, -0.1359, -0.0053,
+        -0.1068, 0.0685, -0.0163, -0.0502, -0.1933, 0.0496, 0.0389, 0.0652, 0.0672, -0.0973, -0.0193, -0.1444, -0.0796,
+        -0.0561, 0.0070, 0.0267, 0.0253, -0.0274, -0.1174, -0.0250, -0.0415, 0.1098, 0.0533, -0.0116, -0.0626, -0.0753,
+        0.0261, -0.0668, 0.0593, -0.0021, 0.0421, 0.0797, 0.1161, 0.1213, -0.0848, -0.0377, 0.0477, 0.1223, -0.0498,
+        -0.0594, -0.0848, 0.0031, 0.0283, 0.0449, -0.0686, -0.0802, 0.0022, -0.0469, 0.0767, -0.0382, -0.1002, 0.0196,
+        -0.0659, 0.0467, 0.0619, 0.0054, -0.0810, -0.0304, -0.0476, 0.0938, -0.0236, 0.1315, 0.0158, -0.0178, -0.0005,
+        -0.0393, -0.0777, 0.0181, 0.0345, 0.0038, 0.0213, -0.1055, 0.0542, 0.0890, 0.0958, 0.0183,
     ]
 
     @Test func printsAVoiceAsWeSpeakerItselfDoes() async throws {
-        let print = try #require(try await printer().voicePrint(of: Self.madeUpVoice()[...]))
+        let printer = try await printer()
+
+        let print = try printer.voicePrint(of: printer.frames(of: Self.madeUpVoice()[...]))
 
         #expect(print.count == VoicePrinter.printLength)
         #expect(voiceDistance(print, Self.weSpeakersPrint) < 0.001)
@@ -44,55 +47,21 @@ struct VoicePrinterTests {
 
     @Test func printsSpeechOfAnyLengthWithOneModel() async throws {
         let printer = try await printer()
-        let voice = Self.madeUpVoice()
+        let frames = printer.frames(of: Self.madeUpVoice()[...])
 
-        // Core ML plans the model again for each new length, from the weights it was loaded with.
-        for seconds in [1.5, 2.0, 2.5, 3.0, 2.2, 1.8] {
-            let speech = voice.prefix(Int(seconds * VoicePrinter.sampleRate))
-            #expect(try printer.voicePrint(of: speech, minimumSpeech: 0.5)?.count == VoicePrinter.printLength)
+        // A second's worth of frames at the least, and more than 10 s, in parts.
+        for count in [1, 99, 100, 150, 298, 2_400] {
+            let some = (0..<count).map { frames[$0 % frames.count] }
+            #expect(try printer.voicePrint(of: some).count == VoicePrinter.printLength)
         }
     }
 
-    @Test func printsNothingOfAudioWithTooLittleSpeech() async throws {
+    @Test func makesAFrameEveryHopThatFitsWhole() async throws {
         let printer = try await printer()
-        let silence = [Float](repeating: 0, count: 48_000)
-        let briefly = Array(Self.madeUpVoice().prefix(8_000)) + [Float](repeating: 0, count: 40_000)
 
-        #expect(try printer.voicePrint(of: silence[...]) == nil)
-        #expect(try printer.voicePrint(of: briefly[...]) == nil)
-        #expect(try printer.voicePrint(of: [Float](repeating: 0.1, count: 100)[...]) == nil)
-    }
-
-    @Test func printsNothingOfANotificationsPing() async throws {
-        let printer = try await printer()
-        let pings = (0..<48_000).map { index in
-            let time = Double(index % 16_000) / 16_000
-            let chime = [(2_100.0, 1.0), (4_200, 0.3), (5_800, 0.5)].map { sin(2 * Double.pi * $0 * time) * $1 }
-            return Float(chime.reduce(0, +) * exp(-time) * 0.1)
-        }
-
-        #expect(try printer.voicePrint(of: pings[...]) == nil)
-    }
-
-    @Test func printsNothingOfAHum() async throws {
-        let printer = try await printer()
-        let hum = (0..<48_000).map { index in
-            let time = Double(index) / 16_000
-            return Float((sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.01)
-        }
-
-        #expect(try printer.voicePrint(of: hum[...]) == nil)
-    }
-
-    @Test func printsAQuietVoiceOverAHum() async throws {
-        let printer = try await printer()
-        let voice = Self.madeUpVoice().enumerated().map { index, sample in
-            let time = Double(index) / 16_000
-            let hum = (sin(2 * Double.pi * 100 * time) + sin(2 * Double.pi * 200 * time) / 4) * 0.0003
-            return sample * 0.03 + Float(hum)
-        }
-
-        #expect(try printer.voicePrint(of: voice[...]) != nil)
+        #expect(printer.frames(of: Self.madeUpVoice()[...]).count == 298)
+        #expect(printer.frames(of: [Float](repeating: 0, count: 399)[...]).isEmpty)
+        #expect(printer.frames(of: [Float](repeating: 0, count: 400)[...]).count == 1)
     }
 
     @Test func measuresHowFarApartTwoPrintsPoint() {

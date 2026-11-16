@@ -11,9 +11,13 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Up to 20 clips are kept per person, named or not.
 - On your microphone, a voice not saved yet is "You", not "Them": AirPods sounding different after a pause no longer turn you into someone else.
 - Someone new is saved only together with a clip of them: at least 5 s of them alone, speaking without a pause.
+- Who talks when comes from a segmentation model, overlap included; lines split where the speaker changes.
+- When a call ends, voices are regrouped and the transcript rewritten; new people are saved then (`Them A` until then).
+- Voice prints run on the Neural Engine.
 
 ### TotalRecall.app
 
+- With Identify Speakers, the transcript window shows the rewritten transcript when the recording ends.
 - Start Recording and New Meeting… file the recording under the default meeting calendar, chosen in Settings (the
   first calendar recorded until then), instead of `other/`; with no calendar recorded, it goes straight under the
   recordings folder, by week. Holding ⌘ with the menu open turns them into Start Recording On… and New Meeting On…,

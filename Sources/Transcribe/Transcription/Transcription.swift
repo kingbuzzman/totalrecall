@@ -18,7 +18,8 @@ struct TranscriptionOutput {
 /// totalrecall's split of you and them, starts a recognizer for each speaker, telling people apart by voice with
 /// `--identify-speakers`, and hands each update to `output`'s printer. The text file, if any, is created only once
 /// transcribing can start, so a failure before then leaves no empty file behind; from then on, whatever has been
-/// transcribed is in it, line by line.
+/// transcribed is in it, line by line. Telling people apart, it is written again at the end, each line said by whoever
+/// turned out to say it, now that all of them have been heard.
 func transcribe(
     _ source: any AudioSource & Sendable,
     locale: Locale,
@@ -47,33 +48,47 @@ func transcribe(
     try await run(transcribers, on: source, readAhead: pendingChunks, printer: printer, echoes: echoes)
     printer.finish()
     try textFile?.close()
-    voices.tidyUp(after: transcribers, report: output.report)
+    let identifiers = transcribers.compactMap(\.identifier)
+    guard !identifiers.isEmpty else { return }
+    for identifier in identifiers { identifier.conclude() }
+    let text = printer.rewritten { line in
+        transcribers.first { $0.speaker == line.speaker }?.identifier?.parts(of: line) ?? [line]
+    }
+    if let textURL {
+        do {
+            try Data(text.utf8).write(to: textURL, options: .atomic)
+        } catch {
+            output.onSaveFailure(error)
+        }
+    }
+    voices.tidyUp(report: output.report)
 }
 
 /// With --identify-speakers, people are told apart by voice: on the right channel, or the one mixed channel, and on
 /// your microphone, where everyone is you. It is an extra: whatever goes wrong with it is reported, and the transcript
 /// goes on without it.
 private struct Voices {
-    let model: MLModel?
+    /// The voice print model and the who-talks-when one.
+    let models: (prints: MLModel, segmentation: MLModel)?
     let database: SpeakerDatabase?
     let warn: (String) -> Void
 
-    /// The speaker model and the database at `url` of the people heard before, when `identifiesSpeakers`.
+    /// The speaker models and the database at `url` of the people heard before, when `identifiesSpeakers`.
     static func load(if identifiesSpeakers: Bool, from url: URL, warn: @escaping (String) -> Void) async -> Voices {
         let warnAboutVoices = { (message: String) in warn("--identify-speakers: \(message)") }
-        guard identifiesSpeakers else { return Voices(model: nil, database: nil, warn: warnAboutVoices) }
-        let model: MLModel
+        guard identifiesSpeakers else { return Voices(models: nil, database: nil, warn: warnAboutVoices) }
+        let models: (MLModel, MLModel)
         do {
-            model = try await SpeakerModel.builtIn()
+            models = (try await SpeakerModel.builtIn(), try await SpeakerModel.builtInSegmentation())
         } catch {
             warnAboutVoices("cannot tell voices apart: \(error.localizedDescription)")
-            return Voices(model: nil, database: nil, warn: warnAboutVoices)
+            return Voices(models: nil, database: nil, warn: warnAboutVoices)
         }
         do {
-            return Voices(model: model, database: try SpeakerDatabase(url: url), warn: warnAboutVoices)
+            return Voices(models: models, database: try SpeakerDatabase(url: url), warn: warnAboutVoices)
         } catch {
             warnAboutVoices("speakers are not being remembered: \(error.localizedDescription)")
-            return Voices(model: model, database: nil, warn: warnAboutVoices)
+            return Voices(models: models, database: nil, warn: warnAboutVoices)
         }
     }
 
@@ -85,13 +100,14 @@ private struct Voices {
         speechTimes: SpeechTimes?,
         otherSpeechTimes: SpeechTimes?
     ) -> SpeakerIdentifier? {
-        guard let model else { return nil }
+        guard let models else { return nil }
         do {
             return try SpeakerIdentifier(
                 name: name,
                 isYours: isYours,
                 sampleRate: sampleRate,
-                printer: try VoicePrinter(model: model),
+                segmenter: try Segmenter(model: models.segmentation),
+                printer: try VoicePrinter(model: models.prints),
                 database: database,
                 speechTimes: speechTimes,
                 otherSpeechTimes: otherSpeechTimes,
@@ -103,12 +119,9 @@ private struct Voices {
         }
     }
 
-    /// Once the transcript is done: forgets those who said too little to be sure of, and merges those heard as two
-    /// people who turn out to be one, now that more of them has been heard.
-    func tidyUp(after transcribers: [SpeakerTranscriber], report: (String) -> Void) {
-        for forgotten in transcribers.compactMap(\.identifier).flatMap({ $0.forgetThoseWhoSaidTooLittle() }) {
-            report("speaker \(forgotten) said too few words for how long they were heard: forgot them")
-        }
+    /// Once the transcript is done: merges those heard as two people who turn out to be one, now that more of them has
+    /// been heard.
+    func tidyUp(report: (String) -> Void) {
         do {
             for (merged, kept) in try database?.unify() ?? [] {
                 let name = kept.name.map { " (\($0))" } ?? ""
@@ -207,19 +220,23 @@ package func prepareTranscription(language: String?) async throws {
 }
 
 /// Who a live transcript goes to, as it is written: each line as it settles, and whether it was heard on your microphone;
-/// the words still being recognized ("" once there are none); and warnings and news of the people it heard.
+/// the words still being recognized ("" once there are none); telling people apart, all the lines again at the end,
+/// each said by whoever turned out to say it; and warnings and news of the people it heard.
 package struct LiveTranscriptHandlers: Sendable {
     package let onLine: @Sendable (_ line: String, _ isYours: Bool) -> Void
     package let onLiveText: @Sendable (String) -> Void
+    package let onRewrite: @Sendable ([(line: String, isYours: Bool)]) -> Void
     package let onMessage: @Sendable (String) -> Void
 
     package init(
         onLine: @escaping @Sendable (_ line: String, _ isYours: Bool) -> Void,
         onLiveText: @escaping @Sendable (String) -> Void,
+        onRewrite: @escaping @Sendable ([(line: String, isYours: Bool)]) -> Void,
         onMessage: @escaping @Sendable (String) -> Void
     ) {
         self.onLine = onLine
         self.onLiveText = onLiveText
+        self.onRewrite = onRewrite
         self.onMessage = onMessage
     }
 }
@@ -278,7 +295,8 @@ package func transcribeLive(
                 isLive: false,
                 save: save,
                 showLine: handlers.onLine,
-                showLive: handlers.onLiveText
+                showLive: handlers.onLiveText,
+                showAll: handlers.onRewrite
             )
         },
         warn: handlers.onMessage,

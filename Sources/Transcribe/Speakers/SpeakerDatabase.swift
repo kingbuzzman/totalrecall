@@ -23,7 +23,7 @@ package final class SpeakerDatabase: @unchecked Sendable {
     }
 
     /// One way someone sounds, as the identifier recognizes them: the average of its prints in the database's model,
-    /// and how many prints, `SpeakerIdentifier.hopSeconds` of speech each; with its person's name and whether that is
+    /// and how many prints, `SpeakerIdentifier.secondsPerPrint` of speech each; with its person's name and whether that is
     /// you.
     package struct Voice: Equatable, Sendable {
         package let id: Int
@@ -55,7 +55,7 @@ package final class SpeakerDatabase: @unchecked Sendable {
     /// first.
     package static let soundAlike = SpeakerIdentifier.soundAlike
     /// How long a voice is heard for each of its prints, in seconds.
-    package static let secondsPerPrint = SpeakerIdentifier.hopSeconds
+    package static let secondsPerPrint = SpeakerIdentifier.secondsPerPrint
 
     package static var defaultURL: URL {
         if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] { return URL(typedPath: path) }

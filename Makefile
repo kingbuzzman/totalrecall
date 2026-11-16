@@ -46,14 +46,18 @@ CODESIGN_IDENTITY ?= TotalRecall Local
 endif
 SIGN =$(if $(CODESIGN_IDENTITY),codesign --force --sign "$(CODESIGN_IDENTITY)" --identifier local.$(notdir $@) $@)
 INFO_PLIST = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker $(CURDIR)/$(BUILD)/$(1)/Info.plist
-# The speaker model transcribe --identify-speakers tells voices apart with, made by scripts/convert-speaker-model.py, is
-# built into transcribe: the Core ML package's model and its weights go into a section each, as SpeakerModel reads them.
-SPEAKER_MODEL := Models/SpeakerEmbedding.mlpackage
-SPEAKER_MODEL_FILES := $(SPEAKER_MODEL)/Data/com.apple.CoreML/model.mlmodel \
-	$(SPEAKER_MODEL)/Data/com.apple.CoreML/weights/weight.bin
-SPEAKER_MODEL_SECTION = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker $(1) -Xlinker $(CURDIR)/$(SPEAKER_MODEL)/$(2)
-SPEAKER_MODEL_SECTIONS := $(call SPEAKER_MODEL_SECTION,__voice_model,Data/com.apple.CoreML/model.mlmodel) \
-	$(call SPEAKER_MODEL_SECTION,__voice_weights,Data/com.apple.CoreML/weights/weight.bin)
+# The models transcribe --identify-speakers tells voices apart with, made by scripts/convert-speaker-model.py, and finds
+# who talks when with, made by scripts/convert-segmentation-model.py, are built into transcribe: each Core ML package's
+# model and its weights go into a section each, as SpeakerModel reads them.
+SPEAKER_MODELS := Models/SpeakerEmbedding.mlpackage Models/SpeakerSegmentation.mlpackage
+SPEAKER_MODEL_FILES := $(foreach model,$(SPEAKER_MODELS),$(model)/Data/com.apple.CoreML/model.mlmodel \
+	$(model)/Data/com.apple.CoreML/weights/weight.bin)
+SPEAKER_MODEL_SECTION = -Xlinker -sectcreate -Xlinker __TEXT -Xlinker $(1) -Xlinker $(CURDIR)/Models/$(2).mlpackage/$(3)
+SPEAKER_MODEL_SECTIONS := \
+	$(call SPEAKER_MODEL_SECTION,__voice_model,SpeakerEmbedding,Data/com.apple.CoreML/model.mlmodel) \
+	$(call SPEAKER_MODEL_SECTION,__voice_weights,SpeakerEmbedding,Data/com.apple.CoreML/weights/weight.bin) \
+	$(call SPEAKER_MODEL_SECTION,__seg_model,SpeakerSegmentation,Data/com.apple.CoreML/model.mlmodel) \
+	$(call SPEAKER_MODEL_SECTION,__seg_weights,SpeakerSegmentation,Data/com.apple.CoreML/weights/weight.bin)
 # One build of the tools and the tests, instrumented for coverage. A debug build, the only kind in which SwiftPM gives the
 # tests' @testable imports of the tools their own entry point (in a release build with -enable-testing, Xcode 26's test
 # runner starts transcribe instead of the tests); the tools must come from the same build for their coverage to add up
@@ -105,7 +109,7 @@ $(BIN)/transcribe: $(SOURCES) $(SPEAKER_MODEL_FILES) $(BUILD)/Transcribe/Info.pl
 	cp "$$(swift build $(SWIFTPM) -c release --show-bin-path)/transcribe" $@
 	$(SIGN)
 
-# The app has the speaker model built in too, for --identify-speakers; the version is in the bundle's Info.plist.
+# The app has the speaker models built in too, for --identify-speakers; the version is in the bundle's Info.plist.
 build-app: $(APP)
 
 $(APP): $(SOURCES) $(SPEAKER_MODEL_FILES) $(APP_RESOURCES) $(BUILD)/TotalRecallApp/Info.plist $(SPEEXDSP)/lib/libspeexdsp.a

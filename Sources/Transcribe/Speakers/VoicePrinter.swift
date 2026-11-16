@@ -2,42 +2,22 @@ import AVFoundation
 import Accelerate
 import CoreML
 import Foundation
-import MachO
 import Shared
-import Synchronization
 
-/// What a few seconds of someone's voice sounds like, to tell people apart by: a speaker embedding, from a neural
-/// network trained to give the same voice the same direction however it is spoken and whatever it says (WeSpeaker's
-/// ResNet34-LM; see `SpeakerModel`). The network hears 80-band log-mel filterbank frames of 16 kHz audio, computed here
-/// as Kaldi computes them, as it was trained on; only the frames with speech go in: near a voiced one, with a pitch,
-/// which noise has not, however quiet, as someone across the room is on a headset's microphone, and with most of its
-/// sound low, as a voice's is and a notification's ping not, but not all of it, as a hum's is. A print is 256 numbers, of length 1, so `voiceDistance` is
-/// how far apart their directions are.
+/// What someone's voice sounds like, to tell people apart by: a speaker embedding, from a neural network trained to give
+/// the same voice the same direction however it is spoken and whatever it says (WeSpeaker's ResNet34-LM; see
+/// `SpeakerModel`). The network hears 80-band log-mel filterbank frames of 16 kHz audio, computed here as Kaldi computes
+/// them, as it was trained on; which frames are whose is for `Segmenter` to say. A print is 256 numbers, of length 1, so
+/// `voiceDistance` is how far apart their directions are.
 final class VoicePrinter: VoicePrinting {
     static let sampleRate = 16_000.0
     static let printLength = 256
-    /// The audio has too little speech to go by unless at least this share of its frames have some, by default; and
-    /// never less than the network takes.
-    static let minimumSpeech = 0.5
-    private static let minimumFrames = 100
-    /// Frames this much quieter than the loudest one in the audio, or quieter than `silence`, are taken for pauses.
-    private static let speechRange: Float = 30
-    private static let silence: Float = -75
-    /// A frame is voiced if, over `pitchFrameLength`, it matches itself this well a pitch period later, for a pitch in
-    /// `pitches`; speech is the frames within `voicedReach` of a voiced one, which takes in the consonants around it.
-    private static let voicing: Float = 0.5
-    private static let pitches = 60.0...400.0
-    private static let pitchFrameLength = 640
-    private static let voicedReach = 10
-    /// A voice has most of its sound, above the lowest pitch, below `lowSound` Hz: in voiced frames, mostly over 0.9 of
-    /// it and hardly ever under 0.4; a ping, a chime or a beep is as steady as a voice but rings above it, all of it. A
-    /// frame is voiced only with at least `lowSoundShare` of its sound that low.
-    private static let lowSound = 1_000.0
-    private static let lowSoundShare: Float = 0.25
-    /// Nor is a voice all below `formants`, where what it says is: in voiced frames, mostly over 0.3 of its sound is
-    /// in them, and hardly ever under 0.02; a hum, as of a fan or the mains, as steady as a voice, is all below them.
-    private static let formants = 300.0...3_400.0
-    private static let formantShare: Float = 0.02
+    /// The network hears from 1 s to 10 s of frames: fewer are repeated to make 1 s; more are printed in equal parts of
+    /// up to 10 s, and the prints averaged. Core ML plans the model again for each length it has not had yet, which
+    /// costs far more than a print, so each part is cut to whole seconds, evenly from both ends, where someone's
+    /// talking starts and ends, the least sure of it: 10 lengths in all.
+    static let fewestFrames = 100
+    static let mostFrames = 1_000
     // Kaldi's filterbank, as WeSpeaker computes it: 25 ms frames every 10 ms, the DC offset removed, pre-emphasized,
     // Hamming-windowed, the power spectrum through 80 triangular mel bands from 20 Hz to 8 kHz, of samples at the scale
     // of 16-bit audio.
@@ -53,11 +33,6 @@ final class VoicePrinter: VoicePrinting {
     private let window: [Float]
     /// One triangular filter per mel band, over the FFT bins below the Nyquist frequency.
     private let filters: [[Float]]
-    /// How much of each FFT bin's power is sound: none below the lowest pitch, and, above, what the pre-emphasis did
-    /// not add; and the bins below `lowSound`, and in `formants`.
-    private let sound: [Float]
-    private let lowBins: Int
-    private let formantBins: Range<Int>
 
     init(model: MLModel) throws {
         guard let fft = vDSP.FFT(log2n: 9, radix: .radix2, ofType: DSPSplitComplex.self) else {
@@ -79,87 +54,33 @@ final class VoicePrinter: VoicePrinting {
                 return Float(max(0, min((frequency - left) / (center - left), (right - frequency) / (right - center))))
             }
         }
-        let binWidth = Self.sampleRate / Double(Self.fftLength)
-        sound = (0..<Self.fftLength / 2).map { bin in
-            let frequency = binWidth * Double(bin)
-            guard frequency >= Self.pitches.lowerBound else { return 0 }
-            let phase = 2 * Double.pi * frequency / Self.sampleRate
-            let preemphasis = Double(Self.preemphasis)
-            return Float(1 / (1 - 2 * preemphasis * cos(phase) + preemphasis * preemphasis))
-        }
-        func bin(_ frequency: Double) -> Int { Int((frequency / binWidth).rounded(.up)) }
-        lowBins = bin(Self.lowSound)
-        formantBins = bin(Self.formants.lowerBound)..<bin(Self.formants.upperBound)
     }
 
-    /// The print of this audio, at `sampleRate`, or nil if less than `minimumSpeech` of it is speech.
-    func voicePrint(
-        of samples: ArraySlice<Float>,
-        minimumSpeech: Double = VoicePrinter.minimumSpeech
-    ) throws
-        -> [Float]?
-    {
-        let (frames, isSpeech) = speech(in: samples)
-        let speech = frames.indices.filter { isSpeech[$0] }.map { frames[$0].bands }
-        guard !frames.isEmpty, speech.count >= max(Self.minimumFrames, Int(Double(frames.count) * minimumSpeech))
-        else { return nil }
-        return try embed(speech)
+    /// The filterbank frames of this audio, at `sampleRate`: one every `hopLength` samples, for as many as fit whole.
+    func frames(of samples: ArraySlice<Float>) -> [[Float]] {
+        stride(from: samples.startIndex, through: samples.endIndex - Self.frameLength, by: Self.hopLength).map {
+            bands(of: samples[$0..<$0 + Self.frameLength])
+        }
     }
 
-    /// Which frames of this audio, `hopLength` apart, are speech, as `voicePrint` takes them.
-    func speechFrames(of samples: ArraySlice<Float>) -> [Bool] {
-        speech(in: samples).isSpeech
-    }
-
-    /// The audio's frames, and which are speech.
-    private func speech(
-        in samples: ArraySlice<Float>
-    ) -> (frames: [(loudness: Float, lowShare: Float, formantShare: Float, bands: [Float])], isSpeech: [Bool]) {
-        var frames: [(loudness: Float, lowShare: Float, formantShare: Float, bands: [Float])] = []
-        var start = samples.startIndex
-        while start + Self.frameLength <= samples.endIndex {
-            frames.append(analyze(samples[start..<start + Self.frameLength]))
-            start += Self.hopLength
+    /// The print of these frames, which must be some.
+    func voicePrint(of frames: [[Float]]) throws -> [Float] {
+        precondition(!frames.isEmpty, "a voice print of no audio")
+        var frames = frames
+        while frames.count < Self.fewestFrames { frames += frames.prefix(Self.fewestFrames - frames.count) }
+        let parts = (frames.count + Self.mostFrames - 1) / Self.mostFrames
+        let length = frames.count / parts / Self.fewestFrames * Self.fewestFrames
+        let first = (frames.count - parts * length) / 2
+        var sum = [Float](repeating: 0, count: Self.printLength)
+        for part in 0..<parts {
+            let start = first + part * length
+            vDSP.add(sum, try embed(frames[start..<start + length]), result: &sum)
         }
-        guard let loudest = frames.map(\.loudness).max() else { return ([], []) }
-        let isLoud = frames.map { $0.loudness > max(loudest - Self.speechRange, Self.silence) }
-        let isVoiced = isLoud.indices.map {
-            isLoud[$0] && frames[$0].lowShare >= Self.lowSoundShare && frames[$0].formantShare >= Self.formantShare
-                && isPeriodic(samples, at: samples.startIndex + $0 * Self.hopLength)
-        }
-        var nearVoiced = [Bool](repeating: false, count: frames.count)
-        for index in isVoiced.indices where isVoiced[index] {
-            for near in max(0, index - Self.voicedReach)...min(frames.count - 1, index + Self.voicedReach) {
-                nearVoiced[near] = true
-            }
-        }
-        return (frames, frames.indices.map { isLoud[$0] && nearVoiced[$0] })
-    }
-
-    /// Whether the audio from `start` has a pitch: it matches itself, a period later, as a voice does and noise not.
-    private func isPeriodic(_ samples: ArraySlice<Float>, at start: Int) -> Bool {
-        let shortest = Int(Self.sampleRate / Self.pitches.upperBound)
-        let longest = Int(Self.sampleRate / Self.pitches.lowerBound)
-        guard start + Self.pitchFrameLength <= samples.endIndex else { return false }
-        let offset = start - samples.startIndex
-        return samples.withContiguousStorageIfAvailable { samples in
-            let frame = samples.baseAddress! + offset
-            var best: Float = 0
-            for lag in shortest...longest {
-                let count = vDSP_Length(Self.pitchFrameLength - lag)
-                var (product, head, tail): (Float, Float, Float) = (0, 0, 0)
-                vDSP_dotpr(frame, 1, frame + lag, 1, &product, count)
-                vDSP_svesq(frame, 1, &head, count)
-                vDSP_svesq(frame + lag, 1, &tail, count)
-                if head > 0, tail > 0 { best = max(best, product / (head * tail).squareRoot()) }
-                if best >= Self.voicing { return true }
-            }
-            return false
-        } ?? false
+        return vDSP.divide(sum, vDSP.sumOfSquares(sum).squareRoot())
     }
 
     /// The network's print of these frames, less their mean, as it was trained on.
-    private func embed(_ frames: [[Float]]) throws -> [Float] {
+    private func embed(_ frames: ArraySlice<[Float]>) throws -> [Float] {
         var mean = [Float](repeating: 0, count: Self.bandCount)
         for frame in frames { vDSP.add(mean, frame, result: &mean) }
         mean = vDSP.divide(mean, Float(frames.count))
@@ -179,10 +100,8 @@ final class VoicePrinter: VoicePrinting {
         return vDSP.divide(print, length)
     }
 
-    /// A frame's loudness, in dB below full scale, the shares of its sound below `lowSound` and in `formants`, and its
-    /// log mel filterbank.
-    private func analyze(_ frame: ArraySlice<Float>) -> (Float, Float, Float, [Float]) {
-        let loudness = 10 * log10(vDSP.sumOfSquares(frame) / Float(frame.count) + 1e-12)
+    /// A frame's log mel filterbank.
+    private func bands(of frame: ArraySlice<Float>) -> [Float] {
         var samples = vDSP.multiply(Self.sampleScale, frame)
         samples = vDSP.add(-vDSP.mean(samples), samples)
         for index in stride(from: samples.count - 1, to: 0, by: -1) {
@@ -209,20 +128,16 @@ final class VoicePrinter: VoicePrinting {
         // vDSP's FFT gives twice the DFT, and packs the Nyquist bin, which is in no band, in with the DC one.
         power = vDSP.multiply(0.25, power)
         power[0] = real[0] * real[0] / 4
-        let bands = filters.map { log(max(vDSP.dot($0, power), Float.ulpOfOne)) }
-        let sound = vDSP.multiply(power, self.sound)
-        let total = vDSP.sum(sound)
-        guard total > 0 else { return (loudness, 0, 0, bands) }
-        return (loudness, vDSP.sum(sound[..<lowBins]) / total, vDSP.sum(sound[formantBins]) / total, bands)
+        return filters.map { log(max(vDSP.dot($0, power), Float.ulpOfOne)) }
     }
 }
 
 /// Makes voice prints of audio at `VoicePrinter.sampleRate`: `VoicePrinter`, or a stand-in in the tests.
 protocol VoicePrinting {
-    /// The print of this audio, or nil if less than `minimumSpeech` of it is speech.
-    func voicePrint(of samples: ArraySlice<Float>, minimumSpeech: Double) throws -> [Float]?
-    /// Which of its frames, `VoicePrinter.frameLength` long and `VoicePrinter.hopLength` apart, are speech.
-    func speechFrames(of samples: ArraySlice<Float>) -> [Bool]
+    /// The audio's frames, `VoicePrinter.frameLength` long and `VoicePrinter.hopLength` apart, as prints are made of.
+    func frames(of samples: ArraySlice<Float>) -> [[Float]]
+    /// The print of some of those frames, at least one.
+    func voicePrint(of frames: [[Float]]) throws -> [Float]
 }
 
 /// How different two voice prints sound: 1 less the cosine of the angle between them, from 0 for the same direction
@@ -271,53 +186,5 @@ final class VoiceResampler {
             converterInput.convert(input, with: converter, into: output) == nil
         else { return [] }
         return output.samples()
-    }
-}
-
-/// The speaker model: WeSpeaker's ResNet34-LM, trained on VoxCeleb, CC BY 4.0
-/// (https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM), converted to Core ML into
-/// Models/SpeakerEmbedding.mlpackage by scripts/convert-speaker-model.py. The Makefile builds the package's model and
-/// weights into transcribe, as sections of its binary, so it stays one file to install, and Core ML loads them from
-/// there, in memory. They must stay there for as long as the model is used: Core ML reads the weights again whenever
-/// it plans the model for a length of speech it has not had yet.
-package enum SpeakerModel {
-    /// What the database labels this model's prints with, as another model's mean nothing to it.
-    package static let name = "wespeaker-voxceleb-resnet34-lm"
-    /// The package's files, as the Makefile builds them in: the model, which names its weights `weights`, and those.
-    private static let model = "Data/com.apple.CoreML/model.mlmodel"
-    private static let weights = "Data/com.apple.CoreML/weights/weight.bin"
-    private static let weightsName = "weights/weight.bin"
-    /// Packages' models and weights, kept from when they are loaded on.
-    private static let loaded = Mutex<[Data]>([])
-
-    /// The model built into transcribe.
-    static func builtIn() async throws -> MLModel {
-        try await load(model: section("__voice_model"), weights: section("__voice_weights"))
-    }
-
-    /// The model of a package, such as Models/SpeakerEmbedding.mlpackage for the tests.
-    static func load(package: URL) async throws -> MLModel {
-        let (model, weights) = try (
-            Data(contentsOf: package.appending(path: model)), Data(contentsOf: package.appending(path: weights))
-        )
-        loaded.withLock { $0 += [model, weights] }
-        return try await load(model: model, weights: weights)
-    }
-
-    private static func load(model: Data, weights: Data) async throws -> MLModel {
-        let asset = try MLModelAsset(specification: model, blobMapping: [URL(string: weightsName)!: weights])
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = .all
-        return try await MLModel.load(asset: asset, configuration: configuration)
-    }
-
-    /// A section of transcribe's binary, where it is: mapped in for as long as transcribe runs, and never freed.
-    private static func section(_ name: String) throws -> Data {
-        var size: UInt = 0
-        let header = #dsohandle.assumingMemoryBound(to: mach_header_64.self)
-        guard let bytes = getsectiondata(header, "__TEXT", name, &size), size > 0 else {
-            throw MessageError("this transcribe was built without its speaker model; build it with make")
-        }
-        return Data(bytesNoCopy: bytes, count: Int(size), deallocator: .none)
     }
 }

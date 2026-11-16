@@ -1,10 +1,11 @@
 import Foundation
 import Shared
+import Synchronization
 import Testing
 
 @testable import Transcribe
 
-/// The identifier's own work, with made-up voices and a stand-in for the speaker model: audio at a steady level is one
+/// The identifier's own work, with made-up voices and stand-ins for the speaker models: audio at a steady level is one
 /// voice, `level(1)` one person and `level(2)` another, so what it does with them is the same every run.
 struct SpeakerIdentifierTests {
     private static let rate = VoicePrinter.sampleRate
@@ -12,355 +13,103 @@ struct SpeakerIdentifierTests {
     @Test func namesPeopleInTheOrderTheyAreFirstHeard() throws {
         let identifier = try makeIdentifier()
 
-        feed(voice(1, seconds: 12) + voice(2, seconds: 12) + voice(1, seconds: 6), to: identifier)
+        feed(voice(1, seconds: 12) + voice(2, seconds: 12) + voice(1, seconds: 8), to: identifier)
+        identifier.finish()
 
-        #expect(identifier.speaker(from: 2, to: 10) == "Them 1")
-        #expect(identifier.speaker(from: 15, to: 23) == "Them 2")
-        #expect(identifier.speaker(from: 25.5, to: 29.5) == "Them 1")
+        #expect(label(from: 2, to: 10, by: identifier) == ["Them 1"])
+        #expect(label(from: 14, to: 22, by: identifier) == ["Them 2"])
+        #expect(label(from: 26, to: 31, by: identifier) == ["Them 1"])
     }
 
-    @Test func goesByWhoeverSpokeLastUntilTheirWordsHaveBeenPrinted() throws {
+    @Test func splitsALineWhereWhoSpeaksChanges() throws {
         let identifier = try makeIdentifier()
-
-        feed(voice(1, seconds: 6), to: identifier)
-
-        #expect(identifier.speaker(from: 7, to: 8) == "Them 1")
-    }
-
-    @Test func tellsWhoSaidAShortLineRightAfterSomeoneElseByTheMiddleOfEachPrint() throws {
-        let identifier = try makeIdentifier()
-
         feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: identifier)
-
-        // The window from 10.5 s to 13.5 s is as much one as the other; the one after it is all the second.
-        #expect(identifier.speaker(from: 12.6, to: 13.4) == "Them 2")
-    }
-
-    @Test func tellsWhoSaidAShortLineAfterAPauseByItsOwnSound() throws {
-        let identifier = try makeIdentifier()
-        let pause = voice(0, seconds: 10)
-        let audio = voice(1, seconds: 12) + pause + voice(2, seconds: 12) + pause + voice(1, seconds: 1) + pause
-
-        feed(audio, to: identifier)
-
-        #expect(identifier.speaker(from: 44, to: 45) == "Them 1")
-        #expect(identifier.speaker(from: 50, to: 51) == nil)
-    }
-
-    @Test func tellsWhoSaidTheLastWordsOnceTheAudioEnds() throws {
-        let identifier = try makeIdentifier()
-        feed(voice(1, seconds: 12) + voice(2, seconds: 12) + voice(1, seconds: 2), to: identifier)
-        #expect(identifier.speaker(from: 24.2, to: 26) == "Them 2")
-
         identifier.finish()
 
-        #expect(identifier.speaker(from: 24.2, to: 26) == "Them 1")
-    }
+        let parts = identifier.parts(of: line(from: 8, to: 16))
 
-    @Test func namesNobodyBeforeAnyoneHasSpoken() throws {
-        let identifier = try makeIdentifier()
-
-        feed(voice(0, seconds: 10), to: identifier)
-
-        #expect(identifier.speaker(from: 0, to: 10) == nil)
-    }
-
-    @Test func tellsWhoTheFirstWordsAreFromWithLittleSpeech() throws {
-        let identifier = try makeIdentifier()
-
-        feed(voice(0, seconds: 2) + voice(1, seconds: 1), to: identifier)
-
-        #expect(identifier.speaker(from: 2, to: 3) == "Them 1")
-    }
-
-    @Test func resamplesAudioToTheRateItPrintsAt() throws {
-        let identifier = try makeIdentifier(sampleRate: 48_000)
-
-        feed(voice(1, seconds: 12, rate: 48_000) + voice(2, seconds: 12, rate: 48_000), to: identifier, rate: 48_000)
-
-        #expect(identifier.speaker(from: 2, to: 10) == "Them 1")
-        #expect(identifier.speaker(from: 15, to: 23) == "Them 2")
-    }
-
-    @Test func savesSomeoneNewOnlyWithAClipOfThem() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-
-        feed(voice(1, seconds: 6), to: identifier)
-        let beforeAnyClip = try database.voices()
-        feed(voice(1, seconds: 6) + voice(2, seconds: 12), to: identifier, at: 6)
-        identifier.finish()
-
-        #expect(beforeAnyClip.isEmpty)
-        let speakers = try database.voices()
-        #expect(speakers.count == 2, "\(speakers.map { ($0.id, $0.prints) })")
-        for speaker in speakers { #expect(try !database.clips(of: speaker.person).isEmpty) }
-        #expect(identifier.speaker(from: 2, to: 10) == "Them \(speakers[0].person)")
-    }
-
-    @Test func keepsNoClipOfWordsWithPausesBetweenThem() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        let word = voice(1, seconds: 1) + voice(0, seconds: 0.8)
-
-        feed(Array(Array(repeating: word, count: 40).joined()), to: identifier)
-        identifier.finish()
-
-        #expect(try database.voices().isEmpty)
-    }
-
-    @Test func keepsNoClipOfTwoPeopleTakingTurnsTooQuickly() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        let turns = voice(1, seconds: 4) + voice(2, seconds: 4)
-
-        feed(Array(Array(repeating: turns, count: 8).joined()), to: identifier)
-        identifier.finish()
-
-        #expect(try database.clipCounts().isEmpty)
-    }
-
-    @Test func savesSomeoneWhoKeepsTalkingOnceTheirLongestClipIsCut() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-
-        feed(voice(1, seconds: 24), to: identifier)
-
-        let speakers = try database.voices()
-        #expect(speakers.count == 1)
-        let clips = try database.clips(of: try id(0, in: database))
-        try #require(clips.count == 1)
-        // Cut on the 10 ms frames speech is told in.
-        #expect(abs(clips[0].seconds - SpeakerIdentifier.longestSample) < 0.02)
-    }
-
-    @Test func recognizesSomeoneFromAnEarlierCall() throws {
-        let url = temporaryDatabase()
-        let earlier = try makeIdentifier(database: try SpeakerDatabase(url: url))
-        feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: earlier)
-        earlier.finish()
-        let database = try SpeakerDatabase(url: url)
-        let (first, second) = (try id(0, in: database), try id(1, in: database))
-
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(2, seconds: 12) + voice(1, seconds: 12), to: identifier)
-
-        #expect(identifier.speaker(from: 2, to: 10) == "Them \(second)")
-        #expect(identifier.speaker(from: 14, to: 22) == "Them \(first)")
-        #expect(try database.voices().count == 2)
-    }
-
-    @Test func goesByANameGivenWhileTheCallGoesOn() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 24), to: identifier)
-
-        _ = try database.rename(try id(0, in: database), to: "Ada")
-
-        #expect(identifier.speaker(from: 2, to: 5) == "Ada")
-    }
-
-    @Test func theVoiceHeardMostOnYourMicrophoneIsYou() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(isYours: true, database: database)
-
-        feed(voice(1, seconds: 40) + voice(2, seconds: 12), to: identifier)
-        identifier.finish()
-
-        let speakers = try database.voices()
-        try #require(speakers.count == 2)
-        #expect(identifier.speaker(from: 2, to: 10) == "You")
-        #expect(identifier.speaker(from: 43, to: 50) == "Them \(speakers[1].person)")
-        #expect(speakers.map(\.isYou) == [true, false])
-    }
-
-    @Test func takesAVoiceOnYourMicrophoneNotSavedYetForYours() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(isYours: true, database: database)
-
-        // You, then a voice that sounds different for a few seconds: too few for a clip, so not saved.
-        feed(voice(1, seconds: 30) + voice(2, seconds: 6), to: identifier)
-
-        #expect(identifier.speaker(from: 31, to: 35) == "You")
-        #expect(try database.voices().count == 1)
-    }
-
-    @Test func savesYouOnlyOnceItIsClearWhoYouAre() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(isYours: true, database: database)
-
-        feed(voice(2, seconds: 12) + voice(1, seconds: 20), to: identifier)
-
-        #expect(identifier.speaker(from: 15, to: 30) == "You")
-        #expect(identifier.speaker(from: 2, to: 10) == "Them \(try id(0, in: database))")
-        #expect(try database.voices().allSatisfy { !$0.isYou })
-    }
-
-    @Test func knowsYouOnYourMicrophoneEvenWhenSomeoneElseTalksMore() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        feed(voice(1, seconds: 40), to: try makeIdentifier(isYours: true, database: database))
-
-        let identifier = try makeIdentifier(isYours: true, database: database)
-        feed(voice(2, seconds: 40) + voice(1, seconds: 12), to: identifier)
-
-        #expect(identifier.speaker(from: 2, to: 30) == "Them \(try id(1, in: database))")
-        #expect(identifier.speaker(from: 43, to: 50) == "You")
-    }
-
-    @Test func takesNothingYourMicrophoneHearsWhileTheSystemAudioHasSpeechForAVoice() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let systemSpeech = SpeechTimes()
-        let theirs = try makeIdentifier(database: database, speechTimes: systemSpeech)
-        let yours = try makeIdentifier(isYours: true, database: database, otherSpeechTimes: systemSpeech)
-        let theirAudio = voice(2, seconds: 20) + voice(0, seconds: 20)
-        let yourAudio = voice(3, seconds: 20) + voice(1, seconds: 20)
-
-        let chunk = Int(Self.rate * chunkSeconds)
-        for start in stride(from: 0, to: theirAudio.count, by: chunk) {
-            theirs.append(Array(theirAudio[start..<min(start + chunk, theirAudio.count)]))
-            yours.append(Array(yourAudio[start..<min(start + chunk, yourAudio.count)]))
-        }
-        say(seconds: 40, to: theirs)
-        say(seconds: 40, to: yours)
-        theirs.finish()
-        yours.finish()
-
-        #expect(yours.speaker(from: 25, to: 35) == "You")
-        #expect(try database.voices().count == 2)
-    }
-
-    @Test func knowsYourVoiceWhereverElseItIsHeard() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        feed(voice(1, seconds: 40), to: try makeIdentifier(isYours: true, database: database))
-
-        let mixed = try makeIdentifier(name: "Speaker", database: database)
-        feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: mixed)
-        mixed.finish()
-
-        #expect(mixed.speaker(from: 2, to: 10) == "You")
-        #expect(mixed.speaker(from: 15, to: 23) == "Speaker \(try id(1, in: database))")
-    }
-
-    @Test func keepsClipsOfEveryoneToTellWhoTheyAre() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-
-        feed(
-            voice(1, seconds: 12) + voice(0, seconds: 3) + voice(2, seconds: 30) + voice(1, seconds: 6),
-            to: identifier
+        #expect(parts.map(\.voice) == ["Them 1", "Them 2"])
+        // The first keeps the line's start, which a line held back to say who spoke it goes by.
+        #expect(parts.map(\.start) == [8, 12])
+        #expect(parts.map(\.lineStart) == [8, 8])
+        #expect(
+            parts.map(\.text) == [
+                "w8.0 w8.5 w9.0 w9.5 w10.0 w10.5 w11.0 w11.5", "w12.0 w12.5 w13.0 w13.5 w14.0 w14.5 w15.0 w15.5",
+            ]
         )
-        identifier.finish()
-
-        let speakers = try database.voices()
-        #expect(speakers.count == 2)
-        for speaker in speakers {
-            let samples = try database.clips(of: speaker.person)
-            #expect(!samples.isEmpty)
-            for sample in samples {
-                #expect((SpeakerIdentifier.shortestSample...SpeakerIdentifier.longestSample).contains(sample.seconds))
-                // An MPEG-4 file, which starts with its type.
-                #expect(sample.audio.dropFirst(4).prefix(4) == Data("ftyp".utf8))
-            }
-        }
-        let longest = try #require(try database.clips(of: speakers[1].person).first)
-        #expect(abs(longest.seconds - SpeakerIdentifier.longestSample) < 0.02)
     }
 
-    @Test func savesOnlyThoseWhoSaidWords() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 24), to: identifier, saying: false)
-        #expect(try database.voices().isEmpty)
-
-        #expect(identifier.speaker(from: 5, to: 8) == "Them \(try id(0, in: database))")
-        #expect(try database.voices().count == 1)
-    }
-
-    @Test func savesNobodyWhoseWordsAreFewForHowLongTheyAreHeard() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 30), to: identifier, saying: false)
-
-        _ = identifier.speaker(from: 29, to: 30)
-        #expect(try database.voices().isEmpty)
-
-        _ = identifier.speaker(from: 2, to: 9)
-        #expect(try database.voices().count == 1)
-    }
-
-    @Test func forgetsSomeoneWhoInTheEndSaidTooFewWordsForHowLongTheyWereHeard() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 30) + voice(2, seconds: 30), to: identifier, saying: false)
-        _ = identifier.speaker(from: 2, to: 6)
-        _ = identifier.speaker(from: 32, to: 58)
-        let (music, voice) = (try id(0, in: database), try id(1, in: database))
-
-        #expect(identifier.forgetThoseWhoSaidTooLittle() == [music])
-        #expect(try database.voices().map(\.person) == [voice])
-    }
-
-    @Test func keepsClipsOfTheMiddleOfEachPrintOfTheirs() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-
+    @Test func takesATurnTooShortToBeSureOfForTheSpeakerAroundIt() throws {
+        let identifier = try makeIdentifier()
         feed(voice(1, seconds: 12) + voice(2, seconds: 12) + voice(1, seconds: 12), to: identifier)
         identifier.finish()
 
-        // Only the prints wholly theirs, from 12 to 24 s, less the windows' edges: none of the window that is half
-        // someone else's.
-        let clips = try database.clips(of: try id(1, in: database))
-        try #require(clips.count == 1)
-        #expect(abs(clips[0].seconds - 10.5) < 0.02)
+        // Its last word, in the second person's time, is too little of them to split the line for.
+        #expect(label(from: 9, to: 12.5, by: identifier) == ["Them 1"])
     }
 
-    @Test func savesNobodyHeardOnlyForAMoment() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-
-        feed(voice(1, seconds: 1.5) + voice(0, seconds: 10), to: identifier)
-        identifier.finish()
-
-        #expect(try database.voices().isEmpty)
-        #expect(identifier.speaker(from: 0, to: 1.5) == "Them")
-    }
-
-    @Test func keepsClipsOfSomeoneWithANameToo() throws {
-        let database = try SpeakerDatabase(url: temporaryDatabase())
-        let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 24), to: identifier)
-        let ada = try id(0, in: database)
-        _ = try database.rename(ada, to: "Ada")
-        let clipsBefore = try database.clipCounts()[ada, default: 0]
-
-        feed(voice(1, seconds: 20), to: identifier, at: 24)
-        identifier.finish()
-
-        #expect(try database.clipCounts()[ada, default: 0] > clipsBefore)
-    }
-
-    @Test func settlesWhoSpokeALineOnceTheAudioHasGoneFarEnoughPastIt() async throws {
+    @Test func goesByWhoeverTalksAroundALineNobodyIsHeardSaying() throws {
         let identifier = try makeIdentifier()
-        feed(voice(1, seconds: 3), to: identifier)
-        let settled = Task {
-            await identifier.settle(through: 2)
-            return identifier.speaker(from: 0, to: 2)
+        feed(voice(1, seconds: 12) + voice(0, seconds: 1) + voice(2, seconds: 12), to: identifier)
+        identifier.finish()
+
+        #expect(label(from: 12.1, to: 12.4, by: identifier, words: 1) == ["Them 1"])
+    }
+
+    @Test func namesNobodyWhenNobodyIsHeard() throws {
+        let identifier = try makeIdentifier()
+        feed(voice(0, seconds: 15), to: identifier)
+        identifier.finish()
+
+        #expect(label(from: 2, to: 6, by: identifier) == [nil])
+    }
+
+    @Test func tellsWhoSpokeInACallShorterThanAWindow() throws {
+        let identifier = try makeIdentifier()
+
+        feed(voice(1, seconds: 4), to: identifier)
+        identifier.finish()
+
+        #expect(label(from: 0.5, to: 3.5, by: identifier) == ["Them 1"])
+    }
+
+    @Test func resamplesAudioToTheRateItHearsAt() throws {
+        let identifier = try makeIdentifier(sampleRate: 48_000)
+
+        feed(voice(1, seconds: 12, rate: 48_000) + voice(2, seconds: 12, rate: 48_000), to: identifier, rate: 48_000)
+        identifier.finish()
+
+        #expect(label(from: 2, to: 10, by: identifier) == ["Them 1"])
+        #expect(label(from: 14, to: 22, by: identifier) == ["Them 2"])
+    }
+
+    @Test func asksTheModelsNothingOfSilence() throws {
+        let segmenter = StandInSegmenter()
+        let identifier = try makeIdentifier(segmenter: segmenter)
+
+        feed(voice(0, seconds: 30), to: identifier)
+        #expect(segmenter.calls.withLock { $0 } == 0)
+
+        feed(voice(1, seconds: 10), to: identifier)
+        #expect(segmenter.calls.withLock { $0 } > 0)
+    }
+
+    @Test func settlesWhoSpokeALineOnceTheWindowsGoFarEnoughPastIt() async throws {
+        let identifier = try makeIdentifier()
+        feed(voice(1, seconds: 12), to: identifier)
+        let settled = Mutex(false)
+
+        await identifier.settle(through: 4)
+        let waiting = Task {
+            await identifier.settle(through: 9)
+            settled.withLock { $0 = true }
         }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!settled.withLock { $0 })
 
-        feed(voice(1, seconds: SpeakerIdentifier.settleSeconds), to: identifier)
-
-        #expect(await settled.value == "Them 1")
-    }
-
-    @Test func settlesALineAtTheStartOfSomeoneNewOnceTheyAreRecognized() async throws {
-        let identifier = try makeIdentifier()
-
-        // Just as long as it takes to settle a line from 12.8 s to 13 s, their first words.
-        let audio = voice(1, seconds: 12) + voice(2, seconds: 1 + SpeakerIdentifier.settleSeconds)
-        feed(audio, to: identifier, saying: false)
-
-        await identifier.settle(through: 13)
-        #expect(identifier.speaker(from: 12.8, to: 13) == "Them 2")
+        feed(voice(1, seconds: 4), to: identifier)
+        await waiting.value
+        #expect(settled.withLock { $0 })
     }
 
     @Test func settlesEverythingOnceTheAudioEnds() async throws {
@@ -372,38 +121,182 @@ struct SpeakerIdentifierTests {
         await identifier.settle(through: 1_000)
     }
 
-    @Test func warnsOnceAndGoesOnWhenVoicesCannotBePrinted() throws {
-        let warnings = Output()
-        let identifier = try SpeakerIdentifier(
-            name: "Them",
-            sampleRate: Self.rate,
-            printer: StandInPrinter(fails: true)
-        ) { warnings.append($0 + "\n") }
+    @Test func remembersSomeoneNewOnceTheCallIsOverWithAClipOfThem() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+        feed(voice(1, seconds: 24), to: identifier)
+        say(from: 0, to: 24, to: identifier)
+        identifier.finish()
+        #expect(try database.people().isEmpty)
+        #expect(label(from: 2, to: 10, by: identifier) == ["Them A"])
+
+        identifier.conclude()
+
+        let person = try #require(try database.people().first)
+        #expect(try database.people().count == 1)
+        #expect(try !database.clips(of: person.id).isEmpty)
+        #expect(label(from: 2, to: 10, by: identifier) == ["Them \(person.id)"])
+    }
+
+    @Test func remembersNobodyWithoutAClipOfThemAlone() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+        // Taking turns every 3 s: never 5 s of one of them alone.
+        feed((0..<10).flatMap { voice($0 % 2 + 1, seconds: 3) }, to: identifier)
+        say(from: 0, to: 30, to: identifier)
+        identifier.finish()
+
+        identifier.conclude()
+
+        #expect(try database.people().isEmpty)
+        #expect(label(from: 0.5, to: 2.5, by: identifier) == ["Them A"])
+        #expect(label(from: 3.5, to: 5.5, by: identifier) == ["Them B"])
+    }
+
+    @Test func remembersOnlyThoseWhoSaidWords() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+        feed(voice(1, seconds: 24), to: identifier)
+        identifier.finish()
+
+        identifier.conclude()
+
+        #expect(try database.people().isEmpty)
+    }
+
+    @Test func recognizesSomeoneFromAnEarlierCallAsTheCallGoesOn() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let known = try database.addPerson(print: StandInPrinter.print(of: 2), prints: 10)
+        let identifier = try makeIdentifier(database: database)
+
+        feed(voice(2, seconds: 12), to: identifier)
+
+        #expect(label(from: 2, to: 6, by: identifier) == ["Them \(known.person)"])
+        identifier.finish()
+        identifier.conclude()
+        #expect(label(from: 2, to: 6, by: identifier) == ["Them \(known.person)"])
+        #expect(try database.voice(known.id)?.prints ?? 0 > 10)
+    }
+
+    @Test func goesByANameGivenWhileTheCallGoesOn() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let known = try database.addPerson(print: StandInPrinter.print(of: 2), prints: 10)
+        let identifier = try makeIdentifier(database: database)
+        feed(voice(2, seconds: 12), to: identifier)
+
+        _ = try database.rename(known.person, to: "Ada")
+
+        #expect(label(from: 2, to: 6, by: identifier) == ["Ada"])
+    }
+
+    @Test func theVoiceHeardMostOnYourMicrophoneIsYou() throws {
+        let identifier = try makeIdentifier(isYours: true)
+
+        feed(voice(1, seconds: 24) + voice(2, seconds: 12), to: identifier)
+        identifier.finish()
+
+        #expect(label(from: 2, to: 10, by: identifier) == ["You"])
+        #expect(label(from: 26, to: 34, by: identifier) == ["Them 2"])
+    }
+
+    @Test func takesAVoiceOnYourMicrophoneNotRecognizedForYours() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        _ = try database.markAsYou(try database.addPerson(print: StandInPrinter.print(of: 3), prints: 10).id)
+        let identifier = try makeIdentifier(isYours: true, database: database)
 
         feed(voice(1, seconds: 12), to: identifier)
 
-        #expect(warnings.text == "cannot tell voices apart: the speaker model failed\n")
-        #expect(identifier.speaker(from: 2, to: 10) == nil)
+        #expect(label(from: 2, to: 6, by: identifier) == ["You"])
+    }
+
+    @Test func remembersYouOnceItIsClearWhoYouAre() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(isYours: true, database: database)
+        let seconds = Double(SpeakerIdentifier.settledYou + 2) * SpeakerIdentifier.secondsPerPrint
+        feed(voice(1, seconds: seconds), to: identifier)
+        say(from: 0, to: seconds, to: identifier)
+        identifier.finish()
+
+        identifier.conclude()
+
+        #expect(try database.voices().map(\.isYou) == [true])
+        #expect(label(from: 2, to: 6, by: identifier) == ["You"])
+    }
+
+    @Test func remembersNobodyAsYouWhileItIsNotClearWhoYouAre() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(isYours: true, database: database)
+        feed(voice(1, seconds: 24), to: identifier)
+        say(from: 0, to: 24, to: identifier)
+        identifier.finish()
+
+        identifier.conclude()
+
+        #expect(try database.voices().map(\.isYou) == [false])
+        #expect(label(from: 2, to: 6, by: identifier) == ["You"])
+    }
+
+    @Test func hearsNobodyOnYourMicrophoneWhileTheSystemAudioHasSpeech() throws {
+        let systemSpeech = SpeechTimes()
+        let theirs = try makeIdentifier(speechTimes: systemSpeech)
+        let yours = try makeIdentifier(isYours: true, otherSpeechTimes: systemSpeech)
+        let audio = voice(1, seconds: 15)
+
+        // In the order transcribe feeds them: the system audio first.
+        let chunk = Int(Self.rate * chunkSeconds)
+        for start in stride(from: 0, to: audio.count, by: chunk) {
+            let piece = Array(audio[start..<min(start + chunk, audio.count)])
+            theirs.append(piece)
+            yours.append(piece)
+        }
+        theirs.finish()
+        yours.finish()
+
+        #expect(label(from: 2, to: 8, by: theirs) == ["Them 1"])
+        #expect(label(from: 2, to: 8, by: yours) == [nil])
+    }
+
+    @Test func warnsOnceAndGoesOnWhenVoicesCannotBePrinted() async throws {
+        let warnings = Mutex<[String]>([])
+        let identifier = try SpeakerIdentifier(
+            name: "Them",
+            sampleRate: Self.rate,
+            segmenter: StandInSegmenter(),
+            printer: StandInPrinter(fails: true),
+            warn: { message in warnings.withLock { $0.append(message) } }
+        )
+
+        feed(voice(1, seconds: 30), to: identifier)
+        identifier.finish()
+
+        await identifier.settle(through: 10)
+        #expect(label(from: 2, to: 6, by: identifier) == [nil])
+        #expect(warnings.withLock { $0 }.count == 1)
     }
 
     @Test func cannotTellVoicesApartInAudioThatIsNotAudio() {
-        for sampleRate in [0, 100, .nan, .infinity] {
-            #expect(throws: MessageError.self) { try makeIdentifier(sampleRate: sampleRate) }
-        }
+        #expect(throws: MessageError.self) { try makeIdentifier(sampleRate: .nan) }
+        #expect(throws: MessageError.self) { try makeIdentifier(sampleRate: 1_000) }
+    }
+
+    @Test(arguments: [(1, "A"), (26, "Z"), (27, "AA"), (28, "AB"), (702, "ZZ"), (703, "AAA")])
+    func lettersSomeoneNotRemembered(number: Int, letters: String) {
+        #expect(SpeakerIdentifier.letter(number) == letters)
     }
 
     private func makeIdentifier(
-        name: String = "Them",
         isYours: Bool = false,
         sampleRate: Double = rate,
+        segmenter: any SpeakerSegmenting = StandInSegmenter(),
         database: SpeakerDatabase? = nil,
         speechTimes: SpeechTimes? = nil,
         otherSpeechTimes: SpeechTimes? = nil
     ) throws -> SpeakerIdentifier {
         try SpeakerIdentifier(
-            name: name,
+            name: "Them",
             isYours: isYours,
             sampleRate: sampleRate,
+            segmenter: segmenter,
             printer: StandInPrinter(),
             database: database,
             speechTimes: speechTimes,
@@ -413,38 +306,45 @@ struct SpeakerIdentifierTests {
 
     /// Audio of made-up voice `number` at a steady level of its own; 0 is silence.
     private func voice(_ number: Int, seconds: Double, rate: Double = rate) -> [Float] {
-        [Float](repeating: StandInPrinter.level(number), count: Int(seconds * rate))
+        [Float](repeating: StandInSegmenter.level(number), count: Int(seconds * rate))
     }
 
-    /// In the chunks transcribe reads, from `offset` seconds into the audio; then, unless not `saying` anything, a
-    /// line of the transcript every `hopSeconds` of it.
-    private func feed(
-        _ samples: [Float],
-        to identifier: SpeakerIdentifier,
-        rate: Double = rate,
-        at offset: Double = 0,
-        saying: Bool = true
-    ) {
+    /// In the chunks transcribe reads.
+    private func feed(_ samples: [Float], to identifier: SpeakerIdentifier, rate: Double = rate) {
         let chunk = Int(rate * chunkSeconds)
         for start in stride(from: 0, to: samples.count, by: chunk) {
             identifier.append(Array(samples[start..<min(start + chunk, samples.count)]))
         }
-        if saying { say(seconds: Double(samples.count) / rate, to: identifier, at: offset) }
     }
 
-    /// Asks who said each line of words, as the transcriber does: a voice that says none is music or noise.
-    private func say(seconds: Double, to identifier: SpeakerIdentifier, at offset: Double = 0) {
-        let hop = SpeakerIdentifier.hopSeconds
-        for start in stride(from: 0, to: seconds, by: hop) {
-            _ = identifier.speaker(from: offset + start, to: offset + min(start + hop, seconds))
+    /// Says lines from `start` to `end`, as the transcriber does, a few seconds each: only someone who says words is
+    /// remembered.
+    private func say(from start: Double, to end: Double, to identifier: SpeakerIdentifier) {
+        for lineStart in stride(from: start, to: end, by: 4) {
+            _ = identifier.parts(of: line(from: lineStart, to: min(lineStart + 4, end)))
         }
     }
 
-    /// The number of the speaker saved `index`th.
-    private func id(_ index: Int, in database: SpeakerDatabase) throws -> Int {
-        let speakers = try database.voices()
-        try #require(speakers.count > index, "\(speakers.map(\.id))")
-        return speakers[index].person
+    /// Who said each part of a line from `start` to `end`.
+    private func label(
+        from start: Double,
+        to end: Double,
+        by identifier: SpeakerIdentifier,
+        words: Int? = nil
+    ) -> [String?] {
+        identifier.parts(of: line(from: start, to: end, words: words)).map(\.voice)
+    }
+
+    /// A line of their words, one every half second, or `words` of them, each saying when it starts.
+    private func line(from start: Double, to end: Double, words: Int? = nil) -> TranscriptUpdate {
+        let step = words.map { (end - start) / Double($0) } ?? 0.5
+        let timed = stride(from: start, to: end - 0.01, by: step).map { time in
+            TimedWord(text: "w\(Double((time * 10).rounded()) / 10) ", start: time, end: min(time + step * 0.8, end))
+        }
+        var update = TranscriptUpdate(speaker: .them, start: start, text: timed.map(\.text).joined(), isFinal: true)
+        update.end = end
+        update.words = timed
+        return update
     }
 
     private func temporaryDatabase() -> URL {
@@ -452,110 +352,55 @@ struct SpeakerIdentifierTests {
     }
 }
 
-/// Stands in for the speaker model: each made-up voice's level of audio gets a direction of its own, and a stretch
-/// with several of them the mix of theirs, as a real print of two people would be.
-private struct StandInPrinter: VoicePrinting {
-    var fails = false
+/// Stands in for the segmentation model: each frame's people are the made-up voices in what it hears, by their level,
+/// numbered in the order the window first has them.
+final class StandInSegmenter: SpeakerSegmenting, Sendable {
+    let calls = Mutex(0)
 
     static func level(_ voice: Int) -> Float { Float(voice) / 10 }
 
-    func voicePrint(of samples: ArraySlice<Float>, minimumSpeech: Double) throws -> [Float]? {
-        if fails { throw MessageError("the speaker model failed") }
-        var print = [Float](repeating: 0, count: VoicePrinter.printLength)
-        // Resampled audio wobbles a little around its level, and a little more at the edges of each voice.
-        for sample in samples where abs(sample) > 0.05 {
-            print[Int((abs(sample) * 10).rounded())] += 1
-        }
-        let speech = print.reduce(0, +)
-        guard speech > 0, Double(speech) >= Double(samples.count) * minimumSpeech - 1 else { return nil }
-        return print.map { $0 / speech }
-    }
+    /// The made-up voice a sample is of; 0 for none. Resampled audio wobbles a little around its level.
+    static func voice(of sample: Float) -> Int { abs(sample) > 0.05 ? Int((abs(sample) * 10).rounded()) : 0 }
 
-    /// Any frame with sound in it is speech.
-    func speechFrames(of samples: ArraySlice<Float>) -> [Bool] {
+    func segment(_ window: ArraySlice<Float>) throws -> [Talkers] {
+        calls.withLock { $0 += 1 }
+        var people: [Int] = []
+        return (0..<Segmenter.frameCount).map { frame in
+            let start = window.startIndex + frame * Segmenter.frameStep
+            let heard = stride(from: start, to: min(start + 2 * Segmenter.frameCenter, window.endIndex), by: 10)
+                .map { Self.voice(of: window[$0]) }
+            var talkers: Talkers = []
+            for voice in Set(heard) where voice != 0 {
+                if !people.contains(voice) { people.append(voice) }
+                if let person = people.firstIndex(of: voice), person < Segmenter.people {
+                    talkers.insert(.person(person))
+                }
+            }
+            return talkers
+        }
+    }
+}
+
+/// Stands in for the voice print model: each made-up voice's frames print along a direction of their own.
+struct StandInPrinter: VoicePrinting {
+    var fails = false
+
+    static func print(of voice: Int) -> [Float] { direction(voice) }
+
+    func frames(of samples: ArraySlice<Float>) -> [[Float]] {
         stride(
             from: samples.startIndex,
             through: samples.endIndex - VoicePrinter.frameLength,
             by: VoicePrinter.hopLength
         )
-        .map { start in samples[start..<start + VoicePrinter.frameLength].contains { abs($0) > 0.05 } }
-    }
-}
-
-struct VoiceClustersTests {
-    @Test func keepsOnePersonOneSpeakerThroughACall() {
-        var voices = VoiceClusters()
-
-        for print in prints(around: 0, count: 50) { voices.add(print) }
-
-        #expect(voices.speakers.count == 1)
-        #expect(Set(voices.labels) == [1])
+        .map { [samples[$0 + VoicePrinter.frameLength / 2]] }
     }
 
-    @Test func recognizesSomeoneNewOnceTheyHaveSpokenForAFewPrints() {
-        var voices = VoiceClusters()
-        for print in prints(around: 0, count: 10) { voices.add(print) }
-        let enough = VoiceClusters.newSpeakerPrints
-        let newcomer = prints(around: 5, count: enough)
-
-        for print in newcomer.dropLast() { voices.add(print) }
-        #expect(voices.labels.suffix(enough - 1) == Array(repeating: 1, count: enough - 1))
-
-        voices.add(newcomer[enough - 1])
-        #expect(voices.labels.suffix(enough) == Array(repeating: 2, count: enough))
-
-        voices.add(prints(around: 0, count: 1)[0])
-        #expect(voices.labels.last == 1)
-    }
-
-    @Test func makesTheFirstSpeakerWhoeverTheirOddFirstPrintTurnsOutToBe() {
-        var voices = VoiceClusters()
-        var odd = [Float](repeating: 0, count: VoicePrinter.printLength)
-        (odd[0], odd[1]) = (0.56, 0.83)
-
-        voices.add(odd)
-        for print in prints(around: 0, count: 10) { voices.add(print) }
-
-        #expect(voices.speakers.map(\.number) == [1])
-        #expect(voices.speakers.first.map { $0.count >= 10 } == true)
-        #expect(voices.labels == [Int](repeating: 1, count: 11))
-    }
-
-    @Test func aFewOddPrintsDoNotMakeSomeoneNew() {
-        var voices = VoiceClusters()
-
-        for _ in 0..<3 {
-            for print in prints(around: 0, count: 10) + prints(around: 5, count: 1) { voices.add(print) }
-        }
-
-        #expect(voices.speakers.count == 1)
-    }
-
-    /// Prints of one made-up voice, each a little different, the same every run: around a direction of its own, one
-    /// for each `value`.
-    private func prints(around value: Float, count: Int) -> [[Float]] {
-        var random = SeededRandom(seed: UInt64(value.bitPattern) + UInt64(count))
-        return (0..<count).map { _ in
-            (0..<VoicePrinter.printLength).map { element in
-                (element == Int(value) ? 1 : 0) + Float.random(in: -0.02...0.02, using: &random)
-            }
-        }
-    }
-}
-
-/// A random number generator that gives the same numbers for the same seed (SplitMix64).
-private struct SeededRandom: RandomNumberGenerator {
-    var state: UInt64
-
-    init(seed: UInt64) {
-        state = seed
-    }
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var value = state
-        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
-        return value ^ (value >> 31)
+    func voicePrint(of frames: [[Float]]) throws -> [Float] {
+        if fails { throw MessageError("the speaker model failed") }
+        var counts = [Int: Int]()
+        for frame in frames { counts[StandInSegmenter.voice(of: frame[0]), default: 0] += 1 }
+        let most = counts.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key ?? 0
+        return Self.print(of: most)
     }
 }
