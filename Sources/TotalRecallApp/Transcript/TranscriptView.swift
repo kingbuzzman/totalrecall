@@ -132,7 +132,7 @@ private struct TranscriptRow: View {
                 .frame(width: TranscriptTable.Column.timeWidth, alignment: .leading)
             Text(line.speaker)
                 .fontWeight(.semibold)
-                .foregroundStyle(Color(nsColor: line.side.color))
+                .foregroundStyle(Color(nsColor: SpeakerPalette.color(line.side, 0)))
                 .lineLimit(1)
                 .frame(width: TranscriptTable.Column.speakerWidth, alignment: .leading)
             Text(line.text)
@@ -146,6 +146,8 @@ private struct TranscriptRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 12)
-        .background(Color(nsColor: line.side.color).opacity(line.side == .unknown ? 0 : isLive ? 0.05 : 0.12))
+        .background(
+            Color(nsColor: SpeakerPalette.color(line.side, 0)).opacity(line.side == .unknown ? 0 : isLive ? 0.05 : 0.12)
+        )
     }
 }

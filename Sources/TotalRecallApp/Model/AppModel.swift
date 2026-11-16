@@ -257,8 +257,8 @@ final class AppModel {
             log.error("could not save: \(reason, privacy: .public)")
             notifier.post(title: "Could not save the recording", body: reason)
             becameIdleIfDone()
-        case .line(let line):
-            if isLatest { transcript.append(TranscriptLine(parsing: line)) }
+        case .line(let line, let isYours):
+            if isLatest { transcript.append(TranscriptLine(parsing: line, heardOn: isYours ? .you : .them)) }
         case .liveText(let text):
             if isLatest { liveText = text }
         case .message(let message):

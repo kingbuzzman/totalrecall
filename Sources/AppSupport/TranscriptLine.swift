@@ -2,8 +2,8 @@
 /// and what they said, to show as a row of a table.
 package struct TranscriptLine: Equatable, Sendable {
     /// Who spoke, from your side or the others', for telling them apart at a glance.
-    package enum Side: Sendable {
-        /// Your microphone: "You".
+    package enum Side: Hashable, Sendable {
+        /// Your microphone: "You", or your name, or someone sharing it.
         case you
         /// Everyone else: "Them", "Them 2", "Speaker 1", or a name given with `transcribe speakers name`.
         case them
@@ -16,29 +16,27 @@ package struct TranscriptLine: Equatable, Sendable {
     /// Who said it, as the transcript labels them; "" when it does not.
     package let speaker: String
     package let text: String
+    /// Which side said it: from the channel it was heard on, when known, as it is live, so that you are on your side
+    /// by whatever name; otherwise from its label, "You" being yours.
+    package let side: Side
 
-    package init(time: String, speaker: String, text: String) {
+    /// `heardOn` is the side whose channel it was heard on, when known.
+    package init(time: String, speaker: String, text: String, heardOn: Side? = nil) {
         self.time = time
         self.speaker = speaker
         self.text = text
+        side = speaker.isEmpty ? .unknown : heardOn ?? (speaker == "You" ? .you : .them)
     }
 
-    package var side: Side {
-        switch speaker {
-        case "": .unknown
-        case "You": .you
-        default: .them
-        }
-    }
-
-    /// A line of the transcript; one that does not start with a time is kept whole as its text.
-    package init(parsing line: String) {
+    /// A line of the transcript, heard on `heardOn`'s channel, when known; one that does not start with a time is kept
+    /// whole as its text.
+    package init(parsing line: String, heardOn: Side? = nil) {
         guard let match = line.wholeMatch(of: /\[(\d{2}:\d{2}:\d{2})\] (.*)/) else {
             self.init(time: "", speaker: "", text: line)
             return
         }
         let (speaker, text) = Self.speakerAndText(String(match.2))
-        self.init(time: String(match.1), speaker: speaker, text: text)
+        self.init(time: String(match.1), speaker: speaker, text: text, heardOn: heardOn)
     }
 
     /// The words still being recognized, as `transcribe` shows them live: "You: Good mor  |  Them: Hi there", a line

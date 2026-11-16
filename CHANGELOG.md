@@ -38,6 +38,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - The transcript's first line no longer hides under the column headers.
 - The transcript window's recording time keeps counting while the menu is closed.
 - Recording starts as soon as the system audio and the microphone run, which start at once: under a second with the Mac's microphone, about 3 s with AirPods, down from 4–6 s. The noise suppressor learns the room as it records.
+- The transcript gives every speaker a color of their own, kept for the whole transcript: blues for your microphone, whatever your name, other colors for everyone else, chosen to be told apart with red-blue color blindness.
 - The menu bar icon shows a red ring while a recording starts, and the red dot only once it records.
 - The transcript keeps up while no window is open: macOS no longer naps the app while it records or transcribes, nor sleeps the Mac mid-meeting.
 - A People window, from the transcript or Settings › Transcript, names, plays, merges and splits the people Identify Speakers remembers.

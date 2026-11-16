@@ -26,7 +26,7 @@ final class RecordingEngine: Sendable {
         case saved(URL)
         case failedToSave(String)
         /// A line of the transcript, as it settled.
-        case line(String)
+        case line(String, isYours: Bool)
         /// The words still being recognized; "" once there are none.
         case liveText(String)
         /// News from the recorder or the transcriber, such as a microphone switch.
@@ -166,7 +166,7 @@ private final class Recording: @unchecked Sendable {
                     language: request.language,
                     identifyingSpeakersIn: request.identifiesSpeakers ? AppSettings.speakers : nil,
                     handlers: LiveTranscriptHandlers(
-                        onLine: { report(.line($0)) },
+                        onLine: { report(.line($0, isYours: $1)) },
                         onLiveText: { report(.liveText($0)) },
                         onMessage: { report(.message($0)) }
                     )

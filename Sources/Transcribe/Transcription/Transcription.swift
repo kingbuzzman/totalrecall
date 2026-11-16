@@ -206,15 +206,15 @@ package func prepareTranscription(language: String?) async throws {
     _ = try await readySpeechLocale(for: language?.nonEmpty ?? Options().language)
 }
 
-/// Who a live transcript goes to, as it is written: each line as it settles, the words still being recognized ("" once
-/// there are none), and warnings and news of the people it heard.
+/// Who a live transcript goes to, as it is written: each line as it settles, and whether it was heard on your microphone;
+/// the words still being recognized ("" once there are none); and warnings and news of the people it heard.
 package struct LiveTranscriptHandlers: Sendable {
-    package let onLine: @Sendable (String) -> Void
+    package let onLine: @Sendable (_ line: String, _ isYours: Bool) -> Void
     package let onLiveText: @Sendable (String) -> Void
     package let onMessage: @Sendable (String) -> Void
 
     package init(
-        onLine: @escaping @Sendable (String) -> Void,
+        onLine: @escaping @Sendable (_ line: String, _ isYours: Bool) -> Void,
         onLiveText: @escaping @Sendable (String) -> Void,
         onMessage: @escaping @Sendable (String) -> Void
     ) {
@@ -276,10 +276,8 @@ package func transcribeLive(
             TranscriptPrinter(
                 printsLines: false,
                 isLive: false,
-                save: { line in
-                    save?(line)
-                    handlers.onLine(line.trimmingCharacters(in: .newlines))
-                },
+                save: save,
+                showLine: handlers.onLine,
                 showLive: handlers.onLiveText
             )
         },

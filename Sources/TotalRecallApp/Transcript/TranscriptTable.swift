@@ -88,6 +88,9 @@ struct TranscriptTable: NSViewRepresentable {
         var scrollToLatestRequests = 0
         var onScroll: ((Bool) -> Void)?
         private var lines: [TranscriptLine] = []
+        /// Each line's speaker's color, among their side's, numbered as they first speak.
+        private var colorNumbers: [Int] = []
+        private var colors = SpeakerColors()
         /// Each row's height, for the text column's width it was measured at.
         private var heights: [CGFloat] = []
         private var measuredWidth: CGFloat = 0
@@ -120,10 +123,13 @@ struct TranscriptTable: NSViewRepresentable {
                 let added = lines.count..<newLines.count
                 lines = newLines
                 heights += added.map { height(of: newLines[$0]) }
+                colorNumbers += added.map { colors.number(for: newLines[$0]) }
                 table.insertRows(at: IndexSet(integersIn: added), withAnimation: [])
             } else {
                 lines = newLines
                 heights = lines.map(height(of:))
+                colors = SpeakerColors()
+                colorNumbers = lines.map { colors.number(for: $0) }
                 table.reloadData()
             }
             if follows { scrollView.scrollToBottom() }
@@ -158,6 +164,10 @@ struct TranscriptTable: NSViewRepresentable {
             return max(ceil(bounds.height), oneLine) + 2 * Self.verticalPadding
         }
 
+        private func color(ofRow row: Int) -> NSColor {
+            SpeakerPalette.color(lines[row].side, row < colorNumbers.count ? colorNumbers[row] : 0)
+        }
+
         func numberOfRows(in tableView: NSTableView) -> Int {
             lines.count
         }
@@ -178,7 +188,7 @@ struct TranscriptTable: NSViewRepresentable {
                 field.stringValue = line.time
             case Column.speaker:
                 field.stringValue = line.speaker
-                field.textColor = line.side.color
+                field.textColor = color(ofRow: row)
             default:
                 field.stringValue = line.text
             }
@@ -192,7 +202,7 @@ struct TranscriptTable: NSViewRepresentable {
                 ?? TintedRowView()
             rowView.tint =
                 row < lines.count && lines[row].side != .unknown
-                ? lines[row].side.color.withAlphaComponent(0.12) : nil
+                ? color(ofRow: row).withAlphaComponent(0.12) : nil
             return rowView
         }
 
@@ -277,16 +287,5 @@ final class FollowingScrollView: NSScrollView {
         let bottom = max(-insets.top, document.frame.height - contentView.bounds.height + insets.bottom)
         contentView.scroll(to: NSPoint(x: contentView.bounds.minX, y: bottom))
         reflectScrolledClipView(contentView)
-    }
-}
-
-extension TranscriptLine.Side {
-    /// You in blue, everyone else in orange: a pair that stays apart in light and dark mode, and for color blindness.
-    var color: NSColor {
-        switch self {
-        case .you: .systemBlue
-        case .them: .systemOrange
-        case .unknown: .secondaryLabelColor
-        }
     }
 }

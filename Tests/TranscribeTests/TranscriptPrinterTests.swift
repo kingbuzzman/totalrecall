@@ -42,6 +42,22 @@ struct TranscriptPrinterTests {
         #expect(output.text.isEmpty, "nothing goes to stdout")
     }
 
+    @Test func tellsAnAppEachLineAndWhetherYourMicrophoneHeardItWhateverItsLabel() {
+        let lines = Output()
+        let printer = TranscriptPrinter(
+            printsLines: false,
+            isLive: false,
+            write: output.append,
+            showLine: { lines.append("\($1 ? "mine" : "theirs") \($0)\n") }
+        )
+        var named = TranscriptUpdate(speaker: .you, start: 0, text: "Good morning.", isFinal: true)
+        named.voice = "Javier"
+        printer.update(named)
+        printer.update(TranscriptUpdate(speaker: .them, start: 2, text: "Hi.", isFinal: true))
+
+        #expect(lines.text == "mine [00:00:00] Javier: Good morning.\ntheirs [00:00:02] Them: Hi.\n")
+    }
+
     @Test func writesLinesInTheOrderTheySettleNotByTime() {
         let printer = makePrinter(saves: true)
         printer.update(TranscriptUpdate(speaker: .them, start: 5, text: "Fine, thanks.", isFinal: true))

@@ -95,7 +95,7 @@ struct MemorySoakTests {
             identifyingSpeakersIn: identifiesSpeakers
                 ? FileManager.default.temporaryDirectory.appending(path: "soak-\(UUID())/speakers.db") : nil,
             handlers: LiveTranscriptHandlers(
-                onLine: { _ in lines.withLock { $0 += 1 } },
+                onLine: { _, _ in lines.withLock { $0 += 1 } },
                 onLiveText: { _ in },
                 onMessage: { _ in }
             )

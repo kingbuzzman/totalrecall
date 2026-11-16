@@ -11,6 +11,7 @@ final class TranscriptPrinter: @unchecked Sendable {
     private let write: (String) -> Void
     private let save: ((String) -> Void)?
     private let showLive: ((String) -> Void)?
+    private let showLine: ((_ line: String, _ isYours: Bool) -> Void)?
     private let terminalWidth: () -> Int
     private let lock = NSLock()
     /// Each speaker's words still being recognized, and when they start, after their lines held back, by when those
@@ -19,9 +20,9 @@ final class TranscriptPrinter: @unchecked Sendable {
     private var heldLines: [String: [(start: Double, text: String)]] = [:]
 
     /// `printsLines` prints each line to stdout, and `isLive` also shows the text still being recognized there, drawn
-    /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file,
-    /// and `showLive`, for an app, the text still being recognized, as plain text, whenever it changes ("" once there is
-    /// none).
+    /// with terminal control codes whether or not stdout is a terminal. `save` gets each line as well, for a text file;
+    /// for an app, `showLine` gets it too, without its newline, and whether it was heard on your microphone, and
+    /// `showLive` the text still being recognized, as plain text, whenever it changes ("" once there is none).
     init(
         printsLines: Bool,
         isLive: Bool,
@@ -31,6 +32,7 @@ final class TranscriptPrinter: @unchecked Sendable {
             fflush(stdout)
         },
         save: ((String) -> Void)? = nil,
+        showLine: ((_ line: String, _ isYours: Bool) -> Void)? = nil,
         showLive: ((String) -> Void)? = nil
     ) {
         self.printsLines = printsLines
@@ -39,6 +41,7 @@ final class TranscriptPrinter: @unchecked Sendable {
         self.write = write
         self.save = save
         self.showLive = showLive
+        self.showLine = showLine
     }
 
     func update(_ update: TranscriptUpdate) {
@@ -58,6 +61,7 @@ final class TranscriptPrinter: @unchecked Sendable {
                 if hasWords {
                     let line = Self.line(update) + "\n"
                     save?(line)
+                    showLine?(Self.line(update), update.speaker == .you)
                     if printsLines {
                         clearLiveLine()
                         write(line)

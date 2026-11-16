@@ -21,6 +21,13 @@ struct TranscriptLineTests {
         #expect(TranscriptLine(parsing: line).side == side)
     }
 
+    @Test func goesByTheChannelItWasHeardOnWhenKnownWhateverTheName() {
+        #expect(TranscriptLine(parsing: "[00:00:03] Javier: Today we review the plan.", heardOn: .you).side == .you)
+        #expect(TranscriptLine(parsing: "[00:00:05] Them 20: In the room.", heardOn: .you).side == .you)
+        #expect(TranscriptLine(parsing: "[00:00:07] You: Over the speakers.", heardOn: .them).side == .them)
+        #expect(TranscriptLine(parsing: "[00:00:09] Hello everyone.", heardOn: .them).side == .unknown)
+    }
+
     @Test func keepsALineWithoutASpeakerWhole() {
         #expect(
             TranscriptLine(parsing: "[00:00:11] Hello everyone.")

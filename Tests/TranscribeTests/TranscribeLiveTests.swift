@@ -29,7 +29,7 @@ struct TranscribeLiveTests {
             language: nil,
             identifyingSpeakersIn: nil,
             handlers: LiveTranscriptHandlers(
-                onLine: { line in lines.withLock { $0.append(line) } },
+                onLine: { line, _ in lines.withLock { $0.append(line) } },
                 onLiveText: { live in liveTexts.withLock { $0.append(live) } },
                 onMessage: { _ in }
             )
