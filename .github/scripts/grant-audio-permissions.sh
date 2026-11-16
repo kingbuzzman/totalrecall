@@ -60,7 +60,23 @@ grant() {
     sqlite3 "$database" "INSERT OR REPLACE INTO access ($names) VALUES ($values);"
 }
 
-for database in "/Library/Application Support/com.apple.TCC/TCC.db" "$runner_home/Library/Application Support/com.apple.TCC/TCC.db"; do
+system_database="/Library/Application Support/com.apple.TCC/TCC.db"
+user_database="$runner_home/Library/Application Support/com.apple.TCC/TCC.db"
+
+# The microphone's grant is the user's, in their own database, which some runner images (macOS 27's) have not made
+# yet: without it, totalrecall asks, and waits for an answer nobody can give. Made here as a copy of the system's, its
+# layout and version, with none of its grants; the user's tccd, restarted below, then reads it.
+made_user_database=false
+if [ ! -f "$user_database" ] && [ -f "$system_database" ]; then
+    mkdir -p "$(dirname "$user_database")"
+    cp "$system_database" "$user_database"
+    sqlite3 "$user_database" "DELETE FROM access;"
+    chown -R "$runner_user" "$(dirname "$user_database")"
+    made_user_database=true
+    echo "made $user_database"
+fi
+
+for database in "$system_database" "$user_database"; do
     if [ ! -f "$database" ]; then
         echo "skipping missing $database"
         continue
@@ -72,3 +88,8 @@ for database in "/Library/Application Support/com.apple.TCC/TCC.db" "$runner_hom
     done
     echo "granted ${services[*]} to ${#clients[@]} clients in $database"
 done
+
+# A tccd that started before the user's database was made would not see it; launchd starts it again when asked.
+if [ "$made_user_database" = true ]; then
+    pkill -x -u "$runner_user" tccd || true
+fi
