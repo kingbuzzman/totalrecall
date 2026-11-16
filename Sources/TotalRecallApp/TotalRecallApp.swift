@@ -12,7 +12,12 @@ struct TotalRecallApp: App {
             MenuContent()
                 .environment(delegate.model)
         } label: {
-            Image(delegate.model.isRecording ? "MenuBarIconRecording" : "MenuBarIcon")
+            // The red dot only once the recording really has started: a ring while it starts.
+            switch delegate.model.state {
+            case .idle: Image("MenuBarIcon")
+            case .starting: Image("MenuBarIconStarting")
+            case .recording: Image("MenuBarIconRecording")
+            }
         }
 
         Window("Transcript", id: MenuContent.transcriptWindow) {
