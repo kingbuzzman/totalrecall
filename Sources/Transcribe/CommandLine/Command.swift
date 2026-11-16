@@ -5,7 +5,7 @@ let usage = """
     usage: transcribe [--language LANG] [--mix] [--identify-speakers] [--force] <audio-file> [<text-file>]
            transcribe [--language LANG] [--mix] [--identify-speakers] [--force] [--live] - [<text-file>]
            transcribe speakers [name <number> <name> | merge <number> <into-number> [--anyway] | forget <number>]
-           transcribe speakers [split <voice> | play <number> | save <number> <directory>]
+           transcribe speakers [forget-clip <clip> | play <number> | save <number> <directory>]
            transcribe --list-languages
            transcribe --version
 
@@ -25,11 +25,11 @@ let usage = """
       --force              overwrite <text-file> if it exists
 
     transcribe speakers lists the people --identify-speakers remembers, in ~/.transcribe/speakers.db (or the file
-    TRANSCRIBE_SPEAKERS names), with the voices of those heard more than one way, ! marking one that sounds like someone else. name gives one a name to go by instead of their number; merge makes the first number
-    part of the second, for one person taken for two, keeping each voice as it was, and refuses two who do not sound
-    alike unless --anyway; split takes a voice back out into a person of its own, for a merge that was wrong; forget
-    takes one out. The longest stretches of everyone's speech are kept, to tell who they are by: play plays them, save
-    writes them as .m4a files.
+    TRANSCRIBE_SPEAKERS names), and the clips of each that sound like someone else. name gives one a name to go by
+    instead of their number; merge makes the first number part of the second, for one person taken for two, and
+    refuses two who do not sound alike unless --anyway; forget takes one out. The longest stretches of everyone's
+    speech are kept, to tell who they are by: play plays them, save writes them as .m4a files, and forget-clip takes
+    one out, such as someone else's merged in by mistake.
     """
 
 struct Options: Equatable {
@@ -49,7 +49,7 @@ enum Command: Equatable {
     case listSpeakers
     case nameSpeaker(Int, name: String)
     case mergeSpeaker(Int, into: Int, anyway: Bool = false)
-    case splitVoice(Int)
+    case forgetClip(Int)
     case forgetSpeaker(Int)
     case playSpeaker(Int)
     case saveSpeakerSamples(Int, directory: String)
@@ -119,11 +119,11 @@ enum Command: Equatable {
         case "merge":
             command = .mergeSpeaker(try number(), into: try number(), anyway: arguments.first == "--anyway")
             if arguments.first == "--anyway" { arguments.removeFirst() }
-        case "split":
-            guard let argument = arguments.popFirst(), let voice = Int(argument) else {
-                throw MessageError("expected a voice's number, such as 7; transcribe speakers lists them")
+        case "forget-clip":
+            guard let argument = arguments.popFirst(), let clip = Int(argument) else {
+                throw MessageError("expected a clip's number, such as 7; transcribe speakers play shows them")
             }
-            command = .splitVoice(voice)
+            command = .forgetClip(clip)
         case "forget":
             command = .forgetSpeaker(try number())
         case "play":

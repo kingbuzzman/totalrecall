@@ -117,7 +117,7 @@ extension SpeakerIdentifier {
             voice = try database.addPerson(print: center, prints: prints)
         }
         guard let id = voice?.id else { return nil }
-        for clip in clips { try database.addClip(clip.audio, seconds: clip.seconds, to: id) }
+        for clip in clips { try database.addClip(clip.audio, seconds: clip.seconds, print: clip.print, to: id) }
         return try database.voice(id)
     }
 

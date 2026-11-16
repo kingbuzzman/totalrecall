@@ -97,13 +97,21 @@ package final class SpeakerDatabase: @unchecked Sendable {
             recorded_at REAL NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS clip_prints (
+            clip_id INTEGER NOT NULL REFERENCES clips (id) ON DELETE CASCADE,
+            model TEXT NOT NULL,
+            print BLOB NOT NULL,
+            PRIMARY KEY (clip_id, model)
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS voices_person_id ON voices (person_id)",
         "CREATE INDEX IF NOT EXISTS clips_voice_id ON clips (voice_id)",
     ]
 
     /// The speaker model whose prints this database reads and writes.
     let model: String
-    private let sqlite: SQLiteDatabase
+    let sqlite: SQLiteDatabase
 
     package init(url: URL = defaultURL, model: String = SpeakerModel.name) throws {
         self.model = model
@@ -139,10 +147,10 @@ package final class SpeakerDatabase: @unchecked Sendable {
         try changes("DELETE FROM people WHERE id = ?", [.integer(person)])
     }
 
-    /// Makes `person` part of `target`, for one person taken for two: their voices are filed under `target`, which
-    /// keeps its name unless it has none, is you if either was, and was first heard when the earlier of the two was.
-    /// Each voice stays as it was, to be split back out if the merge was wrong. False if either is missing, or they
-    /// are the same.
+    /// Makes `person` part of `target`, for one person taken for two, and forgets `person`: their clips go to `target`,
+    /// and their voice into `target`'s, each weighed by how long it was heard. `target` keeps its name unless it has
+    /// none, is you if either was, and was first heard when the earlier of the two was. A merge that was wrong is undone
+    /// by forgetting the clips that are not `target`'s (`forgetClip`). False if either is missing, or they are the same.
     @discardableResult
     package func merge(_ person: Int, into target: Int) throws -> Bool {
         try sqlite.transaction {
@@ -161,22 +169,9 @@ package final class SpeakerDatabase: @unchecked Sendable {
                 [.integer(target), .integer(person)]
             )
             try sqlite.execute("DELETE FROM people WHERE id = ?", [.integer(person)])
+            try foldVoices(of: target)
             try keepLongestClips(of: target)
             return true
-        }
-    }
-
-    /// Takes a voice out of its person into a person of its own, with no name, for a merge that was wrong. Returns the
-    /// new person, or nil if there is no such voice, or it is its person's only one.
-    @discardableResult
-    package func split(_ voice: Int) throws -> Int? {
-        try sqlite.transaction {
-            guard let found = try self.voice(voice, inAnyModel: true), try voices(of: found.person).count > 1 else {
-                return nil
-            }
-            let person = try addPerson(createdAt: found.createdAt)
-            try sqlite.execute("UPDATE voices SET person_id = ? WHERE id = ?", [.integer(person), .integer(voice)])
-            return person
         }
     }
 
@@ -241,20 +236,49 @@ package final class SpeakerDatabase: @unchecked Sendable {
         )
     }
 
-    /// Takes a voice out, with its clips, and its person if that was their only one. False if there is no such voice.
-    func forgetVoice(_ voice: Int) throws -> Bool {
-        try sqlite.transaction {
-            guard let found = try self.voice(voice, inAnyModel: true) else { return false }
+}
+
+/// What the rest is built on.
+extension SpeakerDatabase {
+
+    /// Makes someone's voices one, the first: each model's print the average of theirs, weighed by how many prints each
+    /// has, and every clip that one's.
+    private func foldVoices(of person: Int) throws {
+        let ids = try sqlite.query("SELECT id FROM voices WHERE person_id = ? ORDER BY id", [.integer(person)]) {
+            $0.integer(0)
+        }
+        guard let kept = ids.first else { return }
+        for voice in ids.dropFirst() {
+            let prints = try sqlite.query(
+                "SELECT model, print, prints FROM voice_prints WHERE voice_id = ?",
+                [.integer(voice)]
+            ) { ($0.text(0) ?? "", $0.floats(1), $0.integer(2)) }
+            for (model, print, count) in prints {
+                let existing = try sqlite.query(
+                    "SELECT print, prints FROM voice_prints WHERE voice_id = ? AND model = ?",
+                    [.integer(kept), .text(model)]
+                ) { ($0.floats(0), $0.integer(1)) }
+                .first
+                guard let (keptPrint, keptCount) = existing, keptPrint.count == print.count else {
+                    try sqlite.execute(
+                        "INSERT OR REPLACE INTO voice_prints (voice_id, model, print, prints) VALUES (?, ?, ?, ?)",
+                        [.integer(kept), .text(model), .floats(print), .integer(count)]
+                    )
+                    continue
+                }
+                let (a, b) = (Float(max(keptCount, 1)), Float(max(count, 1)))
+                try sqlite.execute(
+                    "UPDATE voice_prints SET print = ?, prints = ? WHERE voice_id = ? AND model = ?",
+                    [
+                        .floats(zip(keptPrint, print).map { ($0 * a + $1 * b) / (a + b) }),
+                        .integer(keptCount + count), .integer(kept), .text(model),
+                    ]
+                )
+            }
+            try sqlite.execute("UPDATE clips SET voice_id = ? WHERE voice_id = ?", [.integer(kept), .integer(voice)])
             try sqlite.execute("DELETE FROM voices WHERE id = ?", [.integer(voice)])
-            try sqlite.execute(
-                "DELETE FROM people WHERE id = ? AND NOT EXISTS (SELECT 1 FROM voices WHERE person_id = ?)",
-                [.integer(found.person), .integer(found.person)]
-            )
-            return true
         }
     }
-
-    // MARK: - Underneath
 
     private func addPerson(createdAt: Date) throws -> Int {
         try sqlite.execute("INSERT INTO people (created_at) VALUES (?)", [.real(createdAt.timeIntervalSince1970)])
@@ -286,7 +310,7 @@ package final class SpeakerDatabase: @unchecked Sendable {
     }
 
     /// A voice, `inAnyModel`: whether or not it has a print in this model, which is then empty.
-    private func voice(_ id: Int, inAnyModel: Bool) throws -> Voice? {
+    func voice(_ id: Int, inAnyModel: Bool) throws -> Voice? {
         guard inAnyModel else { return try voice(id) }
         return try sqlite.query(
             """
@@ -308,7 +332,7 @@ package final class SpeakerDatabase: @unchecked Sendable {
         .first
     }
 
-    private func keepLongestClips(of person: Int) throws {
+    func keepLongestClips(of person: Int) throws {
         try sqlite.execute(
             """
             DELETE FROM clips WHERE voice_id IN (SELECT id FROM voices WHERE person_id = ?) AND id NOT IN (
@@ -329,57 +353,6 @@ package final class SpeakerDatabase: @unchecked Sendable {
     }
 }
 
-/// Clips: some seconds of each voice's speech.
-extension SpeakerDatabase {
-    /// Keeps a clip of a voice's speech, `seconds` long, unless its person already has `clipsPerPerson` longer ones.
-    func addClip(_ audio: Data, seconds: Double, to voice: Int) throws {
-        try sqlite.transaction {
-            try sqlite.execute(
-                "INSERT INTO clips (voice_id, audio, seconds, recorded_at) VALUES (?, ?, ?, ?)",
-                [.integer(voice), .data(audio), .real(seconds), .real(Date().timeIntervalSince1970)]
-            )
-            if let person = try self.voice(voice, inAnyModel: true)?.person { try keepLongestClips(of: person) }
-        }
-    }
-
-    /// Someone's clips, of all their voices, the longest first.
-    package func clips(of person: Int) throws -> [Clip] {
-        try sqlite.query(
-            """
-            SELECT clips.id, clips.voice_id, clips.audio, clips.seconds, clips.recorded_at
-            FROM clips JOIN voices ON voices.id = clips.voice_id
-            WHERE voices.person_id = ? ORDER BY clips.seconds DESC, clips.id
-            """,
-            [.integer(person)]
-        ) { row in
-            Clip(
-                id: row.integer(0),
-                voice: row.integer(1),
-                audio: row.data(2),
-                seconds: row.real(3),
-                recordedAt: row.date(4)
-            )
-        }
-    }
-
-    /// How many clips each person has, by number; those with none are left out.
-    package func clipCounts() throws -> [Int: Int] {
-        Dictionary(
-            uniqueKeysWithValues: try sqlite.query(
-                "SELECT voices.person_id, count(*) FROM clips JOIN voices ON voices.id = clips.voice_id GROUP BY 1"
-            ) { ($0.integer(0), $0.integer(1)) }
-        )
-    }
-
-    /// Moves a voice's clips to another voice, for a voice first taken for someone new that turned out to be them.
-    func moveClips(of voice: Int, to target: Int) throws {
-        try sqlite.transaction {
-            try sqlite.execute("UPDATE clips SET voice_id = ? WHERE voice_id = ?", [.integer(target), .integer(voice)])
-            if let person = try self.voice(target, inAnyModel: true)?.person { try keepLongestClips(of: person) }
-        }
-    }
-}
-
 extension SQLiteDatabase.Row {
-    fileprivate func date(_ column: Int32) -> Date { Date(timeIntervalSince1970: real(column)) }
+    func date(_ column: Int32) -> Date { Date(timeIntervalSince1970: real(column)) }
 }

@@ -93,7 +93,7 @@ struct TranscriptView: View {
                 openWindow(id: MenuContent.peopleWindow)
                 WindowFocus.bringToFront(MenuContent.peopleWindow)
             }
-            .help("The people Identify Speakers remembers: name, hear, merge or split them")
+            .help("The people Identify Speakers remembers: name, hear or merge them")
             if let directory = model.meeting?.directory {
                 Button("Show in Finder") { NSWorkspace.shared.open(directory) }
                     .disabled(!FileManager.default.fileExists(atPath: directory.path))

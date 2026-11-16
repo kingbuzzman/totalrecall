@@ -3,7 +3,8 @@ import SwiftUI
 import Transcribe
 
 /// The people Identify Speakers remembers: naming them, hearing their clips, merging one person taken for two, which
-/// asks first when their voices don't sound alike, splitting a voice back out of a wrong merge, and forgetting someone.
+/// asks first when their voices don't sound alike, taking out a clip that sounds like someone else, and forgetting
+/// someone.
 struct PeopleView: View {
     @Environment(AppModel.self) private var model
     @State private var people = People()
@@ -34,8 +35,11 @@ struct PeopleView: View {
                     }
                 } footer: {
                     Text(
-                        "Merging files one person's voices under another, each kept as it was, so a wrong merge can "
-                            + "be split back out."
+                        """
+                        Merging moves one person's clips to another, and forgets the first. A clip marked \
+                        \(Image(systemName: "exclamationmark.triangle.fill")) sounds unlike the rest of theirs: \
+                        listen, and remove it if it's someone else.
+                        """
                     )
                     .foregroundStyle(.secondary)
                 }
@@ -90,7 +94,9 @@ struct PeopleView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("They are most likely two people. Listen to both first; a wrong merge can be split back out.")
+            Text(
+                "They are most likely two people. Listen to both first; a wrong merge leaves clips to remove one by one."
+            )
         }
         .alert(
             "Forget \(forgetting?.name ?? "")?",
@@ -174,9 +180,9 @@ private struct PersonRow: View {
             Text(summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if !entry.oddVoices.isEmpty {
+            if !entry.oddClips.isEmpty {
                 Label(
-                    "\(counted(entry.oddVoices.count, "voice")) may be someone else's: listen, and split it out if so",
+                    "\(counted(entry.oddClips.count, "clip")) may be someone else's: listen, and remove if so",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.caption)
@@ -187,11 +193,11 @@ private struct PersonRow: View {
                     ForEach(clips, id: \.id) { clip in
                         ClipRow(
                             clip: clip,
-                            voiceNumber: entry.voices.count > 1 ? clip.voice : nil,
-                            isOdd: entry.oddVoices[clip.voice] != nil,
+                            alike: entry.oddClips[clip.id],
                             isPlaying: people.playingClip == clip.id,
                             isRecording: isRecording,
-                            play: { people.play(clip, of: entry.id) }
+                            play: { people.play(clip, of: entry.id) },
+                            forget: { people.forgetClip(clip.id) }
                         )
                     }
                 } label: {
@@ -200,29 +206,13 @@ private struct PersonRow: View {
                 .onChange(of: showsClips) { _, shows in if shows { clips = people.clips(of: entry.id) } }
                 .onChange(of: entry.clips) { _, _ in if showsClips { clips = people.clips(of: entry.id) } }
             }
-            if entry.voices.count > 1 {
-                ForEach(entry.voices, id: \.id) { voice in
-                    HStack {
-                        if let alike = entry.oddVoices[voice.id] {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .help(
-                                    "Sounds unlike the rest of \(entry.name)'s voices, \(alike)% alike: most likely "
-                                        + "someone else's, merged in by mistake. Play its clips, and split it out if so."
-                                )
-                        }
-                        Text("Voice \(voice.id) · \(heard(Double(voice.prints) * SpeakerDatabase.secondsPerPrint))")
-                            .font(.caption)
-                        Spacer()
-                        Button("Split Out") { people.split(voice: voice.id) }
-                            .controlSize(.small)
-                    }
-                    .padding(.leading, 12)
-                }
-            }
         }
         .padding(.vertical, 2)
-        .onAppear { name = entry.person.name ?? "" }
+        .onAppear {
+            name = entry.person.name ?? ""
+            // Open on the clips to listen to.
+            if !entry.oddClips.isEmpty { showsClips = true }
+        }
         // Such as a name given from elsewhere; not the spaces of a name being typed, which are saved trimmed.
         .onChange(of: entry.person.name) { _, saved in
             if name.trimmingCharacters(in: .whitespaces) != (saved ?? "") { name = saved ?? "" }
@@ -240,12 +230,11 @@ private struct PersonRow: View {
         return "Plays their clips, longest first"
     }
 
-    /// "You · heard 4 min · 3 clips · 2 voices · since Nov 12, 2026".
+    /// "You · heard 4 min · 3 clips · since Nov 12, 2026".
     private var summary: String {
         var parts = entry.person.isYou && entry.person.name != nil ? ["You"] : []
         parts.append("heard \(heard(entry.heardSeconds))")
         parts.append(entry.clips > 0 ? counted(entry.clips, "clip") : "no clips yet")
-        if entry.voices.count > 1 { parts.append(counted(entry.voices.count, "voice")) }
         parts.append("since \(entry.person.createdAt.formatted(date: .abbreviated, time: .omitted))")
         return parts.joined(separator: " · ")
     }
@@ -255,23 +244,23 @@ private struct PersonRow: View {
     }
 }
 
-/// One clip of someone: how long, when it was recorded, which of their voices when they have several, and a button to
-/// hear it, but not while recording.
+/// One clip of someone: how long, and when it was recorded; marked when it sounds unlike the rest of theirs; a button to
+/// hear it, but not while recording, and one to take it out.
 private struct ClipRow: View {
     let clip: SpeakerDatabase.Clip
-    let voiceNumber: Int?
-    /// Of a voice that sounds unlike the rest of its person's.
-    let isOdd: Bool
+    /// How alike it sounds to the rest of theirs, in percent, when it sounds unlike them.
+    let alike: Int?
     let isPlaying: Bool
     let isRecording: Bool
     let play: () -> Void
+    let forget: () -> Void
 
     var body: some View {
         HStack {
-            if isOdd {
+            if let alike {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
-                    .help("Of a voice that sounds unlike the rest of theirs")
+                    .help("Sounds unlike the rest of their clips, \(alike)% alike: most likely someone else's.")
             }
             Text(description).font(.caption).monospacedDigit()
             Spacer()
@@ -282,14 +271,16 @@ private struct ClipRow: View {
                     .disabled(isRecording)
             }
             .help(isRecording ? PeopleView.recordingHelp : "Plays this clip")
+            Button("Remove", systemImage: "trash", role: .destructive, action: forget)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("Takes this clip out, such as one of someone else")
         }
     }
 
-    /// "12 s · Nov 16, 8:07 AM · voice 2".
+    /// "12 s · Nov 16, 8:07 AM".
     private var description: String {
-        let length = "\(Int(clip.seconds.rounded())) s"
-        var parts = [length, clip.recordedAt.formatted(date: .abbreviated, time: .shortened)]
-        if let voiceNumber { parts.append("voice \(voiceNumber)") }
-        return parts.joined(separator: " · ")
+        "\(Int(clip.seconds.rounded())) s · " + clip.recordedAt.formatted(date: .abbreviated, time: .shortened)
     }
 }

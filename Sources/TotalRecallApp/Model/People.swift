@@ -6,7 +6,7 @@ import Transcribe
 import os
 
 /// The people Identify Speakers remembers, for the People tab of Settings: who they are, how long each was heard, and
-/// their voices; renaming, merging, splitting and forgetting them; and playing their clips. Read afresh whenever the tab
+/// their clips; renaming, merging and forgetting them; and playing and forgetting their clips. Read afresh whenever the tab
 /// appears and after every change, as a recording going on adds people as it hears them.
 @MainActor @Observable
 final class People {
@@ -15,9 +15,9 @@ final class People {
         let person: SpeakerDatabase.Person
         let voices: [SpeakerDatabase.Voice]
         let clips: Int
-        /// Their voices that sound unlike the rest of theirs, as one merged in by mistake would, and how alike each
-        /// sounds to the others, in percent.
-        let oddVoices: [Int: Int]
+        /// Their clips that sound unlike the rest of theirs, as someone else's merged in by mistake would, and how
+        /// alike each sounds to the rest, in percent.
+        let oddClips: [Int: Int]
 
         var id: Int { person.id }
 
@@ -48,17 +48,17 @@ final class People {
     func reload() {
         change(reloading: false) {
             let people = try $0.people()
-            let all = try $0.voices()
-            let odd = SpeakerDatabase.oddVoices(all).mapValues { Int(($0 * 100).rounded()) }
-            let voices = Dictionary(grouping: all, by: \.person)
+            let voices = Dictionary(grouping: try $0.voices(), by: \.person)
             let clips = try $0.clipCounts()
+            let clipPrints = try $0.clipPrints()
+            let odd = SpeakerDatabase.oddClips(clipPrints).mapValues { Int(($0 * 100).rounded()) }
+            let personOf = Dictionary(uniqueKeysWithValues: clipPrints.map { ($0.id, $0.person) })
             entries = people.map { person in
-                let theirs = voices[person.id] ?? []
-                return Entry(
+                Entry(
                     person: person,
-                    voices: theirs,
+                    voices: voices[person.id] ?? [],
                     clips: clips[person.id] ?? 0,
-                    oddVoices: odd.filter { id, _ in theirs.contains { $0.id == id } }
+                    oddClips: odd.filter { clip, _ in personOf[clip] == person.id }
                 )
             }
         }
@@ -93,8 +93,10 @@ final class People {
         change { try $0.merge(person, into: target) }
     }
 
-    func split(voice: Int) {
-        change { try $0.split(voice) }
+    /// Takes out one of someone's clips, such as one of someone else merged in by mistake.
+    func forgetClip(_ clip: Int) {
+        if playingClip == clip { player.stop() }
+        change { try $0.forgetClip(clip) }
     }
 
     func forget(_ person: Int) {

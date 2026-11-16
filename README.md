@@ -158,7 +158,7 @@ totalrecall --list-mics
 transcribe [--language LANG] [--mix] [--identify-speakers] [--force] <audio-file> [<text-file>]
 transcribe [--language LANG] [--mix] [--identify-speakers] [--force] [--live] - [<text-file>]
 transcribe speakers [name <number> <name> | merge <number> <into-number> [--anyway] | forget <number>]
-transcribe speakers [split <voice> | play <number> | save <number> <directory>]
+transcribe speakers [forget-clip <clip> | play <number> | save <number> <directory>]
 transcribe --list-languages
 ```
 
@@ -167,7 +167,7 @@ transcribe --list-languages
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
 | `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Once the call ends, the text file is written again by who turned out to say each line, and everyone who said words is saved, in `~/.transcribe/speakers.db`, so they keep their number from call to call; until then, someone new goes by a letter (`Them A`). It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them`. Voiceprints are biometric data; see [Recording laws](#recording-laws) |
-| `speakers` | List the people `--identify-speakers` remembers, with the voices of those heard more than one way; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, keeping each voice as it was (two who don't sound alike need `--anyway`), `split 7` takes voice 7 back out into a person of its own, `forget 5` takes one out |
+| `speakers` | List the people `--identify-speakers` remembers, with any clips that sound like someone else; `name 3 Ada` names one, `merge 5 3` folds 5 into 3 (two who don't sound alike need `--anyway`), `forget 5` takes one out, `forget-clip 12` takes out one clip, such as someone else's merged in by mistake (`play 3` shows clip numbers) |
 | `speakers play 3`, `speakers save 3 <directory>` | Play the clips kept of someone, their 20 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
 | `-` as input | Transcribe a live WAV stream from stdin, such as `totalrecall -` |

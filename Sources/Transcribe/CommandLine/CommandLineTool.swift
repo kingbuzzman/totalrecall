@@ -38,11 +38,10 @@ package func runCommandLine(_ arguments: ArraySlice<String>) async -> Never {
         guard changingSpeakers({ try $0.rename(speaker, to: name) }) else { failNoSpeaker(speaker) }
     case .mergeSpeaker(let speaker, let target, let anyway):
         mergeSpeaker(speaker, into: target, anyway: anyway)
-    case .splitVoice(let voice):
-        guard let person = changingSpeakers({ try $0.split(voice) }) else {
-            fail("no voice \(voice) that its speaker has others besides; see transcribe speakers")
+    case .forgetClip(let clip):
+        guard changingSpeakers({ try $0.forgetClip(clip) }) else {
+            fail("no clip \(clip); see transcribe speakers play")
         }
-        print("voice \(voice) is speaker \(person) now")
     case .forgetSpeaker(let speaker):
         guard changingSpeakers({ try $0.forget(speaker) }) else { failNoSpeaker(speaker) }
     case .playSpeaker(let speaker):
@@ -76,7 +75,9 @@ private func listSpeakers() {
     let (people, voices, clips) = changingSpeakers { (try $0.people(), try $0.voices(), try $0.clipCounts()) }
     if people.isEmpty { print("nobody yet: transcribe --identify-speakers remembers the people it hears") }
     let voicesOf = Dictionary(grouping: voices, by: \.person)
-    let odd = SpeakerDatabase.oddVoices(voices)
+    let clipPrints = changingSpeakers { try $0.clipPrints() }
+    let odd = SpeakerDatabase.oddClips(clipPrints)
+    let oddOf = Dictionary(grouping: clipPrints.filter { odd[$0.id] != nil }, by: \.person)
     func distance(_ one: Int, _ other: Int) -> Float {
         (voicesOf[one] ?? []).flatMap { voice in (voicesOf[other] ?? []).map { voiceDistance(voice.print, $0.print) } }
             .min() ?? .infinity
@@ -90,14 +91,13 @@ private func listSpeakers() {
         let name = (person.name ?? (person.isYou ? Speaker.you.rawValue : "-")) + (person.isYou ? " (you)" : "")
         let count = clips[person.id, default: 0]
         let clipCount = count == 0 ? "" : ", " + counted(count, "clip")
-        // A voice that sounds unlike the rest of theirs is marked "!": most likely someone else's, merged in by mistake.
-        let voiceNumbers =
-            theirs.count < 2
-            ? "" : "  voices " + theirs.map { "\($0.id)\(odd[$0.id] == nil ? "" : "!")" }.joined(separator: ", ")
+        // Clips that sound unlike the rest of theirs: most likely someone else's, merged in by mistake.
+        let oddClips = (oddOf[person.id] ?? []).map { String($0.id) }
+        let unlike = oddClips.isEmpty ? "" : "  unlike the rest: clips " + oddClips.joined(separator: ", ")
         // Maybe one person, heard as two: not alike enough to be merged without being told to.
         let alike = people.filter { $0.id != person.id && distance($0.id, person.id) < SpeakerIdentifier.soundAlike }
         let soundsLike = alike.isEmpty ? "" : "  sounds like " + alike.map { String($0.id) }.joined(separator: ", ")
-        print("\(number) \(name)  (\(heard)\(clipCount) since \(since))\(voiceNumbers)\(soundsLike)")
+        print("\(number) \(name)  (\(heard)\(clipCount) since \(since))\(unlike)\(soundsLike)")
     }
 }
 
@@ -126,7 +126,9 @@ private func mergeSpeaker(_ speaker: Int, into target: Int, anyway: Bool) {
 private func playSamples(of speaker: Int) {
     let samples = speakerSamples(speaker)
     for (index, sample) in samples.enumerated() {
-        print("speaker \(speaker), sample \(index + 1) of \(samples.count) (\(Int(sample.seconds.rounded())) s)")
+        print(
+            "speaker \(speaker), clip \(sample.id), \(index + 1) of \(samples.count) (\(Int(sample.seconds.rounded())) s)"
+        )
         // Played here rather than by another program, so it stops when transcribe does.
         let player: AVAudioPlayer
         do {
@@ -143,8 +145,8 @@ private func playSamples(of speaker: Int) {
 private func saveSamples(of speaker: Int, in directory: String) {
     let samples = speakerSamples(speaker)
     let folder = URL(typedPath: directory)
-    for (index, sample) in samples.enumerated() {
-        let url = folder.appending(path: "speaker-\(speaker)-\(index + 1).m4a")
+    for sample in samples {
+        let url = folder.appending(path: "speaker-\(speaker)-clip-\(sample.id).m4a")
         do {
             try sample.audio.write(to: url, options: .withoutOverwriting)
         } catch {
