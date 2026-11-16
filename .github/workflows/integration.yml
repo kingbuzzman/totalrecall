@@ -79,9 +79,11 @@ jobs:
           nohup sh -c 'brew install ffmpeg; echo $? > "$RUNNER_TEMP/ffmpeg.tmp"; mv "$RUNNER_TEMP/ffmpeg.tmp" "$RUNNER_TEMP/ffmpeg.status"' \
             > "$RUNNER_TEMP/ffmpeg.log" 2>&1 &
 
-      # Its folder is named after its version and macOS minimum, so an older cache is harmless: make builds afresh.
-      - name: Cache speexdsp
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Its folder is named after its version and macOS minimum, so an older cache is harmless: make builds afresh. Saved
+      # right after the build, as is the next one, so a run whose tests fail still leaves it for the next.
+      - name: Restore speexdsp
+        id: speexdsp
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/speexdsp
           key: speexdsp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
@@ -95,9 +97,10 @@ jobs:
 
       # The Swift builds of the last run, on this branch or master, so a push compiles only what it changed, the SDK's
       # modules included. The final build, which is released, never uses them: it builds afresh.
-      - name: Cache the Swift builds
+      - name: Restore the Swift builds
+        id: swiftpm
         if: env.FINAL != '1'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             build/swiftpm
@@ -109,6 +112,22 @@ jobs:
       # are released, and the build instrumented for coverage, which the tests run on.
       - name: Build
         run: make -j"$(sysctl -n hw.ncpu)" release coverage-build
+
+      - name: Save speexdsp
+        if: steps.speexdsp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/speexdsp
+          key: ${{ steps.speexdsp.outputs.cache-primary-key }}
+
+      - name: Save the Swift builds
+        if: env.FINAL != '1' && steps.swiftpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/swiftpm
+            build/swiftpm-coverage
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
       # The tests launch totalrecall from Swift's test runners, so they get the grant too.
       - name: Grant audio permissions
