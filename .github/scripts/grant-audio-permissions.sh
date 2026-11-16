@@ -61,22 +61,20 @@ grant() {
 }
 
 system_database="/Library/Application Support/com.apple.TCC/TCC.db"
-user_database="$runner_home/Library/Application Support/com.apple.TCC/TCC.db"
-
-# The microphone's grant is the user's, in their own database, which some runner images (macOS 27's) have not made
-# yet: without it, totalrecall asks, and waits for an answer nobody can give. Made here as a copy of the system's, its
-# layout and version, with none of its grants; the user's tccd, restarted below, then reads it.
-made_user_database=false
-if [ ! -f "$user_database" ] && [ -f "$system_database" ]; then
-    mkdir -p "$(dirname "$user_database")"
-    cp "$system_database" "$user_database"
-    sqlite3 "$user_database" "DELETE FROM access;"
-    chown -R "$runner_user" "$(dirname "$user_database")"
-    made_user_database=true
-    echo "made $user_database"
+# The microphone's grant, and system audio's, are the user's, in their own database: in their Library until macOS 27,
+# from macOS 27 in a ProtectedSystem container (as GitHub's own image setup finds it, in runner-images'
+# configure-tccdb-macos-27.sh). Every one found is granted to; one tccd does not use is never read.
+user_databases=()
+if [ -f "$runner_home/Library/Application Support/com.apple.TCC/TCC.db" ]; then
+    user_databases+=("$runner_home/Library/Application Support/com.apple.TCC/TCC.db")
 fi
+while IFS= read -r database; do user_databases+=("$database"); done < <(
+    find /private/var/containers/Data/ProtectedSystem -mindepth 6 -maxdepth 6 -type f \
+        -path "*/Data/Library/Application Support/com.apple.TCC/TCC.db" 2>/dev/null
+)
+if [ "${#user_databases[@]}" -eq 0 ]; then echo "found no user TCC database" >&2; fi
 
-for database in "$system_database" "$user_database"; do
+for database in "$system_database" ${user_databases[@]+"${user_databases[@]}"}; do
     if [ ! -f "$database" ]; then
         echo "skipping missing $database"
         continue
@@ -88,8 +86,3 @@ for database in "$system_database" "$user_database"; do
     done
     echo "granted ${services[*]} to ${#clients[@]} clients in $database"
 done
-
-# A tccd that started before the user's database was made would not see it; launchd starts it again when asked.
-if [ "$made_user_database" = true ]; then
-    pkill -x -u "$runner_user" tccd || true
-fi
