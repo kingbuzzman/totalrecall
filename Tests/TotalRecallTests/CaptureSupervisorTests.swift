@@ -46,6 +46,36 @@ struct CaptureSupervisorTests {
         #expect(announcements.messages == ["mic -> AirPods Pro"])
     }
 
+    @Test func announcesAMicRecordedThroughVoiceProcessing() throws {
+        let silenced = [Float](repeating: 0.00005, count: LoudnessWindow.length)
+        for _ in 0..<MicrophoneCapture.deadSecondsBeforeTrial { devices.sessions[0].deliver(silenced) }
+
+        supervisor.supervise()
+        devices.sessions[1].deliver([Float](repeating: 0.01, count: LoudnessWindow.length))
+        supervisor.supervise()
+
+        #expect(devices.sessions[1].usesVoiceProcessing)
+        #expect(
+            announcements.messages == [
+                "mic \"MacBook Pro Microphone\" silenced by another app; recording it through voice processing"
+            ]
+        )
+    }
+
+    @Test func announcesVoiceProcessingThatFailsToStart() {
+        devices.voiceProcessingFailure = MessageError("voice processing is unavailable")
+        let silenced = [Float](repeating: 0.00005, count: LoudnessWindow.length)
+        for _ in 0..<MicrophoneCapture.deadSecondsBeforeTrial { devices.sessions[0].deliver(silenced) }
+
+        supervisor.supervise()
+
+        #expect(
+            announcements.messages == [
+                "mic silenced, and voice processing is unavailable: voice processing is unavailable"
+            ]
+        )
+    }
+
     @Test func restartsTheMicWhenItsDeviceChanges() {
         devices.sessions[0].changeDevice()
 

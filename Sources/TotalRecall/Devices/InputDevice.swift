@@ -26,6 +26,12 @@ package struct InputDevice {
         return InputDevice(id: deviceID, name: stringProperty(deviceID, kAudioObjectPropertyName) ?? "system input")
     }
 
+    /// Whether it is built into the Mac, such as the MacBook mic.
+    var isBuiltIn: Bool {
+        let address = propertyAddress(kAudioDevicePropertyTransportType)
+        return (try? readProperty(id, address, initialValue: UInt32(0))) == kAudioDeviceTransportTypeBuiltIn
+    }
+
     /// The current format of the device's first input stream.
     func streamFormat() throws -> AudioStreamBasicDescription {
         let streamsAddress = propertyAddress(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)

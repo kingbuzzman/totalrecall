@@ -14,6 +14,7 @@ extension AppModel {
             case .stopped: "stopped; saving"
             case .saved(let url): "saved \(url.path)"
             case .message(let message): message
+            case .voiceProcessing(let isOn): isOn ? "mic on voice processing" : "mic off voice processing"
             case .transcriptStarted: "transcript started"
             case .transcriptFinished(let error): error == nil ? "transcript finished" : nil
             case .audioTrashed(let audio, _, _): "moved \(audio.lastPathComponent) to the Trash, transcribed"

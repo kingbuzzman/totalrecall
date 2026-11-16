@@ -19,6 +19,8 @@ package final class RecordingSession {
     package var onOutputClosed: (@Sendable () -> Void)?
     /// Called on the writer queue the moment the recording starts, once the captures deliver audio (see `start()`).
     package var onRecordingStarted: (@Sendable () -> Void)?
+    /// Called on the writer queue when the microphone goes on or off voice processing, automatically or as asked.
+    package var onVoiceProcessingChange: (@Sendable (Bool) -> Void)?
     private let destination: Destination
     /// Encodes the recording into the output file's format as it records, when that needs encoding.
     private let encoder: LiveEncoder?
@@ -40,6 +42,7 @@ package final class RecordingSession {
     private var hasRecording = false
     private var isOutputClosed = false
     private var ticks = 0
+    private var usesVoiceProcessing = false
     /// Stops the device-change notifications `start()` asked for; in an app, which goes on after a recording, they
     /// would otherwise keep each recording's session alive.
     private var stopWatchingDevices: () -> Void = {}
@@ -164,6 +167,29 @@ package final class RecordingSession {
         if let failure = systemFailure ?? microphoneFailure { throw failure }
     }
 
+    /// Records the microphone through macOS voice processing or not, for when another app's voice processing silences
+    /// it and that went unnoticed. Turning it on turns other apps' audio down about 8 dB.
+    package func useVoiceProcessing(_ isOn: Bool) {
+        nonisolated(unsafe) let session = self  // used on the writer queue, as everything else of the recording is
+        writerQueue.async {
+            guard !session.isStopped, let microphoneCapture = session.microphoneCapture else { return }
+            do {
+                try microphoneCapture.useVoiceProcessing(isOn)
+            } catch {
+                session.status.announce("voice processing is unavailable: \(error.localizedDescription)")
+            }
+            session.reportVoiceProcessing()
+        }
+    }
+
+    /// Tells `onVoiceProcessingChange` when the microphone went on or off voice processing. Runs on the writer queue.
+    private func reportVoiceProcessing() {
+        let isOn = microphoneCapture?.usesVoiceProcessing ?? false
+        guard isOn != usesVoiceProcessing else { return }
+        usesVoiceProcessing = isOn
+        onVoiceProcessingChange?(isOn)
+    }
+
     /// Length of the recording so far, in seconds; 0 until it has started.
     package var secondsRecorded: Double { recorder.secondsRecorded }
 
@@ -246,6 +272,7 @@ package final class RecordingSession {
     /// Runs on the writer queue.
     private func tick() {
         supervisor.supervise()
+        reportVoiceProcessing()
         do {
             try recorder.writeAvailable()
         } catch {

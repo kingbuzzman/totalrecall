@@ -20,6 +20,9 @@ final class AppModel {
     private(set) var transcript: [TranscriptLine] = []
     private(set) var liveText = ""
     private(set) var lastMessage = ""
+    /// Whether the microphone of the recording going on is recorded through voice processing; switched in
+    /// AppModel+VoiceProcessing.swift too.
+    var usesVoiceProcessing = false
     /// Recordings being saved, after they stopped, and transcripts going on, including the one being recorded, until
     /// their last words are written. Saving is counted in AppModel+UnsavedRecordings.swift too.
     var savingCount = 0
@@ -53,7 +56,7 @@ final class AppModel {
     /// Transcripts of recordings that have stopped, still being finished.
     var finishingTranscripts: Int { max(0, transcribingCount - (isRecording ? 1 : 0)) }
 
-    private let engine = RecordingEngine()
+    let engine = RecordingEngine()
     let notifier = Notifier()
     let log = Log.recording
     /// The latest recording's number: events of earlier ones, still finishing, leave the transcript shown alone.
@@ -197,6 +200,7 @@ final class AppModel {
         transcript = []
         liveText = ""
         lastMessage = ""
+        usesVoiceProcessing = false
         state = .starting
         let request = RecordingEngine.Request(
             id: recordingID,
@@ -267,6 +271,8 @@ final class AppModel {
             if isLatest { liveText = text }
         case .message(let message):
             if isLatest { lastMessage = message }
+        case .voiceProcessing(let isOn):
+            if isLatest { usesVoiceProcessing = isOn }
         case .transcriptStarted:
             transcribingCount += 1
         case .transcriptFinished(let error):
@@ -292,19 +298,6 @@ final class AppModel {
 /// Today's meetings: which is next, where each stands, recording or skipping them, and, every second, warning of
 /// those about to start and starting the next once it has started.
 extension AppModel {
-    /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
-    /// underway already.
-    var nextMeeting: ScheduledMeeting? {
-        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: scheduleTime)
-    }
-
-    func status(of meeting: ScheduledMeeting) -> MeetingStatus {
-        if recordedMeetings.contains(meeting) { return .recorded }
-        if skippedMeetings.contains(meeting) { return .skipped }
-        if meeting.end <= scheduleTime { return .ended }
-        return meeting.start <= scheduleTime ? .underway : .upcoming
-    }
-
     /// Records a meeting on the calendar now, such as one starting early, stopping what is being recorded first. It
     /// goes in the meeting's own folder, and is not started again when its time comes.
     func record(_ meeting: ScheduledMeeting) {

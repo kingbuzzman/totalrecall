@@ -46,6 +46,14 @@ final class CaptureSupervisor {
         if let newDevice = microphoneCapture.finishSwitch() {
             announce("mic -> \(newDevice.name)")
         }
+        if let silenced = microphoneCapture.takeVoiceProcessingTakeover() {
+            announce("mic \"\(silenced.name)\" silenced by another app; recording it through voice processing")
+        }
+        do {
+            try microphoneCapture.tryVoiceProcessing()
+        } catch {
+            announce("mic silenced, and voice processing is unavailable: \(error.localizedDescription)")
+        }
         if microphoneCapture.takeDeviceChange() {
             microphoneNeedsRestart = true
         }

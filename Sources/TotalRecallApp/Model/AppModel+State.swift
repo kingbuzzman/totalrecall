@@ -25,4 +25,17 @@ extension AppModel {
     enum MeetingStatus {
         case upcoming, underway, recorded, skipped, ended
     }
+
+    /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
+    /// underway already.
+    var nextMeeting: ScheduledMeeting? {
+        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: scheduleTime)
+    }
+
+    func status(of meeting: ScheduledMeeting) -> MeetingStatus {
+        if recordedMeetings.contains(meeting) { return .recorded }
+        if skippedMeetings.contains(meeting) { return .skipped }
+        if meeting.end <= scheduleTime { return .ended }
+        return meeting.start <= scheduleTime ? .underway : .upcoming
+    }
 }

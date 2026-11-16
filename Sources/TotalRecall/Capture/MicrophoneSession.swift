@@ -12,6 +12,8 @@ protocol MicrophoneCaptureSession: AnyObject {
     var id: Int { get }
     /// When it started, in `uptimeSeconds()`.
     var startedAt: Double { get }
+    /// Whether it records through macOS voice processing (`VoiceProcessingSession`).
+    var usesVoiceProcessing: Bool { get }
     func stop()
 }
 
@@ -27,6 +29,7 @@ final class MicrophoneSession: MicrophoneCaptureSession {
     let device: InputDevice
     let id: Int
     let startedAt = uptimeSeconds()
+    let usesVoiceProcessing = false
     private var ioProcID: AudioDeviceIOProcID?
     private var deviceListener: AudioObjectPropertyListenerBlock?
 

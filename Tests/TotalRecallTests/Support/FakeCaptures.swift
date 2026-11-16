@@ -8,6 +8,7 @@ final class FakeMicrophones {
         let device: InputDevice
         let id: Int
         var startedAt = uptimeSeconds()
+        let usesVoiceProcessing: Bool
         private(set) var isStopped = false
         private let onSamples: MicrophoneAudioHandler
         private let onDeviceChange: () -> Void
@@ -15,11 +16,13 @@ final class FakeMicrophones {
         init(
             device: InputDevice,
             id: Int,
+            usesVoiceProcessing: Bool = false,
             onSamples: @escaping MicrophoneAudioHandler,
             onDeviceChange: @escaping () -> Void
         ) {
             self.device = device
             self.id = id
+            self.usesVoiceProcessing = usesVoiceProcessing
             self.onSamples = onSamples
             self.onDeviceChange = onDeviceChange
         }
@@ -41,6 +44,10 @@ final class FakeMicrophones {
     var target: InputDevice?
     /// Thrown by the next sessions that start.
     var failure: (any Error)?
+    /// Thrown by the next voice-processing sessions that start.
+    var voiceProcessingFailure: (any Error)?
+    /// Whether the devices can be recorded through voice processing.
+    var canUseVoiceProcessing = true
     private(set) var sessions: [Session] = []
     private(set) var preferredNames: [String?] = []
 
@@ -61,7 +68,20 @@ final class FakeMicrophones {
                 let session = Session(device: device, id: id, onSamples: onSamples, onDeviceChange: onDeviceChange)
                 self?.sessions.append(session)
                 return session
-            }
+            },
+            makeVoiceProcessingSession: { [weak self] device, id, onSamples, onDeviceChange in
+                if let failure = self?.voiceProcessingFailure { throw failure }
+                let session = Session(
+                    device: device,
+                    id: id,
+                    usesVoiceProcessing: true,
+                    onSamples: onSamples,
+                    onDeviceChange: onDeviceChange
+                )
+                self?.sessions.append(session)
+                return session
+            },
+            canUseVoiceProcessing: { [weak self] _ in self?.canUseVoiceProcessing ?? false }
         )
     }
 }

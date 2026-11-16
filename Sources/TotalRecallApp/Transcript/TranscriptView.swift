@@ -77,6 +77,19 @@ struct TranscriptView: View {
                 }
             }
             Spacer()
+            if model.isRecording {
+                Toggle(
+                    "Voice processing",
+                    isOn: Binding(get: { model.usesVoiceProcessing }, set: { model.useVoiceProcessing($0) })
+                )
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help(
+                    "Records your mic through macOS voice processing, as a call in Firefox on the MacBook mic needs: "
+                        + "it silences the mic for every other app. Turned on by itself when that happens; turns other "
+                        + "audio down a little while on."
+                )
+            }
             // The same setting as in Settings › Transcript, at hand for when a screenshot of it is wanted.
             Button {
                 hidesFromCapture.toggle()

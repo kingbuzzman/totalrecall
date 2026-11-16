@@ -4,6 +4,15 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ## Unreleased
 
+### totalrecall
+
+- Fixed: a call using voice processing on the MacBook mic (Firefox) silenced it for TotalRecall; it now switches to
+  voice processing itself after a few seconds, which turns other audio down about 8 dB while it lasts.
+
+### TotalRecall.app
+
+- The transcript window has a Voice processing switch while recording, to turn it on or off by hand.
+
 ## 0.6.0
 
 ### transcribe

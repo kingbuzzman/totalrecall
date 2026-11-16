@@ -33,6 +33,8 @@ final class RecordingEngine: Sendable {
         case rewritten([(line: String, isYours: Bool)])
         /// News from the recorder or the transcriber, such as a microphone switch.
         case message(String)
+        /// The microphone went on or off voice processing.
+        case voiceProcessing(Bool)
         /// The transcript started; it goes on until the recording stops and the last words are written.
         case transcriptStarted
         /// The transcript is complete, or stopped short with this error.
@@ -67,6 +69,11 @@ final class RecordingEngine: Sendable {
                 report(.failedToStart(error.localizedDescription))
             }
         }
+    }
+
+    /// Records the microphone of the recording going on through voice processing or not.
+    func useVoiceProcessing(_ isOn: Bool) {
+        queue.async { [self] in current?.useVoiceProcessing(isOn) }
     }
 
     /// Stops the recording going on, if any, and saves it in the background; then calls `done` on the main queue, after
@@ -120,6 +127,7 @@ private final class Recording: @unchecked Sendable {
             }
         }
         session.onRecordingStarted = { report(.started) }
+        session.onVoiceProcessingChange = { report(.voiceProcessing($0)) }
         do {
             try session.start()
         } catch {
@@ -180,6 +188,10 @@ private final class Recording: @unchecked Sendable {
                 report(.transcriptFinished(error.localizedDescription))
             }
         }
+    }
+
+    func useVoiceProcessing(_ isOn: Bool) {
+        session.useVoiceProcessing(isOn)
     }
 
     /// Stops recording at once, ends the stream so the transcript can finish, and saves the file in the background.
