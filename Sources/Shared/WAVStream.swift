@@ -66,22 +66,24 @@ package final class WAVStreamReader: @unchecked Sendable {
         self.handle = handle
         guard let riff = try Self.read(12, from: handle), riff.ascii(0..<4) == "RIFF", riff.ascii(8..<12) == "WAVE"
         else {
-            throw ReaderError("not a WAV stream")
+            throw MessageError("not a WAV stream")
         }
         var format: (sampleFormat: SampleFormat, channelCount: Int, sampleRate: Double)?
         while true {
-            guard let chunkHeader = try Self.read(8, from: handle) else { throw ReaderError("WAV stream has no audio") }
+            guard let chunkHeader = try Self.read(8, from: handle) else {
+                throw MessageError("WAV stream has no audio")
+            }
             let chunkID = chunkHeader.ascii(0..<4)
             let chunkSize = chunkHeader.littleEndianUInt32(at: 4)
             if chunkID == "data" {
-                guard let format else { throw ReaderError("WAV stream has no format") }
+                guard let format else { throw MessageError("WAV stream has no format") }
                 (sampleFormat, channelCount, sampleRate) = format
                 let isStreamed = chunkSize == WAVStream.unknownSize || chunkSize == 0
                 remainingBytes = isStreamed ? nil : Int(chunkSize)
                 return
             }
             guard let body = try Self.read(Int(chunkSize) + Int(chunkSize % 2), from: handle) else {
-                throw ReaderError("WAV stream ended in its header")
+                throw MessageError("WAV stream ended in its header")
             }
             if chunkID == "fmt " {
                 format = try Self.parseFormat(body)
@@ -125,7 +127,7 @@ package final class WAVStreamReader: @unchecked Sendable {
     }
 
     private static func parseFormat(_ body: Data) throws -> (SampleFormat, Int, Double) {
-        guard body.count >= 16 else { throw ReaderError("WAV format chunk is too short") }
+        guard body.count >= 16 else { throw MessageError("WAV format chunk is too short") }
         var formatTag = body.littleEndianUInt16(at: 0)
         let extensible: UInt16 = 0xFFFE
         if formatTag == extensible, body.count >= 26 { formatTag = body.littleEndianUInt16(at: 24) }
@@ -134,10 +136,10 @@ package final class WAVStreamReader: @unchecked Sendable {
         switch (formatTag, bitsPerSample) {
         case (1, 16): sampleFormat = .int16
         case (3, 32): sampleFormat = .float32
-        default: throw ReaderError("unsupported WAV format \(formatTag) with \(bitsPerSample)-bit samples")
+        default: throw MessageError("unsupported WAV format \(formatTag) with \(bitsPerSample)-bit samples")
         }
         let channelCount = Int(body.littleEndianUInt16(at: 2))
-        guard channelCount > 0 else { throw ReaderError("WAV stream has no channels") }
+        guard channelCount > 0 else { throw MessageError("WAV stream has no channels") }
         return (sampleFormat, channelCount, Double(body.littleEndianUInt32(at: 4)))
     }
 
@@ -149,14 +151,6 @@ package final class WAVStreamReader: @unchecked Sendable {
             data.append(chunk)
         }
         return data.isEmpty && count > 0 ? nil : data
-    }
-
-    package struct ReaderError: LocalizedError {
-        package let errorDescription: String?
-
-        package init(_ description: String) {
-            errorDescription = description
-        }
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 import Testing
 
 @testable import TotalRecall
@@ -42,10 +43,10 @@ struct MicrophoneCaptureTests {
     }
 
     @Test func passesOnASessionThatFailsToStart() {
-        devices.failure = RecordingError("device is busy")
+        devices.failure = MessageError("device is busy")
         let capture = makeCapture()
 
-        #expect(throws: RecordingError.self) { try capture.start() }
+        #expect(throws: MessageError.self) { try capture.start() }
         #expect(capture.device == nil)
     }
 

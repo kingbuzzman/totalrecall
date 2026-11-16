@@ -1,5 +1,6 @@
 import AppSupport
 import Foundation
+import Shared
 import TotalRecall
 import Transcribe
 import os
@@ -59,7 +60,7 @@ final class RecordingEngine: Sendable {
         queue.async { [self] in
             let report: @Sendable (Event) -> Void = { event in events(request.id, event) }
             do {
-                current = try Recording.start(request, report: report)
+                current = try Recording(request, report: report)
             } catch {
                 report(.failedToStart(error.localizedDescription))
             }
@@ -80,39 +81,25 @@ final class RecordingEngine: Sendable {
 /// One recording and its transcript.
 private final class Recording: @unchecked Sendable {
     private let session: RecordingSession
-    private let pipe: Pipe
+    private let pipe = Pipe()
     private let audio: URL
     /// Set when it stopped before it started: its transcript, empty, is then deleted once finished.
-    private let isDiscarded: OSAllocatedUnfairLock<Bool>
+    private let isDiscarded = OSAllocatedUnfairLock(initialState: false)
     private let disposal: AudioDisposal
     private let report: @Sendable (RecordingEngine.Event) -> Void
 
-    private init(
-        session: RecordingSession,
-        pipe: Pipe,
-        audio: URL,
-        isDiscarded: OSAllocatedUnfairLock<Bool>,
-        disposal: AudioDisposal,
-        report: @escaping @Sendable (RecordingEngine.Event) -> Void
-    ) {
-        self.disposal = disposal
-        self.session = session
-        self.pipe = pipe
-        self.audio = audio
-        self.isDiscarded = isDiscarded
-        self.report = report
-    }
-
-    static func start(
-        _ request: RecordingEngine.Request,
-        report: @escaping @Sendable (RecordingEngine.Event) -> Void
-    ) throws -> Recording {
-        try checkPermissions()
+    /// Starts recording into a free rec.EXT in `request.directory`, and transcribing it into the transcript.txt beside
+    /// it as it records.
+    init(_ request: RecordingEngine.Request, report: @escaping @Sendable (RecordingEngine.Event) -> Void) throws {
+        try Self.checkPermissions()
         try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
         let (audio, transcript) = RecordingFolder.freePaths(
             in: request.directory,
             audioExtension: request.format.fileExtension
         )
+        self.audio = audio
+        self.report = report
+        disposal = AudioDisposal(transcript: transcript, isOn: request.trashesAudioOnceTranscribed, report: report)
 
         var options = Options()
         if let microphone = request.microphone, !InputDevice.matching(microphone).isEmpty {
@@ -120,11 +107,10 @@ private final class Recording: @unchecked Sendable {
         } else if let microphone = request.microphone {
             report(.message("\(microphone) is not connected; recording the system input"))
         }
-        let pipe = Pipe()
         // Once the transcriber has stopped reading, a write fails rather than killing the app.
         _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         let destination = Destination(path: audio.path, streams: true, streamHandle: pipe.fileHandleForWriting)
-        let session = try RecordingSession(options: options, destination: destination) { text in
+        session = try RecordingSession(options: options, destination: destination) { text in
             for line in text.split(separator: "\n") where !line.isEmpty {
                 report(.message(String(line).replacing(#/^totalrecall: /#, with: "")))
             }
@@ -136,52 +122,31 @@ private final class Recording: @unchecked Sendable {
             try? pipe.fileHandleForWriting.close()
             throw error
         }
-
-        let isDiscarded = OSAllocatedUnfairLock(initialState: false)
-        let disposal = AudioDisposal(transcript: transcript, isOn: request.trashesAudioOnceTranscribed, report: report)
-        transcribe(
-            pipe.fileHandleForReading,
-            for: request,
-            isDiscarded: isDiscarded,
-            disposal: disposal,
-            report: report
-        )
-        return Recording(
-            session: session,
-            pipe: pipe,
-            audio: audio,
-            isDiscarded: isDiscarded,
-            disposal: disposal,
-            report: report
-        )
+        transcribe(request)
     }
 
     /// Asks for the permissions recording needs, the first time, and throws if either is not given.
     private static func checkPermissions() throws {
         guard requestSystemAudioAccess() else {
-            throw AppError(
+            throw MessageError(
                 "TotalRecall may not record system audio. Allow it in System Settings › Privacy & Security › "
                     + "Screen & System Audio Recording › System Audio Recording Only, then quit and reopen TotalRecall."
             )
         }
         guard requestMicrophoneAccess() else {
-            throw AppError(
+            throw MessageError(
                 "TotalRecall may not use the microphone. Allow it in System Settings › Privacy & Security › Microphone."
             )
         }
     }
 
-    /// Transcribes the recording streamed into `input` to `disposal.transcript`, in a task of its own. The transcript goes on to
-    /// the end of the stream, after the recording stops. If it stops early, its end of the pipe is closed, so the
-    /// recording goes on without it rather than wait for it. A recording discarded, stopped before it started, leaves
-    /// no transcript behind.
-    private static func transcribe(
-        _ input: FileHandle,
-        for request: RecordingEngine.Request,
-        isDiscarded: OSAllocatedUnfairLock<Bool>,
-        disposal: AudioDisposal,
-        report: @escaping @Sendable (RecordingEngine.Event) -> Void
-    ) {
+    /// Transcribes the recording, as it streams through the pipe, to `disposal.transcript`, in a task of its own. The
+    /// transcript goes on to the end of the stream, after the recording stops. If it stops early, its end of the pipe
+    /// is closed, so the recording goes on without it rather than wait for it. A recording discarded, stopped before it
+    /// started, leaves no transcript behind.
+    private func transcribe(_ request: RecordingEngine.Request) {
+        // Not `self`, which would keep the recording, and its captures, until the transcript is finished.
+        let (input, isDiscarded, disposal, report) = (pipe.fileHandleForReading, isDiscarded, disposal, report)
         let transcript = disposal.transcript
         report(.transcriptStarted)
         Task.detached(priority: .userInitiated) {
@@ -279,13 +244,5 @@ private final class AudioDisposal: Sendable {
         } catch {
             report(.message("Could not move \(audio.lastPathComponent) to the Trash: \(error.localizedDescription)"))
         }
-    }
-}
-
-struct AppError: LocalizedError {
-    let errorDescription: String?
-
-    init(_ description: String) {
-        errorDescription = description
     }
 }

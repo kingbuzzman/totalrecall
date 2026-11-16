@@ -2,6 +2,7 @@ import AppKit
 import AppSupport
 import Foundation
 import Observation
+import Shared
 import TotalRecall
 import Transcribe
 import os
@@ -109,37 +110,34 @@ final class AppModel {
         RunLoop.main.add(clock, forMode: .common)
         self.clock = clock
         // A Mac that slept through a meeting's start records it on waking; the calendar may have changed meanwhile.
-        observers.append(
-            NSWorkspace.shared.notificationCenter.addObserver(
-                forName: NSWorkspace.didWakeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in MainActor.assumeIsolated { self?.readCalendar() } }
-        )
+        observe(NSWorkspace.didWakeNotification, on: NSWorkspace.shared.notificationCenter) { $0.readCalendar() }
         // On opening the menu, the elapsed time as of now, not of when it was last open.
         for (name, change) in [(NSMenu.didBeginTrackingNotification, 1), (NSMenu.didEndTrackingNotification, -1)] {
-            observers.append(
-                NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        guard let self else { return }
-                        self.openMenus = max(0, self.openMenus + change)
-                        self.updateElapsed()
-                    }
-                }
-            )
+            observe(name, queue: nil) { model in
+                model.openMenus = max(0, model.openMenus + change)
+                model.updateElapsed()
+            }
         }
         // Such as calendars turned off in Settings.
-        observers.append(
-            NotificationCenter.default.addObserver(
-                forName: UserDefaults.didChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in MainActor.assumeIsolated { self?.readCalendar() } }
-        )
+        observe(UserDefaults.didChangeNotification) { $0.readCalendar() }
         Task {
             await calendar.requestAccess()
             readCalendar()
         }
+    }
+
+    /// Calls `handle` with the model whenever `center` posts `name`, on `queue`, for as long as the model is around.
+    private func observe(
+        _ name: Notification.Name,
+        on center: NotificationCenter = .default,
+        queue: OperationQueue? = .main,
+        _ handle: @escaping @MainActor (AppModel) -> Void
+    ) {
+        observers.append(
+            center.addObserver(forName: name, object: nil, queue: queue) { [weak self] _ in
+                MainActor.assumeIsolated { if let self { handle(self) } }
+            }
+        )
     }
 
     /// Starts recording a new meeting named `name`, filed under `calendar`, or the default meeting calendar, stopping
@@ -374,7 +372,7 @@ extension AppModel {
         let excluded = warnedMeetings.union(recordedMeetings).union(skippedMeetings)
         for meeting in MeetingSchedule.warningsDue(in: todaysMeetings, lead: lead, excluding: excluded, now: now) {
             warnedMeetings.insert(meeting)
-            let time = meeting.start.formatted(date: .omitted, time: .shortened)
+            let time = meeting.start.shortTime
             let body =
                 AppSettings.recordsAutomatically && !isRecording
                 ? "Recording starts at \(time)." : "It starts at \(time)."
@@ -393,7 +391,6 @@ extension AppModel {
 
     private func updateElapsed() {
         guard openMenus > 0, case .recording(let since) = state else { return }
-        let seconds = max(0, Int(now.timeIntervalSince(since)))
-        elapsed = String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        elapsed = clockTime(max(0, Int(now.timeIntervalSince(since))), padsHours: false)
     }
 }

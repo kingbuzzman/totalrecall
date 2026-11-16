@@ -32,8 +32,7 @@ package enum RecordingFolder {
     /// "Weekly Design Review (camera on)" -> "weekly-design-review": lowercase ASCII words joined by "-", up to
     /// `maxLength` characters, leaving out whatever is in parentheses or brackets; "meeting" when nothing is left.
     package static func shortName(_ title: String, maxLength: Int = 40) -> String {
-        let unbracketed = title.replacing(/\([^)]*\)|\[[^\]]*\]/, with: " ")
-        let ascii = unbracketed.decomposedStringWithCompatibilityMapping.unicodeScalars.filter(\.isASCII)
+        let ascii = unbracketed(title).decomposedStringWithCompatibilityMapping.unicodeScalars.filter(\.isASCII)
         let words = String(String.UnicodeScalarView(ascii)).lowercased().matches(of: /[a-z0-9]+/).map { String($0.0) }
         var name = ""
         for word in words {
@@ -42,6 +41,12 @@ package enum RecordingFolder {
             name = longer
         }
         return name.isEmpty ? "meeting" : name
+    }
+
+    /// `title` without whatever is in parentheses or brackets, each such part a space instead: "Standup (webcam ON)" ->
+    /// "Standup ".
+    static func unbracketed(_ title: String) -> String {
+        title.replacing(/\([^)]*\)|\[[^\]]*\]/, with: " ")
     }
 
     /// rec.EXT and transcript.txt in `directory`, or rec-2.EXT and transcript-2.txt and so on when it already has a

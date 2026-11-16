@@ -27,9 +27,7 @@ package func runCommandLine(_ arguments: ArraySlice<String>) async -> Never {
     case .listSpeakers:
         listSpeakers()
     case .nameSpeaker(let speaker, let name):
-        guard changingSpeakers({ try $0.rename(speaker, to: name) }) else {
-            fail("no speaker \(speaker); see transcribe speakers")
-        }
+        guard changingSpeakers({ try $0.rename(speaker, to: name) }) else { failNoSpeaker(speaker) }
     case .mergeSpeaker(let speaker, let target):
         guard changingSpeakers({ try $0.merge(speaker, into: target) }) else {
             fail(
@@ -39,9 +37,7 @@ package func runCommandLine(_ arguments: ArraySlice<String>) async -> Never {
             )
         }
     case .forgetSpeaker(let speaker):
-        guard changingSpeakers({ try $0.forget(speaker) }) else {
-            fail("no speaker \(speaker); see transcribe speakers")
-        }
+        guard changingSpeakers({ try $0.forget(speaker) }) else { failNoSpeaker(speaker) }
     case .playSpeaker(let speaker):
         playSamples(of: speaker)
     case .saveSpeakerSamples(let speaker, let directory):
@@ -78,7 +74,7 @@ private func listSpeakers() {
         let number = String(speaker.id).padding(toLength: 4, withPad: " ", startingAt: 0)
         let name = (speaker.name ?? (speaker.isYou ? Speaker.you.rawValue : "-")) + (speaker.isYou ? " (you)" : "")
         let count = samples[speaker.id, default: 0]
-        let sampleCount = count == 0 ? "" : count == 1 ? ", 1 sample" : ", \(count) samples"
+        let sampleCount = count == 0 ? "" : ", " + counted(count, "sample")
         // Maybe one person, heard as two: not alike enough to be merged without being told to.
         let alike = speakers.filter {
             $0.id != speaker.id && voiceDistance($0.voice, speaker.voice) < SpeakerIdentifier.soundAlike
@@ -108,7 +104,7 @@ private func playSamples(of speaker: Int) {
 /// `transcribe speakers save`: writes the samples kept of a speaker as .m4a files into `directory`.
 private func saveSamples(of speaker: Int, in directory: String) {
     let samples = speakerSamples(speaker)
-    let folder = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+    let folder = URL(typedPath: directory)
     for (index, sample) in samples.enumerated() {
         let url = folder.appending(path: "speaker-\(speaker)-\(index + 1).m4a")
         do {
@@ -124,25 +120,27 @@ private func saveSamples(of speaker: Int, in directory: String) {
 /// stdin, to stdout or the text file.
 private func transcribe(inputPath: String, textPath: String?, options: Options) async {
     let readsStream = inputPath == "-"
-    let textURL = textPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
+    let textURL = textPath.map { URL(typedPath: $0).standardizedFileURL }
     if readsStream && isatty(STDIN_FILENO) != 0 {
         fail("nothing is piped in; - reads a live stream, e.g. totalrecall - | transcribe -")
     }
-    if let textURL { checkCanCreate(textURL, overwrite: options.overwrite) }
+    do {
+        try checkCanCreate(textURL.map { [$0] } ?? [], overwrite: options.overwrite)
+    } catch {
+        fail(error.localizedDescription)
+    }
 
     // Ctrl-C reaches every program in the pipeline, and totalrecall answers it by ending the stream. So rather than dying
     // with the last words still being recognized, keep going until the stream ends and finish the transcript from it. A
     // second Ctrl-C quits right away.
     let stopSignals = readsStream ? finishOnStopSignals() : []
     do {
-        guard await speechRecognitionIsAvailable() else { throw TranscribeError(speechRecognitionUnavailable) }
-        let locale = try await speechLocale(for: options.language)
-        try await installSpeechModel(for: locale)
+        let locale = try await readySpeechLocale(for: options.language)
         // Read here first, to tell the speakers apart, then by the reading task below.
         let source: any AudioSource & Sendable =
             readsStream
             ? try WAVStreamReader(handle: .standardInput)
-            : try FileAudioSource(url: URL(fileURLWithPath: (inputPath as NSString).expandingTildeInPath))
+            : try FileAudioSource(url: URL(typedPath: inputPath))
         let output = TranscriptionOutput(
             makePrinter: { save in
                 TranscriptPrinter(printsLines: save == nil || options.showsLive, isLive: options.showsLive, save: save)
@@ -159,46 +157,30 @@ private func transcribe(inputPath: String, textPath: String?, options: Options) 
     withExtendedLifetime(stopSignals) {}
 }
 
-/// Fails unless the text file's directory exists and, without `overwrite`, the file does not.
-private func checkCanCreate(_ textURL: URL, overwrite: Bool) {
-    let directory = textURL.deletingLastPathComponent().path
-    var isDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
-        fail("directory \(directory) does not exist")
-    }
-    if FileManager.default.fileExists(atPath: textURL.path) && !overwrite {
-        fail("\(textURL.path) already exists (use --force to overwrite)")
-    }
-}
-
 /// Ignores SIGINT, SIGTERM and SIGHUP the first time, so the transcript can finish from the end of the stream, and
 /// quits on the second; keep the returned sources for as long as that should hold.
 private func finishOnStopSignals() -> [any DispatchSourceSignal] {
-    signal(SIGPIPE, SIG_IGN)
-    let queue = DispatchQueue(label: "transcribe.signals")
-    nonisolated(unsafe) var isStopping = false  // only touched on `queue`
-    return [SIGINT, SIGTERM, SIGHUP].map { signalNumber in
-        signal(signalNumber, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: queue)
-        source.setEventHandler {
-            if isStopping { exit(128 + signalNumber) }
-            isStopping = true
-        }
-        source.resume()
-        return source
+    nonisolated(unsafe) var isStopping = false  // only touched on the signals' queue
+    return handleStopSignals(queue: DispatchQueue(label: "transcribe.signals")) { signalNumber in
+        if isStopping { exit(128 + signalNumber) }
+        isStopping = true
     }
 }
 
 /// A speaker's samples, longest first, failing if there are none.
 func speakerSamples(_ speaker: Int) -> [SpeakerDatabase.Sample] {
     let (exists, samples) = changingSpeakers { (try $0.speaker(speaker) != nil, try $0.samples(of: speaker)) }
-    guard exists else { fail("no speaker \(speaker); see transcribe speakers") }
+    guard exists else { failNoSpeaker(speaker) }
     guard !samples.isEmpty else {
         fail(
             "no samples of speaker \(speaker): they are kept from stretches of \(Int(SpeakerIdentifier.shortestSample)) s or more, until they have a name"
         )
     }
     return samples
+}
+
+private func failNoSpeaker(_ speaker: Int) -> Never {
+    fail("no speaker \(speaker); see transcribe speakers")
 }
 
 /// Opens the speaker database for `transcribe speakers`, failing if it cannot be read or changed.

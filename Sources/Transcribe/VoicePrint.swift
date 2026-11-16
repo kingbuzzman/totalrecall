@@ -61,7 +61,7 @@ final class VoicePrinter: VoicePrinting {
 
     init(model: MLModel) throws {
         guard let fft = vDSP.FFT(log2n: 9, radix: .radix2, ofType: DSPSplitComplex.self) else {
-            throw TranscribeError("cannot set up the FFT for voice prints")
+            throw MessageError("cannot set up the FFT for voice prints")
         }
         self.model = model
         self.fft = fft
@@ -158,10 +158,10 @@ final class VoicePrinter: VoicePrinting {
         let output = try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["features": input]))
         guard let embedding = output.featureValue(for: "embedding")?.multiArrayValue,
             embedding.count == Self.printLength
-        else { throw TranscribeError("the speaker model gave no voice print") }
+        else { throw MessageError("the speaker model gave no voice print") }
         let print = (0..<Self.printLength).map { embedding[$0].floatValue }
         let length = vDSP.sumOfSquares(print).squareRoot()
-        guard length > 0, length.isFinite else { throw TranscribeError("the speaker model gave an empty voice print") }
+        guard length > 0, length.isFinite else { throw MessageError("the speaker model gave an empty voice print") }
         return vDSP.divide(print, length)
     }
 
@@ -231,14 +231,14 @@ final class VoiceResampler {
         guard sampleRate.isFinite, (8_000...768_000).contains(sampleRate),
             let sourceFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
             let format = AVAudioFormat(standardFormatWithSampleRate: VoicePrinter.sampleRate, channels: 1)
-        else { throw TranscribeError("cannot tell voices apart in audio at \(sampleRate) Hz") }
+        else { throw MessageError("cannot tell voices apart in audio at \(sampleRate) Hz") }
         self.sourceFormat = sourceFormat
         self.format = format
         if sampleRate == VoicePrinter.sampleRate {
             converter = nil
         } else {
             guard let converter = AVAudioConverter(from: sourceFormat, to: format) else {
-                throw TranscribeError("cannot tell voices apart in audio at \(sampleRate) Hz")
+                throw MessageError("cannot tell voices apart in audio at \(sampleRate) Hz")
             }
             self.converter = converter
         }
@@ -254,7 +254,7 @@ final class VoiceResampler {
         guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity),
             converterInput.convert(input, with: converter, into: output) == nil
         else { return [] }
-        return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
+        return output.samples()
     }
 }
 
@@ -298,7 +298,7 @@ enum SpeakerModel {
         var size: UInt = 0
         let header = #dsohandle.assumingMemoryBound(to: mach_header_64.self)
         guard let bytes = getsectiondata(header, "__TEXT", name, &size), size > 0 else {
-            throw TranscribeError("this transcribe was built without its speaker model; build it with make")
+            throw MessageError("this transcribe was built without its speaker model; build it with make")
         }
         return Data(bytesNoCopy: bytes, count: Int(size), deallocator: .none)
     }

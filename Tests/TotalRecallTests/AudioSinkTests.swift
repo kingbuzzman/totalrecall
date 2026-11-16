@@ -112,7 +112,7 @@ final class FailingSink: AudioSink {
 
     func write(left: [Float], right: [Float], count: Int) throws {
         writes += 1
-        throw RecordingError("broken pipe")
+        throw MessageError("broken pipe")
     }
 
     func close() {

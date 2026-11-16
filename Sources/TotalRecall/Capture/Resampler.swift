@@ -18,23 +18,18 @@ final class Resampler {
             return
         }
         guard let converter = AVAudioConverter(from: format, to: monoFormat) else {
-            throw RecordingError("cannot convert audio from \(format)")
+            throw MessageError("cannot convert audio from \(format)")
         }
         converter.downmix = true
         self.converter = converter
     }
 
     func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        guard let converter else {
-            return Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
-        }
+        guard let converter else { return buffer.samples() }
         let ratio = monoFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + Self.capacitySlackFrames
-        if output.map({ $0.frameCapacity < capacity }) ?? true {
-            output = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: capacity)
-        }
-        guard let output else { return [] }
-        if input.convert(buffer, with: converter, into: output) != nil { return [] }
-        return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
+        output = .reusing(output, format: monoFormat, frameCapacity: capacity)
+        guard let output, input.convert(buffer, with: converter, into: output) == nil else { return [] }
+        return output.samples()
     }
 }

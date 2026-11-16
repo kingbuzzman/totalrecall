@@ -4,6 +4,12 @@ import Foundation
 import Shared
 import Speech
 
+extension String {
+    /// Whether it has any words, rather than nothing or bare punctuation, such as the "." the recognizer sometimes
+    /// reports for silence.
+    var hasWords: Bool { contains { $0.isLetter || $0.isNumber } }
+}
+
 /// Who is speaking, from totalrecall's channel split: your microphone on the left, everyone else on the right.
 enum Speaker: String {
     case you = "You"
@@ -54,7 +60,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
             let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
             let converter = AVAudioConverter(from: sourceFormat, to: analyzerFormat)
         else {
-            throw TranscribeError("the speech recognizer cannot take \(Int(sampleRate)) Hz audio")
+            throw MessageError("the speech recognizer cannot take \(Int(sampleRate)) Hz audio")
         }
         self.analyzerFormat = analyzerFormat
         self.converter = converter
@@ -116,7 +122,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
             let end = update.end ?? update.start
             await identifier.settle(through: end)
             // Not for bare punctuation, which is no one's words.
-            if update.text.contains(where: { $0.isLetter || $0.isNumber }) {
+            if update.text.hasWords {
                 update.voice = identifier.speaker(from: update.start, to: end)
             }
             onUpdate(update)
@@ -139,9 +145,7 @@ final class SpeakerTranscriber: @unchecked Sendable {
     }
 
     private func convert(_ samples: [Float]) -> AVAudioPCMBuffer? {
-        if self.source.map({ $0.frameCapacity < samples.count }) ?? true {
-            self.source = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
-        }
+        self.source = .reusing(self.source, format: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
         guard let source = self.source else { return nil }
         source.frameLength = AVAudioFrameCount(samples.count)
         source.floatChannelData![0].update(from: samples, count: samples.count)
@@ -208,11 +212,20 @@ func speechLocale(for identifier: String, among supported: [Locale], currentRegi
     }
     if wanted.region == nil, let locale = sameLanguage.first { return locale }
     let variants = sameLanguage.map { $0.identifier(.bcp47) }
-    throw TranscribeError(
+    throw MessageError(
         variants.isEmpty
             ? "no speech model for \(identifier); see transcribe --list-languages"
             : "no speech model for \(identifier); try \(variants.joined(separator: ", "))"
     )
+}
+
+/// Checks that this Mac can transcribe, and gives the recognizer's locale for `language`, with its speech model
+/// downloaded if need be.
+func readySpeechLocale(for language: String) async throws -> Locale {
+    guard await speechRecognitionIsAvailable() else { throw MessageError(speechRecognitionUnavailable) }
+    let locale = try await speechLocale(for: language)
+    try await installSpeechModel(for: locale)
+    return locale
 }
 
 /// Downloads the on-device speech model for this locale if it is not installed yet. Transcribers can only be made once
@@ -222,12 +235,4 @@ func installSpeechModel(for locale: Locale) async throws {
     guard let request = try await AssetInventory.assetInstallationRequest(supporting: modules) else { return }
     fputs("downloading the \(locale.identifier(.bcp47)) speech model...\n", stderr)
     try await request.downloadAndInstall()
-}
-
-struct TranscribeError: LocalizedError {
-    let errorDescription: String?
-
-    init(_ description: String) {
-        errorDescription = description
-    }
 }

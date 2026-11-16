@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// Writes the transcript as it comes in: each line ("[00:01:23] Them: ...") the moment the recognizer settles on it, in
 /// the order they settle, never reordered. Lines go to stdout, to a text file, or both; live, stdout also shows the text
@@ -41,8 +42,7 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     func update(_ update: TranscriptUpdate) {
-        // The recognizer sometimes reports bare punctuation, such as "." for silence.
-        let hasWords = update.text.contains { $0.isLetter || $0.isNumber }
+        let hasWords = update.text.hasWords
         lock.withLock {
             let key = update.speaker?.rawValue ?? ""
             // A line held back comes while the words after it are being recognized.
@@ -78,14 +78,13 @@ final class TranscriptPrinter: @unchecked Sendable {
     }
 
     private static func line(_ update: TranscriptUpdate) -> String {
-        let seconds = Int(update.start.isFinite ? update.start : 0)
-        let time = String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        let time = clockTime(Int(update.start.isFinite ? update.start : 0))
         let label = update.voice ?? update.speaker?.rawValue
         return "[\(time)] " + (label.map { "\($0): " } ?? "") + update.text
     }
 
     private func clearLiveLine() {
-        if isLive { write("\r\u{1B}[K") }
+        if isLive { write(Terminal.clearLine) }
     }
 
     private func drawLiveLine() {

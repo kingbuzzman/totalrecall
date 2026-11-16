@@ -203,9 +203,7 @@ private func run(
 /// Checks that this Mac can transcribe `language` (nil or "" for en-US), and downloads its speech model if need be, so
 /// that the first recording's transcript does not wait for it.
 package func prepareTranscription(language: String?) async throws {
-    guard await speechRecognitionIsAvailable() else { throw TranscribeError(speechRecognitionUnavailable) }
-    let locale = try await speechLocale(for: language.flatMap { $0.isEmpty ? nil : $0 } ?? Options().language)
-    try await installSpeechModel(for: locale)
+    _ = try await readySpeechLocale(for: language?.nonEmpty ?? Options().language)
 }
 
 /// Who a live transcript goes to, as it is written: each line as it settles, the words still being recognized ("" once
@@ -237,12 +235,10 @@ package func transcribeLive(
     identifiesSpeakers: Bool,
     handlers: LiveTranscriptHandlers
 ) async throws {
-    guard await speechRecognitionIsAvailable() else { throw TranscribeError(speechRecognitionUnavailable) }
     var options = Options()
-    if let language, !language.isEmpty { options.language = language }
+    options.language = language?.nonEmpty ?? options.language
     options.identifiesSpeakers = identifiesSpeakers
-    let locale = try await speechLocale(for: options.language)
-    try await installSpeechModel(for: locale)
+    let locale = try await readySpeechLocale(for: options.language)
     let source = try WAVStreamReader(handle: input)
     let output = TranscriptionOutput(
         makePrinter: { save in
@@ -266,7 +262,7 @@ package func transcribeLive(
 /// Creates the text file, emptying it if it exists (`--force`).
 func createTextFile(_ url: URL) throws -> FileHandle {
     guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-        throw TranscribeError("cannot create \(url.path)")
+        throw MessageError("cannot create \(url.path)")
     }
     return try FileHandle(forWritingTo: url)
 }

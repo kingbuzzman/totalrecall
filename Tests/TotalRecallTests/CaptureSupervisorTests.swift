@@ -1,4 +1,5 @@
 import CoreAudio
+import Shared
 import Testing
 
 @testable import TotalRecall
@@ -107,7 +108,7 @@ struct CaptureSupervisorTests {
 
     @Test func retriesAMicThatCannotStart() {
         devices.sessions[0].changeDevice()
-        devices.failure = RecordingError("device is gone")
+        devices.failure = MessageError("device is gone")
 
         supervisor.supervise()
 
@@ -126,7 +127,7 @@ struct CaptureSupervisorTests {
     }
 
     @Test func retriesSystemAudioThatCannotStart() async throws {
-        system.failure = RecordingError("tap failed")
+        system.failure = MessageError("tap failed")
         try await Task.sleep(for: .seconds(captureStallSeconds + 0.1))
         recorder.resetStallTimer(for: .microphone)
 

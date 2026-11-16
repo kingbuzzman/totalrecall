@@ -1,5 +1,6 @@
 import AppSupport
 import Foundation
+import Shared
 
 /// The settings, kept in the app's user defaults; Settings changes them through `@AppStorage` with the same keys.
 enum AppSettings {
@@ -34,21 +35,21 @@ enum AppSettings {
     /// no warnings.
     static let defaultWarningMinutes = 5
     static var warningMinutes: Int {
-        UserDefaults.standard.object(forKey: Key.warningMinutes) == nil
-            ? defaultWarningMinutes : UserDefaults.standard.integer(forKey: Key.warningMinutes)
+        defaults.object(forKey: Key.warningMinutes) == nil
+            ? defaultWarningMinutes : defaults.integer(forKey: Key.warningMinutes)
     }
 
     /// What to record from each calendar set up in Settings, by calendar identifier. A calendar not set up goes by
     /// `CalendarRules.defaults`, so one added later is recorded too.
     static var calendarRules: [String: CalendarRules] {
-        get { CalendarRules.decode(UserDefaults.standard.object(forKey: Key.calendarRules)) }
-        set { UserDefaults.standard.set(CalendarRules.encode(newValue), forKey: Key.calendarRules) }
+        get { CalendarRules.decode(defaults.object(forKey: Key.calendarRules)) }
+        set { defaults.set(CalendarRules.encode(newValue), forKey: Key.calendarRules) }
     }
 
     /// The identifier of the calendar a meeting started from the menu is filed under, as chosen in Settings; nil when
     /// none was chosen.
     static var defaultMeetingCalendar: String? {
-        UserDefaults.standard.string(forKey: Key.defaultMeetingCalendar).flatMap { $0.isEmpty ? nil : $0 }
+        defaults.string(forKey: Key.defaultMeetingCalendar)?.nonEmpty
     }
 
     /// How long the event New Meeting adds lasts until the meeting is stopped, when its end moves to then; 30 minutes
@@ -56,14 +57,14 @@ enum AppSettings {
     static let defaultNewMeetingMinutes = 30
     static let newMeetingLengths = [15, 30, 45, 60, 90, 120]
     static var newMeetingMinutes: Int {
-        let minutes = UserDefaults.standard.integer(forKey: Key.newMeetingMinutes)
+        let minutes = defaults.integer(forKey: Key.newMeetingMinutes)
         return minutes > 0 ? minutes : defaultNewMeetingMinutes
     }
 
     /// The name last given to New Meeting, which it suggests next time, to be changed or kept.
     static var lastMeetingName: String {
-        get { UserDefaults.standard.string(forKey: Key.lastMeetingName) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: Key.lastMeetingName) }
+        get { defaults.string(forKey: Key.lastMeetingName) ?? "" }
+        set { defaults.set(newValue, forKey: Key.lastMeetingName) }
     }
 
     /// The rules of `calendar`: as set up, or its defaults; a read-only calendar is never recorded, whatever was set.
@@ -83,24 +84,21 @@ enum AppSettings {
         .path
 
     static var recordingsFolder: URL {
-        URL(filePath: UserDefaults.standard.string(forKey: Key.recordingsFolder) ?? defaultRecordingsFolder)
+        URL(filePath: defaults.string(forKey: Key.recordingsFolder) ?? defaultRecordingsFolder)
     }
 
     static var format: AudioFormatChoice {
-        UserDefaults.standard.string(forKey: Key.format).flatMap(AudioFormatChoice.init) ?? .default
+        defaults.string(forKey: Key.format).flatMap(AudioFormatChoice.init) ?? .default
     }
 
     /// Part of the name of a microphone to prefer whenever it is connected; nil for the system input.
     static var microphone: String? {
-        UserDefaults.standard.string(forKey: Key.microphone).flatMap { $0.isEmpty ? nil : $0 }
+        defaults.string(forKey: Key.microphone)?.nonEmpty
     }
 
     /// The language spoken, such as es or es-MX; nil for transcribe's default, en-US.
     static var language: String? {
-        UserDefaults.standard.string(forKey: Key.language).flatMap {
-            let language = $0.trimmingCharacters(in: .whitespaces)
-            return language.isEmpty ? nil : language
-        }
+        defaults.string(forKey: Key.language)?.trimmingCharacters(in: .whitespaces).nonEmpty
     }
 
     /// Whether a recording goes to the Trash once saved and transcribed, keeping only the transcript; on unless turned
@@ -110,12 +108,14 @@ enum AppSettings {
     }
 
     static var identifiesSpeakers: Bool {
-        UserDefaults.standard.bool(forKey: Key.identifiesSpeakers)
+        defaults.bool(forKey: Key.identifiesSpeakers)
     }
+
+    private static var defaults: UserDefaults { .standard }
 
     /// A setting that is on or off, or `unset` when never set. Read with `bool(forKey:)`, which also takes the text a
     /// launch argument gives, such as `-recordsAutomatically NO`, where a cast to Bool would take it for unset.
     private static func flag(_ key: String, unset: Bool) -> Bool {
-        UserDefaults.standard.object(forKey: key) == nil ? unset : UserDefaults.standard.bool(forKey: key)
+        defaults.object(forKey: key) == nil ? unset : defaults.bool(forKey: key)
     }
 }

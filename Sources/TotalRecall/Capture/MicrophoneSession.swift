@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import Shared
 
 /// Receives each captured buffer, resampled to mono, with the host time of its first frame and the ID of the
 /// `MicrophoneSession` that captured it.
@@ -48,7 +49,7 @@ final class MicrophoneSession: MicrophoneCaptureSession {
             isFloat32,
             let firstChannelFormat = AVAudioFormat(standardFormatWithSampleRate: streamFormat.mSampleRate, channels: 1)
         else {
-            throw RecordingError("unsupported \(device.name) format")
+            throw MessageError("unsupported \(device.name) format")
         }
         let resampler = try Resampler(from: firstChannelFormat)
         let rateWatch = RateWatch(expectedRate: streamFormat.mSampleRate)
@@ -61,7 +62,7 @@ final class MicrophoneSession: MicrophoneCaptureSession {
         }
         var procID: AudioDeviceIOProcID?
         try ensure(AudioDeviceCreateIOProcIDWithBlock(&procID, device.id, nil, ioBlock), "listening to \(device.name)")
-        guard let procID else { throw RecordingError("listening to \(device.name) failed") }
+        guard let procID else { throw MessageError("listening to \(device.name) failed") }
         do {
             try ensure(AudioDeviceStart(device.id, procID), "starting \(device.name)")
         } catch {
@@ -110,9 +111,7 @@ private final class FirstChannel {
         let channelCount = Int(firstBuffer.mNumberChannels)
         let frameCount = Int(firstBuffer.mDataByteSize) / (MemoryLayout<Float>.size * channelCount)
         guard frameCount > 0 else { return nil }
-        if buffer.map({ $0.frameCapacity < frameCount }) ?? true {
-            buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
-        }
+        buffer = .reusing(buffer, format: format, frameCapacity: AVAudioFrameCount(frameCount))
         guard let buffer else { return nil }
         buffer.frameLength = AVAudioFrameCount(frameCount)
         let interleaved = data.assumingMemoryBound(to: Float.self)

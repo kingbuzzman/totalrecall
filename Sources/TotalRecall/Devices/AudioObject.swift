@@ -1,12 +1,13 @@
 package import CoreAudio
 import Foundation
+import Shared
 
 // Thin helpers over the Core Audio object property API.
 
 let systemObject = AudioObjectID(kAudioObjectSystemObject)
 
 func ensure(_ status: OSStatus, _ action: String) throws {
-    if status != noErr { throw RecordingError("\(action) failed (OSStatus \(status))") }
+    if status != noErr { throw MessageError("\(action) failed (OSStatus \(status))") }
 }
 
 func propertyAddress(

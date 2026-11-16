@@ -1,3 +1,4 @@
+import Shared
 import Testing
 
 @testable import TotalRecall
@@ -68,12 +69,12 @@ struct CaptureOutageTests {
 
     @Test func reportsEachReasonForFailingOncePerOutage() {
         outage.restarting(now: 0)
-        outage.restartFailed(RecordingError("tap failed"))
-        outage.restartFailed(RecordingError("tap failed"))
-        outage.restartFailed(RecordingError("no device"))
+        outage.restartFailed(MessageError("tap failed"))
+        outage.restartFailed(MessageError("tap failed"))
+        outage.restartFailed(MessageError("no device"))
         outage.update(deliveries: 1, now: 1)
         outage.restarting(now: 2)
-        outage.restartFailed(RecordingError("no device"))
+        outage.restartFailed(MessageError("no device"))
 
         #expect(
             announcements.messages == [

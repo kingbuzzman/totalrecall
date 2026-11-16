@@ -1,5 +1,6 @@
 import AppKit
 import AppSupport
+import Shared
 import SwiftUI
 
 /// TotalRecall.app: records and transcribes meetings from the menu bar, as `scripts/record-meetings` does from the
@@ -129,7 +130,7 @@ struct MenuContent: View {
 
             if !model.unsavedRecordings.isEmpty {
                 let count = model.unsavedRecordings.count
-                Button(count == 1 ? "Save 1 Unsaved Recording" : "Save \(count) Unsaved Recordings") {
+                Button("Save \(counted(count, "Unsaved Recording"))") {
                     model.saveUnsavedRecordings()
                 }
             }
@@ -174,7 +175,7 @@ struct MenuContent: View {
                 }
             }
         } else if let next = model.nextMeeting {
-            let time = next.start.formatted(date: .omitted, time: .shortened)
+            let time = next.start.shortTime
             Text(
                 next.start <= model.scheduleTime
                     ? "Now: \(next.shortTitle), since \(time)" : "Next: \(next.shortTitle) at \(time)"
@@ -193,8 +194,6 @@ struct MenuContent: View {
 
     /// One of today's meetings: when, what, and where it stands, with a submenu to record it now or skip it.
     private func todayItem(_ meeting: ScheduledMeeting) -> some View {
-        let start = meeting.start.formatted(date: .omitted, time: .shortened)
-        let end = meeting.end.formatted(date: .omitted, time: .shortened)
         let status = model.status(of: meeting)
         let note =
             switch status {
@@ -203,7 +202,7 @@ struct MenuContent: View {
             case .underway: " — now"
             case .upcoming, .ended: ""
             }
-        return Menu("\(start)–\(end)  \(meeting.shortTitle)\(note)") {
+        return Menu("\(meeting.start.shortTime)–\(meeting.end.shortTime)  \(meeting.shortTitle)\(note)") {
             Button(model.isRecording ? "Stop and Record It Now" : "Record Now") { model.record(meeting) }
             if status == .upcoming || status == .underway || status == .skipped {
                 Button(status == .skipped ? "Don't Skip" : "Skip") { model.toggleSkipped(meeting) }

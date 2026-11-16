@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import Shared
 
 /// Records the preferred microphone when it is present, otherwise the system input. Switching is make-before-break:
 /// the old microphone keeps recording until the new one delivers real audio, which hides the ~2 s AirPods take to
@@ -67,7 +68,7 @@ final class MicrophoneCapture {
 
     /// Starts recording the target device. While another device is recording, the new one waits as pending.
     func start() throws {
-        guard let target = targetDevice() else { throw RecordingError("no microphone available") }
+        guard let target = targetDevice() else { throw MessageError("no microphone available") }
         let sessionID = lock.withLock {
             nextSessionID += 1
             return nextSessionID

@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import Shared
 import Testing
 
 @testable import Transcribe
@@ -114,7 +115,7 @@ struct VoicePrinterTests {
 
         #expect(abs(resampled.count - 16_000) < 200)
         #expect(try VoiceResampler(sampleRate: 16_000).resample(second) == second)
-        #expect(throws: TranscribeError.self) { try VoiceResampler(sampleRate: 4_000) }
+        #expect(throws: MessageError.self) { try VoiceResampler(sampleRate: 4_000) }
     }
 
     private func printer() async throws -> VoicePrinter {

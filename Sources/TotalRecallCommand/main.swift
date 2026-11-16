@@ -7,7 +7,7 @@ import TotalRecall
 
 func fail(_ message: String) -> Never {
     // On a terminal, start on a clean line, like every other message (see StatusLine).
-    let clearLine = isatty(STDERR_FILENO) != 0 ? "\r\u{1B}[K" : ""
+    let clearLine = isatty(STDERR_FILENO) != 0 ? Terminal.clearLine : ""
     fputs("\(clearLine)totalrecall: \(message)\n", stderr)
     exit(1)
 }
@@ -109,5 +109,5 @@ do {
 } catch {
     fail(error.localizedDescription)
 }
-let stopSignals = handleStopSignals { stopAndExit() }
+let stopSignals = handleStopSignals { _ in stopAndExit() }
 dispatchMain()

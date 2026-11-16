@@ -1,5 +1,6 @@
 import AppSupport
 import Foundation
+import Shared
 import TotalRecall
 import Transcribe
 import os
@@ -47,7 +48,7 @@ extension AppModel {
                 let file = OutputFile(path: output.path)
                 do {
                     guard !FileManager.default.fileExists(atPath: output.path) else {
-                        throw AppError("\(output.lastPathComponent) already exists")
+                        throw MessageError("\(output.lastPathComponent) already exists")
                     }
                     try file.save()
                     if let encoding = file.encodingURL { try? FileManager.default.removeItem(at: encoding) }

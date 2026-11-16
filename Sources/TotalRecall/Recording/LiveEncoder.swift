@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// Encodes the recording into the output file's format while it is being recorded, so that saving only has to finish
 /// the file, instead of converting the whole recording after Ctrl-C: that takes seconds for every hour of audio, about
@@ -55,7 +56,7 @@ final class LiveEncoder: @unchecked Sendable {
         let accepted = lock.withLock {
             guard failure == nil else { return false }
             guard backlogFrames + count <= Self.maxBacklogFrames else {
-                failure = RecordingError("encoding fell more than \(Self.maxBacklogFrames / Int(sampleRate)) s behind")
+                failure = MessageError("encoding fell more than \(Self.maxBacklogFrames / Int(sampleRate)) s behind")
                 return false
             }
             backlogFrames += count
@@ -148,10 +149,10 @@ final class FFmpegEncoder: Encoder {
     func finish() throws {
         try input.close()
         guard exited.wait(timeout: .now() + LiveEncoder.finishTimeoutSeconds) == .success else {
-            throw RecordingError("ffmpeg did not finish within \(Int(LiveEncoder.finishTimeoutSeconds)) s")
+            throw MessageError("ffmpeg did not finish within \(Int(LiveEncoder.finishTimeoutSeconds)) s")
         }
         guard process.terminationStatus == 0 else {
-            throw RecordingError("ffmpeg exited with status \(process.terminationStatus)")
+            throw MessageError("ffmpeg exited with status \(process.terminationStatus)")
         }
     }
 

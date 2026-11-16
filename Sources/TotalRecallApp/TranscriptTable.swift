@@ -31,7 +31,8 @@ struct TranscriptTable: NSViewRepresentable {
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.usesAlternatingRowBackgroundColors = false
         let columns: [(NSUserInterfaceItemIdentifier, String, CGFloat)] = [
-            (Column.time, "Time", 64), (Column.speaker, "Speaker", 84), (Column.text, "Text", 300),
+            (Column.time, "Time", Column.timeWidth), (Column.speaker, "Speaker", Column.speakerWidth),
+            (Column.text, "Text", 300),
         ]
         for (identifier, title, width) in columns {
             let column = NSTableColumn(identifier: identifier)
@@ -71,6 +72,9 @@ struct TranscriptTable: NSViewRepresentable {
         static let time = NSUserInterfaceItemIdentifier("time")
         static let speaker = NSUserInterfaceItemIdentifier("speaker")
         static let text = NSUserInterfaceItemIdentifier("text")
+        /// The time and speaker columns' widths, which the strip of words still being recognized lines up with.
+        static let timeWidth: CGFloat = 64
+        static let speakerWidth: CGFloat = 84
     }
 
     @MainActor

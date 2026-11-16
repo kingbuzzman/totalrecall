@@ -6,14 +6,7 @@ package func requestMicrophoneAccess() -> Bool {
     case .authorized:
         return true
     case .notDetermined:
-        let answered = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var granted = false  // written before `answered.signal()`, read after `answered.wait()`
-        AVCaptureDevice.requestAccess(for: .audio) { answer in
-            granted = answer
-            answered.signal()
-        }
-        answered.wait()
-        return granted
+        return waitForAnswer { AVCaptureDevice.requestAccess(for: .audio, completionHandler: $0) }
     default:
         return false
     }

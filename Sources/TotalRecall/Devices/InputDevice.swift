@@ -1,4 +1,5 @@
 package import CoreAudio
+import Shared
 
 package struct InputDevice {
     package let id: AudioDeviceID
@@ -29,7 +30,7 @@ package struct InputDevice {
     func streamFormat() throws -> AudioStreamBasicDescription {
         let streamsAddress = propertyAddress(kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput)
         let streams = try readObjectIDs(id, streamsAddress, "listing \(name) streams")
-        guard let firstStream = streams.first else { throw RecordingError("\(name) has no input") }
+        guard let firstStream = streams.first else { throw MessageError("\(name) has no input") }
         return try readProperty(
             firstStream,
             propertyAddress(kAudioStreamPropertyVirtualFormat),

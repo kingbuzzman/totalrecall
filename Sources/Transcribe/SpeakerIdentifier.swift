@@ -3,6 +3,7 @@
 
 import AVFoundation
 import Foundation
+import Shared
 
 /// Tells the people on one channel apart by their voices (`--identify-speakers`). Every `hopSeconds` it takes a print
 /// of the last `windowSeconds`, and a line of the transcript goes to whoever most of its time was spoken by. With a
@@ -633,7 +634,7 @@ func m4a(_ samples: ArraySlice<Float>) throws -> Data {
     let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
     guard
         let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(samples.count))
-    else { throw TranscribeError("cannot make a sample of \(samples.count) frames") }
+    else { throw MessageError("cannot make a sample of \(samples.count) frames") }
     buffer.frameLength = buffer.frameCapacity
     samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: $0.count) }
     try file.write(from: buffer)

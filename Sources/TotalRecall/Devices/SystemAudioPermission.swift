@@ -42,12 +42,5 @@ package func requestSystemAudioAccess() -> Bool {
         let request = tccFunction("TCCAccessRequest", as: TCCAccessRequest.self)
     else { return true }
     if preflight(audioCaptureService, nil) == 0 { return true }
-    let answered = DispatchSemaphore(value: 0)
-    var granted = false
-    request(audioCaptureService, nil) { answer in
-        granted = answer
-        answered.signal()
-    }
-    answered.wait()
-    return granted
+    return waitForAnswer { answer in request(audioCaptureService, nil) { answer($0) } }
 }

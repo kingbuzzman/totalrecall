@@ -1,5 +1,6 @@
 import AVFoundation
 package import Foundation
+import Shared
 
 /// Where the recording goes: a file, a live WAV stream on stdout (`-`) for another program such as `transcribe -`, or
 /// both (`--stream`).
@@ -32,7 +33,7 @@ package struct OutputFile {
     let rawURL: URL?
 
     package init(path: String, environment: [String: String] = ProcessInfo.processInfo.environment) {
-        url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
+        url = URL(typedPath: path).standardizedFileURL
         partialURL = url.appendingPathExtension("partial.caf")
         let savesRaw = environment["TOTALRECALL_RAW"] == "1"
         rawURL = savesRaw ? url.appendingPathExtension("raw.caf") : nil
@@ -40,14 +41,7 @@ package struct OutputFile {
 
     /// Throws unless the directory exists and, without `overwrite`, neither file exists yet.
     package func checkCanCreate(overwrite: Bool) throws {
-        let directory = url.deletingLastPathComponent().path
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw RecordingError("directory \(directory) does not exist")
-        }
-        for existing in [url, partialURL] where FileManager.default.fileExists(atPath: existing.path) && !overwrite {
-            throw RecordingError("\(existing.path) already exists (use --force to overwrite)")
-        }
+        try Shared.checkCanCreate([url, partialURL], overwrite: overwrite)
     }
 
     /// Where `LiveEncoder` encodes the recording while it is recorded, such as `meeting.encoding.mp3` for
@@ -105,7 +99,7 @@ private func transcode(_ source: URL, to destination: URL, settings: [String: An
 
 private func transcodeWithFFmpeg(_ source: URL, to destination: URL) throws {
     guard let ffmpeg = findFFmpeg() else {
-        throw RecordingError("saving .\(destination.pathExtension) needs ffmpeg (brew install ffmpeg)")
+        throw MessageError("saving .\(destination.pathExtension) needs ffmpeg (brew install ffmpeg)")
     }
     let process = Process()
     process.executableURL = ffmpeg
@@ -115,6 +109,6 @@ private func transcodeWithFFmpeg(_ source: URL, to destination: URL) throws {
     try process.run()
     process.waitUntilExit()
     if process.terminationStatus != 0 {
-        throw RecordingError("ffmpeg exited with status \(process.terminationStatus)")
+        throw MessageError("ffmpeg exited with status \(process.terminationStatus)")
     }
 }

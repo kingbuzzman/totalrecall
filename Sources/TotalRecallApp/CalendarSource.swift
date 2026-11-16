@@ -3,6 +3,7 @@ import AppSupport
 import EventKit
 import Foundation
 import Observation
+import Shared
 
 /// Today's events from Calendar.app, with every account it has (Google, Exchange, iCloud, ...), through EventKit, once
 /// the user gives the app access to their calendars.
@@ -71,7 +72,17 @@ final class CalendarSource {
         let day = MeetingSchedule.day(containing: now)
         let included = store.calendars(for: .event).filter { isRecorded(Self.calendar($0)) }
         guard !included.isEmpty else { return [] }
-        let predicate = store.predicateForEvents(withStart: day.start, end: day.end, calendars: included)
+        return events(on: included, in: day)
+    }
+
+    /// The events of the calendar `id` in `interval`, such as to try a rule on; none without access.
+    func events(onCalendar id: String, in interval: DateInterval) -> [CalendarEvent] {
+        guard hasAccess, let calendar = store.calendar(withIdentifier: id) else { return [] }
+        return events(on: [calendar], in: interval)
+    }
+
+    private func events(on calendars: [EKCalendar], in interval: DateInterval) -> [CalendarEvent] {
+        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
         return store.events(matching: predicate).map { event in
             CalendarEvent(
                 title: event.title ?? "",
@@ -84,26 +95,10 @@ final class CalendarSource {
         }
     }
 
-    /// The events of the calendar `id` in `interval`, such as to try a rule on; none without access.
-    func events(onCalendar id: String, in interval: DateInterval) -> [CalendarEvent] {
-        guard hasAccess, let calendar = store.calendar(withIdentifier: id) else { return [] }
-        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: [calendar])
-        return store.events(matching: predicate).map { event in
-            CalendarEvent(
-                title: event.title ?? "",
-                start: event.startDate,
-                end: event.endDate,
-                calendar: calendar.title,
-                calendarID: id,
-                isAllDay: event.isAllDay
-            )
-        }
-    }
-
     /// Adds `meeting` to its calendar as an event; the event's identifier.
     func add(_ meeting: ScheduledMeeting) throws -> String {
         guard let calendar = store.calendar(withIdentifier: meeting.calendarID) else {
-            throw AppError("the calendar \(meeting.calendar) is gone")
+            throw MessageError("the calendar \(meeting.calendar) is gone")
         }
         let event = EKEvent(eventStore: store)
         event.calendar = calendar
@@ -117,7 +112,7 @@ final class CalendarSource {
     /// Moves the end of the event `id` to `end`, as when the meeting it is of stops.
     func moveEnd(ofEvent id: String, to end: Date) throws {
         guard let event = store.calendarItem(withIdentifier: id) as? EKEvent else {
-            throw AppError("the event is gone from the calendar")
+            throw MessageError("the event is gone from the calendar")
         }
         event.endDate = end
         try store.save(event, span: .thisEvent, commit: true)

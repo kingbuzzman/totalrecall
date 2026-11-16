@@ -54,17 +54,17 @@ final class EchoFilter: @unchecked Sendable {
             guard update.speaker == .you, !update.isHeld else { return pass(update) }
             if update.isFinal {
                 let isShown = !looksLikeEcho(update.text, from: update.start, to: update.end)
+                // Unless they are the next line's, the words still being recognized were this line's.
+                let liveWordsFollowIt = yourLiveWords.map { $0.start >= update.end ?? update.start } ?? false
                 if isShown {
                     var notice = update
                     notice.isHeld = true
                     pass(notice)
-                } else if areYourLiveWordsShown,
-                    !(yourLiveWords.map { $0.start >= update.end ?? update.start } ?? false)
-                {
+                } else if areYourLiveWordsShown, !liveWordsFollowIt {
                     // The words that became the line are not shown either.
                     passNoLiveWords(from: update.start)
                 }
-                if !(yourLiveWords.map { $0.start >= update.end ?? update.start } ?? false) { yourLiveWords = nil }
+                if !liveWordsFollowIt { yourLiveWords = nil }
                 held.append((update, isShown))
                 passSettledLines()
             } else {
@@ -120,7 +120,7 @@ final class EchoFilter: @unchecked Sendable {
             held.removeFirst()
             if isEcho(line) {
                 // It never comes, so its words stop showing.
-                pass(TranscriptUpdate(speaker: .you, start: line.start, text: "", isFinal: true, end: line.end))
+                passWithdrawn(line)
             } else {
                 pass(line)
             }
@@ -139,8 +139,13 @@ final class EchoFilter: @unchecked Sendable {
             guard looksLikeEcho(line.text, from: line.start, to: line.end) else { continue }
             held[index].isShown = false
             // As for an echo: it never comes, for now, so its words stop showing.
-            pass(TranscriptUpdate(speaker: .you, start: line.start, text: "", isFinal: true, end: line.end))
+            passWithdrawn(line)
         }
+    }
+
+    /// Says a line of yours shown while held never comes, so its words stop showing.
+    private func passWithdrawn(_ line: TranscriptUpdate) {
+        pass(TranscriptUpdate(speaker: .you, start: line.start, text: "", isFinal: true, end: line.end))
     }
 
     /// Clears your words still being recognized from what is shown.
@@ -155,14 +160,11 @@ final class EchoFilter: @unchecked Sendable {
         if isFarQuieterThanThem(from: start, to: end) { return true }
         let words = Self.words(text)
         guard !words.isEmpty else { return false }
-        var theirWords = theirLines.filter {
-            $0.end >= start - Self.reach && $0.start <= (end ?? .infinity) + Self.reach
-        }
-        .reduce(into: Set()) { $0.formUnion($1.words) }
+        var theirWords = theirWords(from: start, to: end ?? .infinity)
         if let theirWordsStart, theirWordsStart <= (end ?? .infinity) + Self.reach {
             theirWords.formUnion(theirLiveWords)
         }
-        return Double(words.filter(theirWords.contains).count) >= Double(words.count) * Self.echoShare
+        return Self.mostlyRepeats(words, theirWords)
     }
 
     /// Whether your microphone was far quieter than the system audio, which had sound, from `start` to `end`, or up to
@@ -178,11 +180,18 @@ final class EchoFilter: @unchecked Sendable {
         if isFarQuieterThanThem(from: line.start, to: line.end ?? line.start) { return true }
         let words = Self.words(line.text)
         guard words.count >= Self.fewestWords else { return false }
-        let (start, end) = (line.start - Self.reach, (line.end ?? line.start) + Self.reach)
-        let theirWords = theirLines.filter { $0.start <= end && $0.end >= start }.reduce(into: Set()) {
-            $0.formUnion($1.words)
-        }
-        return Double(words.filter(theirWords.contains).count) >= Double(words.count) * Self.echoShare
+        return Self.mostlyRepeats(words, theirWords(from: line.start, to: line.end ?? line.start))
+    }
+
+    /// The words of the lines the system audio's recognizer settled on from `start` to `end`, give or take `reach`.
+    private func theirWords(from start: Double, to end: Double) -> Set<String> {
+        theirLines.filter { $0.end >= start - Self.reach && $0.start <= end + Self.reach }
+            .reduce(into: Set()) { $0.formUnion($1.words) }
+    }
+
+    /// Whether at least `echoShare` of `words` are among `theirs`.
+    private static func mostlyRepeats(_ words: Set<String>, _ theirs: Set<String>) -> Bool {
+        Double(words.filter(theirs.contains).count) >= Double(words.count) * echoShare
     }
 
     /// The words of a line, lowercased, without punctuation.

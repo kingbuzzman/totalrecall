@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 import Testing
 
 @testable import Transcribe
@@ -330,7 +331,7 @@ struct SpeakerIdentifierTests {
 
     @Test func cannotTellVoicesApartInAudioThatIsNotAudio() {
         for sampleRate in [0, 100, .nan, .infinity] {
-            #expect(throws: TranscribeError.self) { try makeIdentifier(sampleRate: sampleRate) }
+            #expect(throws: MessageError.self) { try makeIdentifier(sampleRate: sampleRate) }
         }
     }
 
@@ -402,7 +403,7 @@ private struct StandInPrinter: VoicePrinting {
     static func level(_ voice: Int) -> Float { Float(voice) / 10 }
 
     func voicePrint(of samples: ArraySlice<Float>, minimumSpeech: Double) throws -> [Float]? {
-        if fails { throw TranscribeError("the speaker model failed") }
+        if fails { throw MessageError("the speaker model failed") }
         var print = [Float](repeating: 0, count: VoicePrinter.printLength)
         // Resampled audio wobbles a little around its level, and a little more at the edges of each voice.
         for sample in samples where abs(sample) > 0.05 {

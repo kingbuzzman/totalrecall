@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 let usage = """
     usage: transcribe [--language LANG] [--mix] [--identify-speakers] [--force] <audio-file> [<text-file>]
@@ -69,7 +70,7 @@ enum Command: Equatable {
                 options.overwrite = true
             case "--language":
                 guard let value = arguments.popFirst(), !value.hasPrefix("-") else {
-                    throw TranscribeError("--language needs a language, such as es")
+                    throw MessageError("--language needs a language, such as es")
                 }
                 options.language = value
             case "--list-languages":
@@ -80,14 +81,14 @@ enum Command: Equatable {
                 return .version
             default:
                 guard argument == "-" || !argument.hasPrefix("-") else {
-                    throw TranscribeError("unexpected argument \(argument)\n\(usage)")
+                    throw MessageError("unexpected argument \(argument)\n\(usage)")
                 }
                 paths.append(argument)
             }
         }
-        guard (1...2).contains(paths.count) else { throw TranscribeError("expected an audio file or -\n\(usage)") }
+        guard (1...2).contains(paths.count) else { throw MessageError("expected an audio file or -\n\(usage)") }
         if options.showsLive && paths[0] != "-" {
-            throw TranscribeError("--live is for a live stream (-); a file is transcribed faster than it was spoken")
+            throw MessageError("--live is for a live stream (-); a file is transcribed faster than it was spoken")
         }
         return .transcribe(inputPath: paths[0], textPath: paths.count == 2 ? paths[1] : nil, options: options)
     }
@@ -97,7 +98,7 @@ enum Command: Equatable {
         var arguments = arguments
         func number() throws -> Int {
             guard let argument = arguments.popFirst(), let number = Int(argument) else {
-                throw TranscribeError("expected a speaker's number, such as 3; transcribe speakers lists them")
+                throw MessageError("expected a speaker's number, such as 3; transcribe speakers lists them")
             }
             return number
         }
@@ -107,7 +108,7 @@ enum Command: Equatable {
             command = .listSpeakers
         case "name":
             let speaker = try number()
-            guard !arguments.isEmpty else { throw TranscribeError("expected a name for speaker \(speaker)") }
+            guard !arguments.isEmpty else { throw MessageError("expected a name for speaker \(speaker)") }
             command = .nameSpeaker(speaker, name: arguments.joined(separator: " "))
             arguments = []
         case "merge":
@@ -119,13 +120,13 @@ enum Command: Equatable {
         case "save":
             let speaker = try number()
             guard let directory = arguments.popFirst() else {
-                throw TranscribeError("expected a directory to save speaker \(speaker)'s samples in")
+                throw MessageError("expected a directory to save speaker \(speaker)'s samples in")
             }
             command = .saveSpeakerSamples(speaker, directory: directory)
         case let other?:
-            throw TranscribeError("unknown speakers command \(other)\n\(usage)")
+            throw MessageError("unknown speakers command \(other)\n\(usage)")
         }
-        guard arguments.isEmpty else { throw TranscribeError("unexpected argument \(arguments.first!)\n\(usage)") }
+        guard arguments.isEmpty else { throw MessageError("unexpected argument \(arguments.first!)\n\(usage)") }
         return command
     }
 }

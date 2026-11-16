@@ -22,9 +22,7 @@ final class AudioFileSink: AudioSink {
 
     func write(left: [Float], right: [Float], count: Int) throws {
         guard let file else { return }
-        if buffer.map({ $0.frameCapacity < count }) ?? true {
-            buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: AVAudioFrameCount(count))
-        }
+        buffer = .reusing(buffer, format: stereoFormat, frameCapacity: AVAudioFrameCount(count))
         let buffer = buffer!
         buffer.frameLength = AVAudioFrameCount(count)
         copy(left, count: count, to: buffer.floatChannelData![0])

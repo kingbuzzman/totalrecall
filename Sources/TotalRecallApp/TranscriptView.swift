@@ -107,9 +107,6 @@ struct TranscriptView: View {
 
 /// A line of the words still being recognized, in the strip below the table, laid out like its rows.
 private struct TranscriptRow: View {
-    static let timeWidth: CGFloat = 64
-    static let speakerWidth: CGFloat = 84
-
     let line: TranscriptLine
     var isLive = false
 
@@ -118,12 +115,12 @@ private struct TranscriptRow: View {
             Text(line.time)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: Self.timeWidth, alignment: .leading)
+                .frame(width: TranscriptTable.Column.timeWidth, alignment: .leading)
             Text(line.speaker)
                 .fontWeight(.semibold)
-                .foregroundStyle(color)
+                .foregroundStyle(Color(nsColor: line.side.color))
                 .lineLimit(1)
-                .frame(width: Self.speakerWidth, alignment: .leading)
+                .frame(width: TranscriptTable.Column.speakerWidth, alignment: .leading)
             Text(line.text)
                 .italic(isLive)
                 .foregroundStyle(isLive ? .secondary : .primary)
@@ -135,15 +132,6 @@ private struct TranscriptRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 12)
-        .background(color.opacity(line.side == .unknown ? 0 : isLive ? 0.05 : 0.12))
-    }
-
-    /// You in blue, everyone else in orange: a pair that stays apart in light and dark mode, and for color blindness.
-    private var color: Color {
-        switch line.side {
-        case .you: .blue
-        case .them: .orange
-        case .unknown: .secondary
-        }
+        .background(Color(nsColor: line.side.color).opacity(line.side == .unknown ? 0 : isLive ? 0.05 : 0.12))
     }
 }

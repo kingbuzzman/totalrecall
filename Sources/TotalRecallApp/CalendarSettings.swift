@@ -1,5 +1,6 @@
 import AppKit
 import AppSupport
+import Shared
 import SwiftUI
 
 /// Access to the calendars, and for each, whether its meetings are recorded and which of them to ignore.
@@ -158,10 +159,7 @@ private struct CalendarRow: View {
     /// What it ignores, in a few words: "Ignores 2 phrases · focus & prep".
     private var summary: String {
         var parts: [String] = []
-        if !rules.ignoredPhrases.isEmpty {
-            let count = rules.ignoredPhrases.count
-            parts.append(count == 1 ? "1 phrase" : "\(count) phrases")
-        }
+        if !rules.ignoredPhrases.isEmpty { parts.append(counted(rules.ignoredPhrases.count, "phrase")) }
         if rules.skipsFocusAndPrep { parts.append("focus & prep") }
         return parts.isEmpty ? "Ignores nothing" : "Ignores " + parts.joined(separator: " · ")
     }
@@ -310,7 +308,7 @@ private struct RuleTestView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(meeting.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
                             .frame(width: 96, alignment: .leading)
-                        Text(meeting.start.formatted(date: .omitted, time: .shortened))
+                        Text(meeting.start.shortTime)
                             .monospacedDigit()
                             .frame(width: 64, alignment: .leading)
                         Text(meeting.title)
@@ -332,8 +330,6 @@ private struct RuleTestView: View {
     }
 
     private var summary: String {
-        let count = meetings.count
-        let what = count == 1 ? "1 meeting" : "\(count) meetings"
-        return "“\(phrase)” would ignore \(what)"
+        "“\(phrase)” would ignore \(counted(meetings.count, "meeting"))"
     }
 }

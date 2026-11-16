@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// Progress on stderr: messages ("totalrecall: ...", never timestamped, which would look like a line of a transcript)
 /// and, on a terminal, a level meter redrawn in place.
@@ -29,12 +30,11 @@ struct StatusLine {
     }
 
     /// Returns to the start of the line and clears it, on a terminal.
-    private var clearLine: String { isTerminal ? "\r\u{1B}[K" : "" }
+    private var clearLine: String { isTerminal ? Terminal.clearLine : "" }
 
     /// Length of the recording so far, as HH:MM:SS.
     var elapsed: String {
-        let seconds = Int(recorder.secondsRecorded)
-        return String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+        clockTime(Int(recorder.secondsRecorded))
     }
 
     /// Prints "totalrecall: `message`" on a line of its own.
@@ -54,7 +54,7 @@ struct StatusLine {
     func showLevels(_ levels: LevelSnapshot) {
         guard showsMeter else { return }
         let microphoneMeter = recorder.includesMicrophone ? "  mic \(Self.meter(levels.microphonePeak))" : ""
-        write("\r\u{1B}[K● \(elapsed)\(microphoneMeter)  system \(Self.meter(levels.systemPeak))")
+        write("\(Terminal.clearLine)● \(elapsed)\(microphoneMeter)  system \(Self.meter(levels.systemPeak))")
     }
 
     static func meter(_ peak: Float) -> String {

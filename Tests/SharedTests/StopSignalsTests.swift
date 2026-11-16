@@ -1,13 +1,14 @@
 import Foundation
+import Shared
 import Testing
-
-@testable import TotalRecall
 
 struct StopSignalsTests {
     @Test(.timeLimit(.minutes(1)))
     func handlesTheSignalOnTheMainQueueInsteadOfTerminating() async throws {
         let handled = AsyncStream.makeStream(of: Bool.self)
-        let sources = handleStopSignals([SIGUSR1]) { handled.continuation.yield(Thread.isMainThread) }
+        let sources = handleStopSignals([SIGUSR1]) { signal in
+            handled.continuation.yield(Thread.isMainThread && signal == SIGUSR1)
+        }
         defer { sources.forEach { $0.cancel() } }
 
         // The source starts listening asynchronously, so keep signalling until it hears one.

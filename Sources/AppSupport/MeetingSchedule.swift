@@ -26,6 +26,9 @@ package struct CalendarEvent: Sendable {
         self.calendarID = calendarID ?? calendar
         self.isAllDay = isAllDay
     }
+
+    /// Whether it is a meeting's kind of event: not all-day, and with a length.
+    var isTimed: Bool { !isAllDay && end > start }
 }
 
 /// A meeting to record. The same meeting on two calendars is one meeting: the calendar only says where its recording
@@ -96,7 +99,7 @@ package struct ScheduledMeeting: Hashable, Sendable {
 
     /// The title without whatever is in parentheses or brackets: "Standup (webcam ON)" -> "Standup".
     package var shortTitle: String {
-        let title = title.replacing(/\([^)]*\)|\[[^\]]*\]/, with: " ").trimmingCharacters(in: .whitespaces)
+        let title = RecordingFolder.unbracketed(title).trimmingCharacters(in: .whitespaces)
         return title.isEmpty ? self.title : title
     }
 }
@@ -118,7 +121,7 @@ package enum MeetingSchedule {
     ) -> [ScheduledMeeting] {
         var meetings: [ScheduledMeeting] = []
         var seen: Set<ScheduledMeeting> = []
-        for event in events where !event.isAllDay && event.end > event.start {
+        for event in events where event.isTimed {
             let calendarRules = rules(event.calendarID)
             guard calendarRules.isRecorded, !calendarRules.ignores(title: event.title) else { continue }
             let title = event.title.trimmingCharacters(in: .whitespaces)
@@ -176,7 +179,7 @@ package enum MeetingSchedule {
     /// The meetings among `events` that `phrase` would leave out, in order: those with a length, not all-day, whose
     /// title contains it, or matches it for a regular expression.
     package static func meetings(matching phrase: String, in events: [CalendarEvent]) -> [CalendarEvent] {
-        events.filter { !$0.isAllDay && $0.end > $0.start && CalendarRules.matches($0.title, phrase: phrase) }
+        events.filter { $0.isTimed && CalendarRules.matches($0.title, phrase: phrase) }
             .sorted { ($0.start, $0.title) < ($1.start, $1.title) }
     }
 

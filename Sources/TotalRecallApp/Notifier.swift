@@ -90,7 +90,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, Sendable {
         content.title = title
         content.body = body
         content.categoryIdentifier = kind?.rawValue ?? ""
-        content.userInfo = url.map { info.merging([Self.revealKey: $0.path]) { _, reveal in reveal } } ?? info
+        var info = info
+        info[Self.revealKey] = url?.path
+        content.userInfo = info
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 

@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import Shared
 
 /// Receives each captured buffer, resampled to mono, with the host time of its first frame.
 typealias SystemAudioHandler = (_ samples: [Float], _ hostTime: UInt64) -> Void
@@ -50,7 +51,7 @@ final class SystemAudioCapture: RestartableCapture {
             "reading system audio format"
         )
         guard let format = AVAudioFormat(streamDescription: &streamDescription) else {
-            throw RecordingError("unsupported system audio format")
+            throw MessageError("unsupported system audio format")
         }
 
         let resampler = try Resampler(from: format)

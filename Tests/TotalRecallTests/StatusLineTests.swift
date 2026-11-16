@@ -1,3 +1,4 @@
+import Shared
 import Testing
 
 @testable import TotalRecall
@@ -40,7 +41,7 @@ struct StatusLineTests {
     }
 
     @Test func reportsWriteFailures() {
-        makeStatus(terminal: false).reportWriteFailure(RecordingError("disk full"))
+        makeStatus(terminal: false).reportWriteFailure(MessageError("disk full"))
 
         #expect(output.text == "totalrecall: write failed: disk full\n")
     }

@@ -31,9 +31,7 @@ final class FileAudioSource: AudioSource, @unchecked Sendable {
         let buffer = buffer!
         try file.read(into: buffer)
         guard buffer.frameLength > 0 else { return nil }
-        return (0..<channelCount).map { channel in
-            Array(UnsafeBufferPointer(start: buffer.floatChannelData![channel], count: Int(buffer.frameLength)))
-        }
+        return (0..<channelCount).map { buffer.samples(channel: $0) }
     }
 }
 

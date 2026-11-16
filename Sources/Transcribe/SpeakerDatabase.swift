@@ -2,6 +2,7 @@
 
 import Foundation
 import SQLite3
+import Shared
 
 /// The people `--identify-speakers` has heard, so each keeps their number, or the name given with
 /// `transcribe speakers name`, from one call to the next: a SQLite database at ~/.transcribe/speakers.db, or wherever
@@ -37,9 +38,7 @@ final class SpeakerDatabase: @unchecked Sendable {  // swiftlint:disable:this ty
     static let samePersonPrints = SpeakerIdentifier.settledPrints
 
     static var defaultURL: URL {
-        if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] {
-            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        }
+        if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] { return URL(typedPath: path) }
         return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".transcribe/speakers.db")
     }
 
@@ -53,7 +52,7 @@ final class SpeakerDatabase: @unchecked Sendable {  // swiftlint:disable:this ty
         guard sqlite3_open(url.path, &handle) == SQLITE_OK, let handle else {
             let reason = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "out of memory"
             sqlite3_close(handle)
-            throw TranscribeError("cannot open \(url.path): \(reason)")
+            throw MessageError("cannot open \(url.path): \(reason)")
         }
         database = handle
         // Another transcribe may be writing too; it never takes long.
@@ -370,7 +369,7 @@ final class SpeakerDatabase: @unchecked Sendable {  // swiftlint:disable:this ty
         }
     }
 
-    private func failure() -> TranscribeError {
-        TranscribeError("speaker database: \(String(cString: sqlite3_errmsg(database)))")
+    private func failure() -> MessageError {
+        MessageError("speaker database: \(String(cString: sqlite3_errmsg(database)))")
     }
 }
