@@ -4,6 +4,8 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ## Unreleased
 
+## 0.6.0
+
 ### transcribe
 
 - Remembered speakers start over in a new layout.
@@ -48,6 +50,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - The transcript keeps up while no window is open: macOS no longer naps the app while it records or transcribes, nor sleeps the Mac mid-meeting.
 - A People window, from the transcript or Settings › Transcript, names, plays and merges the people Identify Speakers remembers, and flags and removes clips of someone else.
 - Dropping a recording on the People window learns the voices in it.
+- The app, `totalrecall` and `transcribe` log to Console under `local.totalrecall`; macOS keeps only the errors.
 
 ## 0.5.0
 
