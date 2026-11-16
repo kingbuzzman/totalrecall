@@ -268,10 +268,13 @@ final class FollowingScrollView: NSScrollView {
         if follows { scrollToBottom() }
     }
 
+    /// Scrolls as far down as it goes, or, with too few lines to scroll, to the top: the clip view's insets, which hold
+    /// the table's column headers floating over it, start the first row below them, and 0 would leave it under them.
     func scrollToBottom() {
         guard let document = documentView else { return }
         document.layoutSubtreeIfNeeded()
-        let bottom = max(0, document.frame.height - contentView.bounds.height)
+        let insets = contentView.contentInsets
+        let bottom = max(-insets.top, document.frame.height - contentView.bounds.height + insets.bottom)
         contentView.scroll(to: NSPoint(x: contentView.bounds.minX, y: bottom))
         reflectScrolledClipView(contentView)
     }
