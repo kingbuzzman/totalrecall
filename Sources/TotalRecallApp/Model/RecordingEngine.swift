@@ -242,6 +242,9 @@ private final class AudioDisposal: Sendable {
             try FileManager.default.trashItem(at: audio, resultingItemURL: &trashed)
             report(.audioTrashed(audio: audio, trashed: trashed.map { $0 as URL }, transcript: transcript))
         } catch {
+            Log.recording.error(
+                "could not move \(audio.path, privacy: .public) to the Trash: \(error.localizedDescription, privacy: .public)"
+            )
             report(.message("Could not move \(audio.lastPathComponent) to the Trash: \(error.localizedDescription)"))
         }
     }

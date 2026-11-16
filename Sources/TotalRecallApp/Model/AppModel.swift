@@ -55,7 +55,7 @@ final class AppModel {
 
     private let engine = RecordingEngine()
     let notifier = Notifier()
-    let log = Logger(subsystem: "local.totalrecall.app", category: "recording")
+    let log = Log.recording
     /// The latest recording's number: events of earlier ones, still finishing, leave the transcript shown alone.
     private var recordingID = 0
     private var clock: Timer?
@@ -145,6 +145,9 @@ final class AppModel {
                 let directory = scheduled.directory(root: AppSettings.recordingsFolder)
                 return start(Meeting(name: title, directory: directory, scheduled: scheduled, eventID: eventID))
             } catch {
+                log.error(
+                    "could not add “\(title, privacy: .public)” to \(target.title, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
                 notifier.post(title: "Could not add “\(title)” to \(target.title)", body: error.localizedDescription)
             }
         }
@@ -166,6 +169,7 @@ final class AppModel {
 
     func stop() {
         guard isRecording else { return }
+        log.info("recording \(self.recordingID, privacy: .public): stopping, as asked")
         endEvent()
         engine.stop()
         state = .idle
@@ -203,6 +207,7 @@ final class AppModel {
             identifiesSpeakers: AppSettings.identifiesSpeakers,
             trashesAudioOnceTranscribed: AppSettings.trashesAudioOnceTranscribed
         )
+        logStart(request, of: meeting)
         // Through the main queue rather than a task each, so the events keep their order.
         engine.start(request) { [weak self] id, event in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.handle(event, of: id) } }
@@ -219,12 +224,16 @@ final class AppModel {
             meeting.scheduled = stopped
             self.meeting = meeting
         } catch {
+            log.error(
+                "could not end “\(meeting.name, privacy: .public)” on the calendar: \(error.localizedDescription, privacy: .public)"
+            )
             notifier.post(title: "Could not end “\(meeting.name)” on the calendar", body: error.localizedDescription)
         }
     }
 
     private func handle(_ event: RecordingEngine.Event, of id: Int) {
         let isLatest = id == recordingID
+        logEvent(event, of: id)
         switch event {
         case .started:
             guard isLatest, state == .starting else { return }
@@ -253,7 +262,6 @@ final class AppModel {
         case .liveText(let text):
             if isLatest { liveText = text }
         case .message(let message):
-            log.info("\(message, privacy: .public)")
             if isLatest { lastMessage = message }
         case .transcriptStarted:
             transcribingCount += 1
@@ -362,6 +370,7 @@ extension AppModel {
                 AppSettings.recordsAutomatically && !isRecording
                 ? "Recording starts at \(time)." : "It starts at \(time)."
             announceWarning(of: meeting, now: now, body: body)
+            log.info("warned of “\(meeting.title, privacy: .public)” at \(time, privacy: .public)")
             chime?.stop()
             chime?.play()
         }
@@ -370,6 +379,7 @@ extension AppModel {
             let next = MeetingSchedule.next(in: todaysMeetings, excluding: excludedFromStart, now: now),
             next.start <= now
         {
+            log.info("“\(next.title, privacy: .public)” started: recording it")
             record(next)
         }
     }
@@ -377,11 +387,9 @@ extension AppModel {
     /// Only while a menu is open, and the pointer on none of its items: a change redraws the menu, which throws off the
     /// highlighted item and closes the submenu open, or about to open, under the pointer.
     private func updateElapsed() {
-        let highlighted = openMenus.compactMap { $0.highlightedItem?.title }
-        Logger(subsystem: "local.totalrecall.app", category: "menu").debug(
-            "open menus: \(self.openMenus.count, privacy: .public), highlighted: \(highlighted, privacy: .public)"
-        )
-        guard !openMenus.isEmpty, highlighted.isEmpty, case .recording(let since) = state else { return }
+        guard !openMenus.isEmpty, !openMenus.contains(where: { $0.highlightedItem != nil }),
+            case .recording(let since) = state
+        else { return }
         elapsed = clockTime(max(0, Int(now.timeIntervalSince(since))), padsHours: false)
     }
 }

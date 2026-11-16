@@ -1,6 +1,7 @@
 import Foundation
 import Shared
 import TotalRecall
+import os
 
 // The command-line tool, on top of the TotalRecall library, and the only place that ends the process: the library
 // reports failures by throwing.
@@ -9,6 +10,7 @@ func fail(_ message: String) -> Never {
     // On a terminal, start on a clean line, like every other message (see StatusLine).
     let clearLine = isatty(STDERR_FILENO) != 0 ? Terminal.clearLine : ""
     fputs("\(clearLine)totalrecall: \(message)\n", stderr)
+    Log.recording.error("totalrecall: \(message, privacy: .public)")
     exit(1)
 }
 

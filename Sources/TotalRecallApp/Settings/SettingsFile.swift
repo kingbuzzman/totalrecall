@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Shared
 import os
 
 /// Settings kept in a property list file of their own, read when the app starts and written whole, as plain XML, on
@@ -12,7 +13,7 @@ final class SettingsFile: @unchecked Sendable {
 
     @ObservationIgnored private let url: URL
     @ObservationIgnored private let lock = NSLock()
-    @ObservationIgnored private let log = Logger(subsystem: "local.totalrecall.app", category: "settings")
+    @ObservationIgnored private let log = Log.app
     private var values: [String: Any]
 
     init(url: URL) {

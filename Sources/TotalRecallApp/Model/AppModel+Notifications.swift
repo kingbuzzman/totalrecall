@@ -1,6 +1,7 @@
 import AppKit
 import AppSupport
 import Foundation
+import os
 
 /// The notifications: of a meeting about to start, a recording starting or failing to, and its files, saved and, once
 /// transcribed, gone to the Trash; and what their buttons do.
@@ -72,6 +73,9 @@ extension AppModel {
                 try FileManager.default.moveItem(at: URL(filePath: trashed), to: URL(filePath: audio))
                 NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: audio)])
             } catch {
+                log.error(
+                    "could not restore \(audio, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
                 notifier.post(title: "Could not restore the recording", body: error.localizedDescription)
             }
         }

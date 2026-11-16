@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import Shared
 import Transcribe
+import os
 
 /// The people Identify Speakers remembers, for the People tab of Settings: who they are, how long each was heard, and
 /// their voices; renaming, merging, splitting and forgetting them; and playing their clips. Read afresh whenever the tab
@@ -38,6 +39,7 @@ final class People {
     var playingClip: Int? { player.clip }
 
     @ObservationIgnored private var database: SpeakerDatabase?
+    @ObservationIgnored private let log = Log.speakers
     private let player = ClipPlayer()
 
     func reload() {
@@ -116,6 +118,7 @@ final class People {
         reload()
         if let failure {
             problem = "Could not learn the voices in \(url.lastPathComponent): \(failure)"
+            log.error("could not learn the voices in \(url.path, privacy: .public): \(failure, privacy: .public)")
         } else {
             let added = entries.count - before
             learned =
@@ -157,6 +160,7 @@ final class People {
             problem = nil
         } catch {
             problem = error.localizedDescription
+            log.error("speaker database: \(error.localizedDescription, privacy: .public)")
         }
         if reloading, database != nil { reload() }
     }

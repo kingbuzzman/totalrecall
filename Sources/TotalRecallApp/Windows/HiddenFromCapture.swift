@@ -1,4 +1,5 @@
 import AppKit
+import Shared
 import SwiftUI
 import os
 
@@ -7,7 +8,7 @@ import os
 /// so it is found among the app's windows by its class.
 @MainActor
 enum MenuBarIconSharing {
-    private static let log = Logger(subsystem: "local.totalrecall.app", category: "capture")
+    private static let log = Log.app
 
     static func apply() {
         let hides = AppSettings.hidesMenuBarIconFromCapture

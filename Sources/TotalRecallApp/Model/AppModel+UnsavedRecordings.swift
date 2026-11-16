@@ -42,7 +42,7 @@ extension AppModel {
         let unsaved = unsavedRecordings
         unsavedRecordings = []
         savingCount += unsaved.count
-        let notifier = notifier
+        let (notifier, log) = (notifier, log)
         for (partial, output) in unsaved {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let file = OutputFile(path: output.path)
@@ -54,6 +54,9 @@ extension AppModel {
                     if let encoding = file.encodingURL { try? FileManager.default.removeItem(at: encoding) }
                     notifier.post(title: "Saved an unsaved recording", body: output.path, revealing: output)
                 } catch {
+                    log.error(
+                        "could not save \(partial.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
                     notifier.post(
                         title: "Could not save an unsaved recording",
                         body: "\(partial.path): \(error.localizedDescription)"

@@ -3,6 +3,7 @@ import CoreML
 import Foundation
 import Shared
 import Speech
+import os
 
 // transcribe: on-device speech to text for totalrecall recordings, from a file or live from `totalrecall -`. The
 // command-line tool, and the only code that ends the process; the transcribing itself is in Transcription.swift, which
@@ -10,7 +11,14 @@ import Speech
 
 func fail(_ message: String) -> Never {
     fputs("transcribe: \(message)\n", stderr)
+    Log.transcript.error("transcribe: \(message, privacy: .public)")
     exit(1)
+}
+
+/// Tells the user, on stderr, and the log, at info, of a problem transcribe goes on without, or of the people it heard.
+private func say(_ message: String) {
+    fputs("transcribe: \(message)\n", stderr)
+    Log.transcript.info("transcribe: \(message, privacy: .public)")
 }
 
 /// Runs transcribe with the arguments after the program name, then exits.
@@ -171,8 +179,8 @@ private func transcribe(inputPath: String, textPath: String?, options: Options) 
             makePrinter: { save in
                 TranscriptPrinter(printsLines: save == nil || options.showsLive, isLive: options.showsLive, save: save)
             },
-            warn: { fputs("transcribe: \($0)\n", stderr) },
-            report: { fputs("transcribe: \($0)\n", stderr) },
+            warn: say,
+            report: say,
             // A failed write ends transcribe, as the transcript is incomplete.
             onSaveFailure: { fail("cannot write the transcript: \($0.localizedDescription)") }
         )

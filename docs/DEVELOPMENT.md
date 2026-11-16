@@ -102,6 +102,9 @@ Files are named the Swift way: after the main type they declare (`StatusLine.swi
 extension (`AppModel+Notifications.swift`, `Date+ShortTime.swift`), or after their topic for free functions
 (`StopSignals.swift`). The larger targets group files by feature in folders; the small ones stay flat.
 
+`totalrecall`, `transcribe` and the app log to one place: `log show --predicate 'subsystem == "local.totalrecall"'
+--last 1d` shows their failures, which macOS keeps; `log stream` with `--info` shows everything as it happens.
+
 Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
 and `make lint` to check it. `make lint` also checks the GitHub workflows for security problems with
 [zizmor](https://docs.zizmor.sh), run through `pipx` (`brew install pipx`) at the version the Makefile pins.
