@@ -4,6 +4,8 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ## Unreleased
 
+## 0.6.1
+
 ### totalrecall
 
 - Fixed: a call using voice processing on the MacBook mic (Firefox) silenced it for TotalRecall; it now switches to
