@@ -84,10 +84,13 @@ need icalbuddy.
   as "1:1", or matches a regular expression between slashes, such as `/^1:1/`; **Test** shows which of the
   calendar's meetings, from two weeks back to two weeks ahead, a rule would ignore. **Always Ignore Meetings Like
   This**, on a meeting in **Today**, adds its title to its calendar's.
-- **Next: Standup at 10:00** shows in the menu, with **Start Now** for a meeting that starts early. **Today** lists
-  every meeting of the day, to record one now or skip it.
-- **Start Recording** starts right away. **New Meeting…** asks for a name first. **Stop Recording** stops at once, and
-  the next recording can start straight after. The file is saved and the last words written in the background.
+- **Next: Standup at 10:00** shows in the menu. **Today** lists every meeting of the day, to record one now, as when it
+  starts early, or skip it.
+- **Start Recording** starts right away. **New Meeting…** asks for a name first. Both file the recording under the
+  default meeting calendar, set in Settings; hold ⌘ with the menu open for **Start Recording On…** and **New Meeting
+  On…**, which ask which calendar, to pick another for one recording. **New Meeting…** suggests the last name given,
+  and adds the meeting to that calendar, from when it starts until it's stopped, unless turned off in Settings.
+  **Stop Recording** stops at once, and the next recording can start straight after. The file is saved and the last words written in the background.
 - **Continue "…"** records the last meeting again, into its folder, as `rec-2` and `transcript-2`.
 - **Show Transcript**, while recording, opens a window with the transcript as it's written, as a table of time, speaker
   and words, your lines in blue and everyone else's in orange, and the words still being recognized in grey. While it's
@@ -99,8 +102,8 @@ need icalbuddy.
 - **Settings** has a tab each for where recordings go (`~/Meetings` by default) and when they start, which calendars,
   the format and the mic, the transcript's language and identifying speakers, and the version. Recordings go in the
   same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a meeting on the calendar, by when it was
-  meant to start, so a restarted meeting lands next to the first recording, and `other/...` for one started from the
-  menu.
+  meant to start, so a restarted meeting lands next to the first recording, and the same under its calendar for one
+  started from the menu (`WEEK-YEAR/...` straight under the folder when no calendar is recorded).
 - After a crash or a forced quit, the menu offers to save any recording that was left unsaved.
 
 It needs Xcode to build (`make build-app`, or `make build` for the tools and the app together, then `make install-app`

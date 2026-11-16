@@ -6,10 +6,37 @@ import SwiftUI
 struct CalendarSettings: View {
     @Environment(AppModel.self) private var model
     @State private var rules = AppSettings.calendarRules
+    @AppStorage(AppSettings.Key.addsNewMeetingsToCalendar) private var addsNewMeetingsToCalendar = true
+    @AppStorage(AppSettings.Key.newMeetingMinutes) private var newMeetingMinutes = AppSettings.defaultNewMeetingMinutes
 
     var body: some View {
         Form {
             if model.calendar.hasAccess {
+                if !model.meetingCalendars.isEmpty {
+                    Section {
+                        Picker("Default meeting calendar", selection: defaultMeetingCalendar) {
+                            ForEach(model.meetingCalendars) { calendar in
+                                Text(calendar.title).tag(calendar.id)
+                            }
+                        }
+                        Toggle("Add new meetings to the calendar", isOn: $addsNewMeetingsToCalendar)
+                        Picker("Default meeting length", selection: $newMeetingMinutes) {
+                            ForEach(AppSettings.newMeetingLengths, id: \.self) { minutes in
+                                Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes])))
+                                    .tag(minutes)
+                            }
+                        }
+                        .disabled(!addsNewMeetingsToCalendar)
+                    } footer: {
+                        Text(
+                            "Recordings started with Start Recording or New Meeting are filed under it. Hold ⌘ in the "
+                                + "menu to pick another calendar for one recording. New Meeting can add the meeting "
+                                + "to the calendar too, as long as the default meeting length until it's stopped, "
+                                + "when it ends then."
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                }
                 ForEach(accounts, id: \.self) { account in
                     Section(account.isEmpty ? "Other" : account) {
                         ForEach(model.calendar.calendars.filter { $0.account == account }) { calendar in
@@ -22,8 +49,9 @@ struct CalendarSettings: View {
                 Section {
                     Text(
                         "Meetings on the calendars turned on are warned of and recorded. Holidays and birthdays start "
-                            + "off; any other calendar, added later too, starts on. A meeting in Today can be ignored "
-                            + "from then on with Always Ignore Meetings Like This."
+                            + "off; any other calendar, added later too, starts on. Read-only calendars, which "
+                            + "events can't be added to, are never recorded. A meeting in Today can be ignored from "
+                            + "then on with Always Ignore Meetings Like This."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -67,10 +95,19 @@ struct CalendarSettings: View {
         return model.calendar.calendars.map(\.account).filter { seen.insert($0).inserted }
     }
 
+    /// The default meeting calendar: the one chosen, or the one the app falls back to when none was.
+    private var defaultMeetingCalendar: Binding<String> {
+        Binding {
+            model.defaultMeetingCalendar?.id ?? ""
+        } set: { id in
+            UserDefaults.standard.set(id, forKey: AppSettings.Key.defaultMeetingCalendar)
+        }
+    }
+
     /// A calendar's rules, as set up or its defaults, saved as soon as they change.
     private func binding(for calendar: CalendarSource.Calendar) -> Binding<CalendarRules> {
         Binding {
-            rules[calendar.id] ?? CalendarRules.defaults(isMeetingCalendar: calendar.isMeetingCalendar)
+            AppSettings.rules(for: calendar, in: rules)
         } set: { newRules in
             rules[calendar.id] = newRules
             AppSettings.calendarRules = rules
@@ -97,7 +134,11 @@ private struct CalendarRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                if rules.isRecorded {
+                if calendar.isReadOnly {
+                    Label("Read-only", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if rules.isRecorded {
                     Text(summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -105,7 +146,14 @@ private struct CalendarRow: View {
                 }
             }
         }
-        .help(rules.isRecorded ? "Its meetings are recorded" : "Its meetings are not recorded")
+        .disabled(calendar.isReadOnly)
+        .help(
+            calendar.isReadOnly
+                ? "This calendar is read-only: events can't be added to it, as with holidays, birthdays, or a "
+                    + "calendar shared with you for viewing only. Your own meetings aren't on it, so it can't be "
+                    + "recorded, or chosen for new meetings."
+                : rules.isRecorded ? "Its meetings are recorded" : "Its meetings are not recorded"
+        )
         .sheet(isPresented: $editsRules) {
             CalendarRulesEditor(calendarTitle: calendar.title, rules: $rules, events: events)
         }

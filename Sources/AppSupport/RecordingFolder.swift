@@ -1,8 +1,8 @@
 package import Foundation
 
 /// Where the app saves a recording: the folders `scripts/record-meetings` uses, so both put recordings in one tree:
-/// ROOT/CALENDAR/WW-YYYY/MM-DD/HHhMM-short-name/, with the calendar the meeting is on (other/ for one recorded on the
-/// spot), the ISO week, and when it was meant to start, 24-hour in the Mac's time zone.
+/// ROOT/CALENDAR/WW-YYYY/MM-DD/HHhMM-short-name/, with the calendar the meeting is on, the ISO week, and when it was
+/// meant to start, 24-hour in the Mac's time zone. A meeting on no calendar goes straight under ROOT, by week.
 package enum RecordingFolder {
     /// The folder for a recording named `name` that starts, or was meant to start, at `start`, of a meeting on the
     /// calendar named `calendar`; nil or "" for none.
@@ -19,14 +19,14 @@ package enum RecordingFolder {
         let week = String(format: "%02d-%d", parts.weekOfYear!, parts.yearForWeekOfYear!)
         let day = String(format: "%02d-%02d", parts.month!, parts.day!)
         let time = String(format: "%02dh%02d", parts.hour!, parts.minute!)
-        return root.appending(path: calendarFolder(calendar ?? "")).appending(path: week).appending(path: day)
-            .appending(path: "\(time)-\(shortName(name))")
+        let base = calendarFolder(calendar ?? "").map { root.appending(path: $0) } ?? root
+        return base.appending(path: week).appending(path: day).appending(path: "\(time)-\(shortName(name))")
     }
 
-    /// The calendar's name with "/" as "-", without dots or spaces at either end; "other" when nothing is left.
-    package static func calendarFolder(_ calendar: String) -> String {
+    /// The calendar's name with "/" as "-", without dots or spaces at either end; nil when nothing is left.
+    package static func calendarFolder(_ calendar: String) -> String? {
         let name = calendar.replacing("/", with: "-").trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        return name.isEmpty ? "other" : name
+        return name.isEmpty ? nil : name
     }
 
     /// "Weekly Design Review (camera on)" -> "weekly-design-review": lowercase ASCII words joined by "-", up to

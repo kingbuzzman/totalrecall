@@ -18,6 +18,9 @@ final class CalendarSource {
         /// Whether it can have meetings: not a calendar of birthdays, holidays or another subscription, whose events
         /// are all-day ones. Only says whether it is recorded until set in Settings.
         let isMeetingCalendar: Bool
+        /// Whether events cannot be added to it, as to a calendar of holidays or birthdays, or one shared for viewing
+        /// only: none of its meetings are yours, so it is never recorded.
+        let isReadOnly: Bool
     }
 
     private(set) var hasAccess = false
@@ -97,6 +100,29 @@ final class CalendarSource {
         }
     }
 
+    /// Adds `meeting` to its calendar as an event; the event's identifier.
+    func add(_ meeting: ScheduledMeeting) throws -> String {
+        guard let calendar = store.calendar(withIdentifier: meeting.calendarID) else {
+            throw AppError("the calendar \(meeting.calendar) is gone")
+        }
+        let event = EKEvent(eventStore: store)
+        event.calendar = calendar
+        event.title = meeting.title
+        event.startDate = meeting.start
+        event.endDate = meeting.end
+        try store.save(event, span: .thisEvent, commit: true)
+        return event.calendarItemIdentifier
+    }
+
+    /// Moves the end of the event `id` to `end`, as when the meeting it is of stops.
+    func moveEnd(ofEvent id: String, to end: Date) throws {
+        guard let event = store.calendarItem(withIdentifier: id) as? EKEvent else {
+            throw AppError("the event is gone from the calendar")
+        }
+        event.endDate = end
+        try store.save(event, span: .thisEvent, commit: true)
+    }
+
     private func updateStatus() {
         let status = EKEventStore.authorizationStatus(for: .event)
         hasAccess = status == .fullAccess
@@ -116,7 +142,8 @@ final class CalendarSource {
             title: calendar.title,
             account: calendar.source?.title ?? "",
             color: calendar.cgColor,
-            isMeetingCalendar: !isSubscription && !isHolidays
+            isMeetingCalendar: calendar.allowsContentModifications && !isSubscription && !isHolidays,
+            isReadOnly: !calendar.allowsContentModifications
         )
     }
 }

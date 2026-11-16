@@ -2,6 +2,24 @@
 
 Each release's notes on GitHub come from its section here (see `.github/workflows/release.yml`).
 
+## Unreleased
+
+### TotalRecall.app
+
+- Start Recording and New Meeting… file the recording under the default meeting calendar, chosen in Settings (the
+  first calendar recorded until then), instead of `other/`; with no calendar recorded, it goes straight under the
+  recordings folder, by week. Holding ⌘ with the menu open turns them into Start Recording On… and New Meeting On…,
+  which ask for the calendar, to pick another for one recording.
+- New Meeting… suggests the last name given, and adds the meeting to its calendar, from when it starts until it's
+  stopped (a switch in Settings). Until then it lasts the default meeting length, 30 minutes unless changed in
+  Settings.
+- Read-only calendars, such as holidays, which events can't be added to, are greyed out in Settings and never
+  recorded.
+- Submenus, such as Today, no longer close by themselves: the menu was redrawn every second. Now only the elapsed time
+  updates, and only while recording with the menu open.
+- Open Recordings Folder is gone from the menu; Show, beside the folder in Settings, opens it.
+- Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
+
 ## 0.5.0
 
 ### TotalRecall.app

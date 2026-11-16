@@ -25,6 +25,8 @@ final class AppModel {
         let name: String
         let directory: URL
         var scheduled: ScheduledMeeting?
+        /// The event the app added to the calendar for it, which ends when it stops.
+        var eventID: String?
     }
 
     /// Where one of today's meetings stands, for the menu.
@@ -40,17 +42,30 @@ final class AppModel {
     private(set) var liveText = ""
     private(set) var lastMessage = ""
     /// Recordings being saved, after they stopped, and transcripts going on, including the one being recorded, until
-    /// their last words are written.
-    private(set) var savingCount = 0
+    /// their last words are written. Saving is counted in AppModel+UnsavedRecordings.swift too.
+    var savingCount = 0
     private(set) var transcribingCount = 0
     /// Partial recordings a crash or a forced quit left unsaved, which the menu offers to save.
-    private(set) var unsavedRecordings: [(partial: URL, output: URL)] = []
-    /// Now, every second, so the times shown update.
-    private(set) var now = Date()
+    var unsavedRecordings: [(partial: URL, output: URL)] = []
+    /// Now, every second, for the warnings and starting meetings. Not observed: anything the menu reads redraws it, and
+    /// a redraw closes the submenu open in it, so what the menu shows changes only when it must.
+    @ObservationIgnored private(set) var now = Date()
+    /// How long the recording has been going, as H:MM:SS, every second while recording and a menu is open; only the
+    /// line showing it reads it.
+    private(set) var elapsed = "0:00:00"
+    /// How many menus are open, submenus included: the elapsed time only needs updating while one is.
+    @ObservationIgnored private var openMenus = 0
+    /// The time the meetings' places in the menu go by, such as whether one is underway: now as of when a meeting last
+    /// started or ended.
+    private(set) var scheduleTime = Date()
     /// Today's meetings on the calendar, and those recorded (or being recorded) or skipped, which are not started again.
     private(set) var todaysMeetings: [ScheduledMeeting] = []
     private(set) var recordedMeetings: Set<ScheduledMeeting> = []
     private(set) var skippedMeetings: Set<ScheduledMeeting> = []
+    /// The calendars whose meetings are recorded, which a meeting started from the menu can be filed under, and the
+    /// one it is unless another is picked: the default meeting calendar of Settings.
+    private(set) var meetingCalendars: [CalendarSource.Calendar] = []
+    private(set) var defaultMeetingCalendar: CalendarSource.Calendar?
     let calendar: CalendarSource
 
     var isRecording: Bool { state != .idle }
@@ -59,14 +74,16 @@ final class AppModel {
     var finishingTranscripts: Int { max(0, transcribingCount - (isRecording ? 1 : 0)) }
 
     private let engine = RecordingEngine()
-    private let notifier = Notifier()
-    private let log = Logger(subsystem: "local.totalrecall.app", category: "recording")
+    let notifier = Notifier()
+    let log = Logger(subsystem: "local.totalrecall.app", category: "recording")
     /// The latest recording's number: events of earlier ones, still finishing, leave the transcript shown alone.
     private var recordingID = 0
     private var clock: Timer?
     /// The meetings already warned of, and when the calendar was last read.
     private var warnedMeetings: Set<ScheduledMeeting> = []
     private var lastCalendarRead = Date.distantPast
+    /// How many of today's meetings' starts and ends have passed: when it changes, so do their places in the menu.
+    private var boundariesPassed = 0
     private var observers: [any NSObjectProtocol] = []
     /// Played with each warning, as `record-meetings` does: one of macOS's own sounds, softly.
     private let chime: NSSound? = {
@@ -98,6 +115,18 @@ final class AppModel {
                 queue: .main
             ) { [weak self] _ in MainActor.assumeIsolated { self?.readCalendar() } }
         )
+        // On opening the menu, the elapsed time as of now, not of when it was last open.
+        for (name, change) in [(NSMenu.didBeginTrackingNotification, 1), (NSMenu.didEndTrackingNotification, -1)] {
+            observers.append(
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.openMenus = max(0, self.openMenus + change)
+                        self.updateElapsed()
+                    }
+                }
+            )
+        }
         // Such as calendars turned off in Settings.
         observers.append(
             NotificationCenter.default.addObserver(
@@ -112,18 +141,35 @@ final class AppModel {
         }
     }
 
-    /// How long the recording has been going, as H:MM:SS.
-    var elapsed: String {
-        guard case .recording(let since) = state else { return "0:00:00" }
-        let seconds = max(0, Int(now.timeIntervalSince(since)))
-        return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-    }
-
-    /// Starts recording a new meeting named `name`, stopping the one being recorded first.
-    func startMeeting(named name: String) {
+    /// Starts recording a new meeting named `name`, filed under `calendar`, or the default meeting calendar, stopping
+    /// the one being recorded first; when `addsEvent` and Settings say so, added to that calendar too.
+    func startMeeting(named name: String, on calendar: CalendarSource.Calendar? = nil, addsEvent: Bool = false) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = trimmed.isEmpty ? "Meeting" : trimmed
-        let directory = RecordingFolder.directory(root: AppSettings.recordingsFolder, name: title, start: Date())
+        if addsEvent, AppSettings.addsNewMeetingsToCalendar, let target = calendar ?? defaultMeetingCalendar {
+            let scheduled = ScheduledMeeting.startingNow(
+                title,
+                now: Date(),
+                minutes: AppSettings.newMeetingMinutes,
+                calendar: target.title,
+                calendarID: target.id
+            )
+            do {
+                let eventID = try self.calendar.add(scheduled)
+                // Recorded already, so that once the calendar reads it back, it is not started again.
+                recordedMeetings.insert(scheduled)
+                let directory = scheduled.directory(root: AppSettings.recordingsFolder)
+                return start(Meeting(name: title, directory: directory, scheduled: scheduled, eventID: eventID))
+            } catch {
+                notifier.post(title: "Could not add “\(title)” to \(target.title)", body: error.localizedDescription)
+            }
+        }
+        let directory = RecordingFolder.directory(
+            root: AppSettings.recordingsFolder,
+            calendar: (calendar ?? defaultMeetingCalendar)?.title,
+            name: title,
+            start: Date()
+        )
         start(Meeting(name: title, directory: directory))
     }
 
@@ -136,12 +182,14 @@ final class AppModel {
 
     func stop() {
         guard isRecording else { return }
+        endEvent()
         engine.stop()
         state = .idle
     }
 
     /// Stops recording and calls `done` once every file is saved and every transcript finished, for quitting.
     func stopAndFinish(_ done: @escaping () -> Void) {
+        if isRecording { endEvent() }
         state = .idle
         clock?.invalidate()
         clock = nil
@@ -152,7 +200,10 @@ final class AppModel {
     }
 
     private func start(_ meeting: Meeting) {
-        if isRecording { engine.stop() }
+        if isRecording {
+            endEvent()
+            engine.stop()
+        }
         recordingID += 1
         self.meeting = meeting
         transcript = []
@@ -173,13 +224,27 @@ final class AppModel {
         }
     }
 
+    /// Ends the event the app added for the meeting being recorded, if it did, as it stops: to the minute.
+    private func endEvent() {
+        guard var meeting, let eventID = meeting.eventID, let scheduled = meeting.scheduled else { return }
+        let stopped = scheduled.stopped(at: Date())
+        do {
+            try calendar.moveEnd(ofEvent: eventID, to: stopped.end)
+            recordedMeetings.insert(stopped)
+            meeting.scheduled = stopped
+            self.meeting = meeting
+        } catch {
+            notifier.post(title: "Could not end “\(meeting.name)” on the calendar", body: error.localizedDescription)
+        }
+    }
+
     private func handle(_ event: RecordingEngine.Event, of id: Int) {
         let isLatest = id == recordingID
         switch event {
         case .started:
             guard isLatest, state == .starting else { return }
             state = .recording(since: Date())
-            now = Date()
+            updateElapsed()
             notifier.post(title: "Recording “\(meeting?.name ?? "")”", body: "Stop it from the menu bar.")
         case .failedToStart(let reason):
             log.error("could not start recording: \(reason, privacy: .public)")
@@ -222,12 +287,11 @@ final class AppModel {
         }
     }
 
-    private func becameIdleIfDone() {
+    func becameIdleIfDone() {
         guard !isBusy, let whenIdle else { return }
         self.whenIdle = nil
         whenIdle()
     }
-
 }
 
 /// Today's meetings: which is next, where each stands, recording or skipping them, and, every second, warning of
@@ -236,14 +300,14 @@ extension AppModel {
     /// The next meeting to record: the first of today's not recorded or skipped that has not ended, which may be
     /// underway already.
     var nextMeeting: ScheduledMeeting? {
-        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: now)
+        MeetingSchedule.next(in: todaysMeetings, excluding: recordedMeetings.union(skippedMeetings), now: scheduleTime)
     }
 
     func status(of meeting: ScheduledMeeting) -> MeetingStatus {
         if recordedMeetings.contains(meeting) { return .recorded }
         if skippedMeetings.contains(meeting) { return .skipped }
-        if meeting.end <= now { return .ended }
-        return meeting.start <= now ? .underway : .upcoming
+        if meeting.end <= scheduleTime { return .ended }
+        return meeting.start <= scheduleTime ? .underway : .upcoming
     }
 
     /// Records a meeting on the calendar now, such as one starting early, stopping what is being recorded first. It
@@ -255,19 +319,6 @@ extension AppModel {
         start(Meeting(name: meeting.shortTitle, directory: directory, scheduled: meeting))
     }
 
-    /// Leaves out from now on every meeting of the same title on the same calendar: its title, without what is in
-    /// parentheses or brackets, becomes one of the calendar's ignored phrases.
-    func alwaysIgnore(_ meeting: ScheduledMeeting) {
-        var rules = AppSettings.calendarRules
-        let calendar = calendar.calendars.first { $0.id == meeting.calendarID }
-        var calendarRules =
-            rules[meeting.calendarID] ?? calendar.map(AppSettings.rules(for:)) ?? CalendarRules()
-        calendarRules.ignore(meeting.shortTitle)
-        rules[meeting.calendarID] = calendarRules
-        AppSettings.calendarRules = rules
-        readCalendar()
-    }
-
     /// Leaves a meeting out of recording and warnings, or puts it back.
     func toggleSkipped(_ meeting: ScheduledMeeting) {
         if skippedMeetings.remove(meeting) == nil { skippedMeetings.insert(meeting) }
@@ -277,16 +328,35 @@ extension AppModel {
     func readCalendar() {
         lastCalendarRead = Date()
         let calendars = Dictionary(calendar.calendars.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // Each set only if it changed: the menu redraws for any change, and a redraw closes the submenu open in it.
+        let recorded = calendar.calendars.filter { AppSettings.rules(for: $0).isRecorded }
+        set(\.meetingCalendars, to: recorded)
+        let defaultID = MeetingCalendar.resolve(
+            chosen: AppSettings.defaultMeetingCalendar,
+            recorded: recorded.map(\.id)
+        )
+        set(\.defaultMeetingCalendar, to: recorded.first { $0.id == defaultID })
         let events = calendar.todaysEvents { AppSettings.rules(for: $0).isRecorded }
-        todaysMeetings = MeetingSchedule.meetings(from: events) { id in
+        let meetings = MeetingSchedule.meetings(from: events) { id in
             calendars[id].map(AppSettings.rules(for:)) ?? CalendarRules()
+        }
+        // Compared with the calendar too, which equality leaves out, so that a meeting moved to another is seen.
+        if meetings.map(\.calendar) != todaysMeetings.map(\.calendar) || meetings != todaysMeetings {
+            todaysMeetings = meetings
+            scheduleTime = Date()
         }
         // Yesterday's are of no more use.
         let today = Set(todaysMeetings)
-        recordedMeetings.formIntersection(today.union(meeting?.scheduled.map { [$0] } ?? []))
-        skippedMeetings.formIntersection(today)
+        set(\.recordedMeetings, to: recordedMeetings.intersection(today.union(meeting?.scheduled.map { [$0] } ?? [])))
+        set(\.skippedMeetings, to: skippedMeetings.intersection(today))
         warnedMeetings.formIntersection(today)
         tick()
+    }
+
+    /// Sets the property at `path` to `value`, unless it is that already: any set, even of the same value, redraws the
+    /// menu.
+    private func set<Value: Equatable>(_ path: ReferenceWritableKeyPath<AppModel, Value>, to value: Value) {
+        if self[keyPath: path] != value { self[keyPath: path] = value }
     }
 
     /// Every second: warns of the meetings about to start, and starts recording the next one once it has started, if
@@ -294,6 +364,12 @@ extension AppModel {
     private func tick() {
         now = Date()
         if now.timeIntervalSince(lastCalendarRead) >= 60 { return readCalendar() }
+        updateElapsed()
+        let boundaries = todaysMeetings.reduce(0) { $0 + ($1.start <= now ? 1 : 0) + ($1.end <= now ? 1 : 0) }
+        if boundaries != boundariesPassed {
+            boundariesPassed = boundaries
+            scheduleTime = now
+        }
         let lead = TimeInterval(AppSettings.warningMinutes * 60)
         let excluded = warnedMeetings.union(recordedMeetings).union(skippedMeetings)
         for meeting in MeetingSchedule.warningsDue(in: todaysMeetings, lead: lead, excluding: excluded, now: now) {
@@ -306,73 +382,18 @@ extension AppModel {
             chime?.stop()
             chime?.play()
         }
-        if AppSettings.recordsAutomatically, !isRecording, let next = nextMeeting, next.start <= now {
+        let excludedFromStart = recordedMeetings.union(skippedMeetings)
+        if AppSettings.recordsAutomatically, !isRecording,
+            let next = MeetingSchedule.next(in: todaysMeetings, excluding: excludedFromStart, now: now),
+            next.start <= now
+        {
             record(next)
         }
     }
-}
 
-/// What goes on around the recordings: the speech model, downloaded ahead, and recordings a crash left unsaved.
-extension AppModel {
-    /// Downloads the speech model in the background, if need be, so the first transcript does not wait for it.
-    private func prepareTranscription() {
-        let language = AppSettings.language
-        let log = log
-        Task.detached(priority: .utility) {
-            do {
-                try await Transcribe.prepareTranscription(language: language)
-            } catch {
-                log.error("cannot transcribe: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Looks for recordings a crash or a forced quit left unsaved, in the background, for the menu to offer saving.
-    /// One written to in the last two minutes is left out: it may be a recording `record-meetings` is making right now.
-    /// So is one whose output file exists, which saving it would replace.
-    func findUnsavedRecordings() {
-        let root = AppSettings.recordingsFolder
-        Task.detached(priority: .utility) { [weak self] in
-            let cutoff = Date().addingTimeInterval(-120)
-            let unsaved = RecordingFolder.unsavedRecordings(under: root).filter { partial, output in
-                let modified = try? partial.resourceValues(forKeys: [.contentModificationDateKey])
-                    .contentModificationDate
-                return (modified.map { $0 < cutoff } ?? false) && !FileManager.default.fileExists(atPath: output.path)
-            }
-            await MainActor.run { self?.unsavedRecordings = unsaved }
-        }
-    }
-
-    /// Saves the recordings `findUnsavedRecordings()` found, in the background, converting each partial recording to
-    /// the format its name asks for, and deleting it once saved.
-    func saveUnsavedRecordings() {
-        let unsaved = unsavedRecordings
-        unsavedRecordings = []
-        savingCount += unsaved.count
-        let notifier = notifier
-        for (partial, output) in unsaved {
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                let file = OutputFile(path: output.path)
-                do {
-                    guard !FileManager.default.fileExists(atPath: output.path) else {
-                        throw AppError("\(output.lastPathComponent) already exists")
-                    }
-                    try file.save()
-                    if let encoding = file.encodingURL { try? FileManager.default.removeItem(at: encoding) }
-                    notifier.post(title: "Saved an unsaved recording", body: output.path, revealing: output)
-                } catch {
-                    notifier.post(
-                        title: "Could not save an unsaved recording",
-                        body: "\(partial.path): \(error.localizedDescription)"
-                    )
-                }
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        self?.savingCount -= 1
-                        self?.becameIdleIfDone()
-                    }
-                }
-            }
-        }
+    private func updateElapsed() {
+        guard openMenus > 0, case .recording(let since) = state else { return }
+        let seconds = max(0, Int(now.timeIntervalSince(since)))
+        elapsed = String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
     }
 }

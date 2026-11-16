@@ -48,8 +48,8 @@ struct MeetingScheduleTests {
         ("someone@example.com", "/r/someone@example.com/47-2026/11-16/10h00-daily-standup"),
         ("Work/Team", "/r/Work-Team/47-2026/11-16/10h00-daily-standup"),
         (". Home .", "/r/Home/47-2026/11-16/10h00-daily-standup"),
-        ("", "/r/other/47-2026/11-16/10h00-daily-standup"),
-        ("...", "/r/other/47-2026/11-16/10h00-daily-standup"),
+        ("", "/r/47-2026/11-16/10h00-daily-standup"),
+        ("...", "/r/47-2026/11-16/10h00-daily-standup"),
     ])
     func recordsUnderTheCalendarByTheScheduledStart(calendar: String, expected: String) {
         let meeting = ScheduledMeeting(
@@ -138,6 +138,39 @@ struct MeetingScheduleTests {
     }
 
     /// 2026-11-`day` (16, a Monday of ISO week 47, unless given) at `hour`:`minute` UTC.
+    @Test func startsAMeetingAddedFromTheMenuOnTheMinute() {
+        let meeting = ScheduledMeeting.startingNow(
+            "Sync",
+            now: at(10, 7) + 42.5,
+            minutes: 45,
+            calendar: "Work",
+            calendarID: "w"
+        )
+
+        #expect(meeting == ScheduledMeeting(title: "Sync", start: at(10, 7), end: at(10, 52), calendar: "Work"))
+        #expect(meeting.calendarID == "w")
+    }
+
+    @Test(arguments: [
+        (12 * 60 + 0.5, 10, 20),  // to the end of the minute it stopped in
+        (13 * 60.0, 10, 20),  // already on a minute
+        (5.0, 10, 8),  // a minute at least
+    ])
+    func endsAMeetingAddedFromTheMenuWhenItStops(after seconds: Double, hour: Int, minute: Int) {
+        let meeting = ScheduledMeeting.startingNow(
+            "Sync",
+            now: at(10, 7),
+            minutes: 30,
+            calendar: "Work",
+            calendarID: "w"
+        )
+
+        let stopped = meeting.stopped(at: at(10, 7) + seconds)
+
+        #expect(stopped.end == at(hour, minute))
+        #expect((stopped.title, stopped.start, stopped.calendarID) == ("Sync", at(10, 7), "w"))
+    }
+
     private func at(_ hour: Int, _ minute: Int, day: Int = 16) -> Date {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = Self.utc

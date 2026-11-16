@@ -3,8 +3,8 @@ import Testing
 
 @testable import AppSupport
 
-/// The folders must match `scripts/record-meetings -n`'s, so both put recordings in one tree; the expected names are
-/// what the script makes of the same input.
+/// The folders of meetings on a calendar must match `scripts/record-meetings -n`'s, so both put recordings in one tree;
+/// the expected names are what the script makes of the same input.
 struct RecordingFolderTests {
     private static let utc = TimeZone(identifier: "UTC")!
 
@@ -19,7 +19,7 @@ struct RecordingFolderTests {
         #expect(RecordingFolder.shortName(title) == expected)
     }
 
-    @Test func goesUnderOtherByISOWeekDayAndStartTime() {
+    @Test func goesStraightUnderTheRootWithoutACalendar() {
         let start = date(2027, 1, 1, 9, 5)
 
         let directory = RecordingFolder.directory(
@@ -29,16 +29,22 @@ struct RecordingFolderTests {
             timeZone: Self.utc
         )
 
-        #expect(directory.path == "/r/other/53-2026/01-01/09h05-standup")
+        #expect(directory.path == "/r/53-2026/01-01/09h05-standup")
     }
 
     @Test func usesTheTimeZoneOfTheMac() {
         let start = date(2026, 12, 28, 23, 59)
         let madrid = TimeZone(identifier: "Europe/Madrid")!
 
-        let directory = RecordingFolder.directory(root: URL(filePath: "/r"), name: "x", start: start, timeZone: madrid)
+        let directory = RecordingFolder.directory(
+            root: URL(filePath: "/r"),
+            calendar: "Work",
+            name: "x",
+            start: start,
+            timeZone: madrid
+        )
 
-        #expect(directory.path == "/r/other/53-2026/12-29/00h59-x")
+        #expect(directory.path == "/r/Work/53-2026/12-29/00h59-x")
     }
 
     @Test func numbersARecordingWhenTheFolderAlreadyHasOne() throws {
@@ -65,7 +71,7 @@ struct RecordingFolderTests {
 
     @Test func findsRecordingsThatWereNeverSaved() throws {
         try withTemporaryDirectory { directory in
-            let meeting = directory.appending(path: "other/46-2026/11-14/10h00-standup")
+            let meeting = directory.appending(path: "Work/46-2026/11-14/10h00-standup")
             try FileManager.default.createDirectory(at: meeting, withIntermediateDirectories: true)
             for name in ["rec.mp3", "rec-2.mp3.partial.caf", "transcript.txt"] {
                 try Data().write(to: meeting.appending(path: name))
