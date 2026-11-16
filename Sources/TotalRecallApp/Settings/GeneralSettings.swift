@@ -2,31 +2,10 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 
-/// Settings, a tab for each part: where recordings go and when they start, which calendars, how they are recorded and
-/// transcribed, and the version. Changes apply from the next recording.
-struct SettingsView: View {
-    /// The tab shown: General each time Settings opens, as the last one looked at is not kept.
-    @State private var tab = 0
-
-    var body: some View {
-        TabView(selection: $tab) {
-            Tab("General", systemImage: "gearshape", value: 0) { GeneralSettings() }
-            Tab("Calendars", systemImage: "calendar", value: 1) { CalendarSettings() }
-            Tab("Recording", systemImage: "waveform", value: 2) { RecordingSettings() }
-            Tab("Transcript", systemImage: "text.bubble", value: 3) { TranscriptSettings() }
-            Tab("About", systemImage: "info.circle", value: 4) { AboutView() }
-        }
-        .frame(width: 540)
-    }
-}
-
-/// Where recordings go, when meetings are recorded, and opening at login.
-private struct GeneralSettings: View {
+/// Where recordings go, hiding the menu bar icon, and opening at login.
+struct GeneralSettings: View {
     @AppStorage(AppSettings.Key.recordingsFolder, store: AppSettings.store) private var recordingsFolder = AppSettings
         .defaultRecordingsFolder
-    @AppStorage(AppSettings.Key.recordsAutomatically, store: AppSettings.store) private var recordsAutomatically = true
-    @AppStorage(AppSettings.Key.warningMinutes, store: AppSettings.store) private var warningMinutes = AppSettings
-        .defaultWarningMinutes
     @AppStorage(AppSettings.Key.hidesMenuBarIconFromCapture, store: AppSettings.store) private var hidesMenuBarIcon =
         true
     @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
@@ -53,21 +32,6 @@ private struct GeneralSettings: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            }
-
-            Section("Meetings on the calendar") {
-                Toggle("Record meetings automatically", isOn: $recordsAutomatically)
-                Text(
-                    "Starts recording each meeting when it starts, if nothing is being recorded. A recording only "
-                        + "stops when you stop it."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Stepper(value: $warningMinutes, in: 0...30) {
-                    LabeledContent("Warn before each meeting") {
-                        Text(warningMinutes == 0 ? "Off" : "\(warningMinutes) min")
-                    }
-                }
             }
 
             Section {

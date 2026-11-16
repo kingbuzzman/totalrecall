@@ -3,38 +3,57 @@ import AppSupport
 import Shared
 import SwiftUI
 
-/// Access to the calendars, and for each, whether its meetings are recorded and which of them to ignore.
+/// Access to the calendars, whether their meetings are recorded and warned of, and for each calendar, whether its
+/// meetings are recorded and which of them to ignore.
 struct CalendarSettings: View {
     @Environment(AppModel.self) private var model
     @State private var rules = AppSettings.calendarRules
     @AppStorage(AppSettings.Key.newMeetingMinutes, store: AppSettings.store) private var newMeetingMinutes = AppSettings
         .defaultNewMeetingMinutes
+    @AppStorage(AppSettings.Key.recordsAutomatically, store: AppSettings.store) private var recordsAutomatically = true
+    @AppStorage(AppSettings.Key.warningMinutes, store: AppSettings.store) private var warningMinutes = AppSettings
+        .defaultWarningMinutes
 
     var body: some View {
         Form {
             if model.calendar.hasAccess {
-                if !model.meetingCalendars.isEmpty {
-                    Section {
-                        Picker("Default meeting calendar", selection: defaultMeetingCalendar) {
-                            ForEach(model.meetingCalendars) { calendar in
-                                Text(calendar.title).tag(calendar.id)
-                            }
+                Section("Meetings on the calendar") {
+                    Toggle("Record meetings automatically", isOn: $recordsAutomatically)
+                    Text(
+                        "Starts recording each meeting when it starts, if nothing is being recorded. A recording only "
+                            + "stops when you stop it."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Stepper(value: $warningMinutes, in: 0...30) {
+                        LabeledContent("Warn before each meeting") {
+                            Text(warningMinutes == 0 ? "Off" : "\(warningMinutes) min")
                         }
-                        Picker("Default meeting length", selection: $newMeetingMinutes) {
-                            ForEach(AppSettings.newMeetingLengths, id: \.self) { minutes in
-                                Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes])))
-                                    .tag(minutes)
-                            }
-                        }
-                    } footer: {
-                        Text(
-                            "Recordings started from the menu are filed under this calendar; hold ⌘ in the menu to "
-                                + "pick another. New Meeting… also puts the meeting on it, the default length long "
-                                + "while it's recorded, then ending when you stop."
-                        )
-                        .foregroundStyle(.secondary)
                     }
                 }
+                // Always there, so nothing below moves when the last calendar is turned off: greyed out instead.
+                Section {
+                    Picker("Default meeting calendar", selection: defaultMeetingCalendar) {
+                        if model.meetingCalendars.isEmpty { Text("None").tag("") }
+                        ForEach(model.meetingCalendars) { calendar in
+                            Text(calendar.title).tag(calendar.id)
+                        }
+                    }
+                    Picker("Default meeting length", selection: $newMeetingMinutes) {
+                        ForEach(AppSettings.newMeetingLengths, id: \.self) { minutes in
+                            Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes])))
+                                .tag(minutes)
+                        }
+                    }
+                } footer: {
+                    Text(
+                        "Recordings started from the menu are filed under this calendar; hold ⌘ in the menu to "
+                            + "pick another. New Meeting… also puts the meeting on it, the default length long "
+                            + "while it's recorded, then ending when you stop."
+                    )
+                    .foregroundStyle(.secondary)
+                }
+                .disabled(model.meetingCalendars.isEmpty)
                 ForEach(accounts, id: \.self) { account in
                     Section(account.isEmpty ? "Other" : account) {
                         ForEach(model.calendar.calendars.filter { $0.account == account }) { calendar in

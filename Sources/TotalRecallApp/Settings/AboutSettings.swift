@@ -3,7 +3,7 @@ import Shared
 import SwiftUI
 
 /// The version, and the credit the speaker model's license asks for.
-struct AboutView: View {
+struct AboutSettings: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(nsImage: NSApp.applicationIconImage)
