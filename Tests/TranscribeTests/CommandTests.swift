@@ -49,6 +49,8 @@ struct CommandTests {
         (["speakers", "name", "3", "Ada"], .nameSpeaker(3, name: "Ada")),
         (["speakers", "name", "3", "Ada", "L."], .nameSpeaker(3, name: "Ada L.")),
         (["speakers", "merge", "5", "3"], .mergeSpeaker(5, into: 3)),
+        (["speakers", "merge", "5", "3", "--anyway"], .mergeSpeaker(5, into: 3, anyway: true)),
+        (["speakers", "split", "7"], .splitVoice(7)),
         (["speakers", "forget", "5"], .forgetSpeaker(5)),
         (["speakers", "play", "5"], .playSpeaker(5)),
         (["speakers", "save", "5", "samples"], .saveSpeakerSamples(5, directory: "samples")),
@@ -81,6 +83,8 @@ struct CommandTests {
         (["speakers", "merge", "5"], "expected a speaker's number, such as 3; transcribe speakers lists them"),
         (["speakers", "forget", "5", "6"], "unexpected argument 6\n\(usage)"),
         (["speakers", "rename"], "unknown speakers command rename\n\(usage)"),
+        (["speakers", "split"], "expected a voice's number, such as 7; transcribe speakers lists them"),
+        (["speakers", "merge", "5", "3", "--force"], "unexpected argument --force\n\(usage)"),
         (["speakers", "play"], "expected a speaker's number, such as 3; transcribe speakers lists them"),
         (["speakers", "save", "5"], "expected a directory to save speaker 5's samples in"),
     ])

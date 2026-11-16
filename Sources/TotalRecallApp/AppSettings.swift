@@ -2,8 +2,24 @@ import AppSupport
 import Foundation
 import Shared
 
-/// The settings, kept in the app's user defaults; Settings changes them through `@AppStorage` with the same keys.
+/// The settings, kept in ~/Library/Application Support/TotalRecall/Settings.plist, beside the people the app remembers;
+/// Settings changes them through `@AppStorage` with the same keys and `store`.
 enum AppSettings {
+    /// Where the app keeps what it keeps: its settings, and the people it remembers.
+    static let folder = URL.applicationSupportDirectory.appending(path: "TotalRecall")
+
+    /// The people Identify Speakers remembers: the app's own, apart from those `transcribe` remembers.
+    static let speakers = folder.appending(path: "speakers.db")
+
+    /// The settings file, as user defaults; which, as Apple documents, any thread may use.
+    nonisolated(unsafe) static let store: UserDefaults = {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard let store = UserDefaults(suiteName: folder.appending(path: "Settings").path) else {
+            preconditionFailure("cannot keep settings in \(folder.path)")
+        }
+        return store
+    }()
+
     enum Key {
         static let recordingsFolder = "recordingsFolder"
         static let format = "audioFormat"
@@ -111,10 +127,10 @@ enum AppSettings {
         defaults.bool(forKey: Key.identifiesSpeakers)
     }
 
-    private static var defaults: UserDefaults { .standard }
+    private static var defaults: UserDefaults { store }
 
-    /// A setting that is on or off, or `unset` when never set. Read with `bool(forKey:)`, which also takes the text a
-    /// launch argument gives, such as `-recordsAutomatically NO`, where a cast to Bool would take it for unset.
+    /// A setting that is on or off, or `unset` when never set. Read with `bool(forKey:)`, which also takes text such
+    /// as `defaults write` can leave, "NO", where a cast to Bool would take it for unset.
     private static func flag(_ key: String, unset: Bool) -> Bool {
         defaults.object(forKey: key) == nil ? unset : defaults.bool(forKey: key)
     }

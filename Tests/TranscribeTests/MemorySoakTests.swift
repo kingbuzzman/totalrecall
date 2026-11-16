@@ -92,7 +92,8 @@ struct MemorySoakTests {
             from: pipe.fileHandleForReading,
             to: text,
             language: nil,
-            identifiesSpeakers: identifiesSpeakers,
+            identifyingSpeakersIn: identifiesSpeakers
+                ? FileManager.default.temporaryDirectory.appending(path: "soak-\(UUID())/speakers.db") : nil,
             handlers: LiveTranscriptHandlers(
                 onLine: { _ in lines.withLock { $0 += 1 } },
                 onLiveText: { _ in },

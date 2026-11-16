@@ -2,9 +2,10 @@ import SwiftUI
 
 /// The language spoken, and telling people apart by voice.
 struct TranscriptSettings: View {
-    @AppStorage(AppSettings.Key.language) private var language = ""
-    @AppStorage(AppSettings.Key.identifiesSpeakers) private var identifiesSpeakers = false
-    @AppStorage(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture = true
+    @AppStorage(AppSettings.Key.language, store: AppSettings.store) private var language = ""
+    @AppStorage(AppSettings.Key.identifiesSpeakers, store: AppSettings.store) private var identifiesSpeakers = false
+    @AppStorage(AppSettings.Key.hidesTranscriptFromCapture, store: AppSettings.store) private var hidesFromCapture =
+        true
     @State private var asksToIdentifySpeakers = false
 
     /// What turning on Identify Speakers means in law, said each time it is turned on, before it is.

@@ -159,7 +159,7 @@ private final class Recording: @unchecked Sendable {
                     from: input,
                     to: transcript,
                     language: request.language,
-                    identifiesSpeakers: request.identifiesSpeakers,
+                    identifyingSpeakersIn: request.identifiesSpeakers ? AppSettings.speakers : nil,
                     handlers: LiveTranscriptHandlers(
                         onLine: { report(.line($0)) },
                         onLiveText: { report(.liveText($0)) },

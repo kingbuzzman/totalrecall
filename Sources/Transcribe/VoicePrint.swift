@@ -265,6 +265,8 @@ final class VoiceResampler {
 /// there, in memory. They must stay there for as long as the model is used: Core ML reads the weights again whenever
 /// it plans the model for a length of speech it has not had yet.
 enum SpeakerModel {
+    /// What the database labels this model's prints with, as another model's mean nothing to it.
+    static let name = "wespeaker-voxceleb-resnet34-lm"
     /// The package's files, as the Makefile builds them in: the model, which names its weights `weights`, and those.
     private static let model = "Data/com.apple.CoreML/model.mlmodel"
     private static let weights = "Data/com.apple.CoreML/weights/weight.bin"

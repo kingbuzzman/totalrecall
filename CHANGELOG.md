@@ -4,6 +4,12 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ## Unreleased
 
+### transcribe
+
+- Remembered speakers start over in a new layout: a person has voices, kept apart when merged.
+- `transcribe speakers split <voice>` undoes a merge; `merge` refuses voices that don't sound alike unless `--anyway`.
+- Up to 20 clips are kept per person, named or not.
+
 ### TotalRecall.app
 
 - Start Recording and New Meeting… file the recording under the default meeting calendar, chosen in Settings (the
@@ -16,22 +22,18 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
   more to pick from.
 - Read-only calendars, such as holidays, which events can't be added to, are greyed out in Settings and never
   recorded.
-- Submenus, such as Today, no longer close by themselves: the menu was redrawn every second. Now only the elapsed time
-  updates, and only while recording with the menu open.
+- Submenus, such as Today, stay open while recording; the elapsed time pauses while the pointer is on an item.
 - Open Recordings Folder is gone from the menu; Show, beside the folder in Settings, opens it.
 - Delete Recordings Once Transcribed, in Settings › Recording, on unless turned off: each recording goes to the Trash
   once its transcript is complete, keeping only the transcript. One whose transcript stopped short, or has no words in
   it, is kept.
-- Each calendar's settings are saved as plain dictionaries in the app's preferences, readable with `defaults read
-  local.totalrecall.app calendarRules`, rather than as encoded data.
+- Settings, window positions and remembered speakers live in `~/Library/Application Support/TotalRecall/`.
+- Each calendar's settings are saved as plain dictionaries rather than encoded data.
 - Notifications have buttons: Record Now and Skip on a meeting about to start (Record Now stops whatever is being
   recorded first), Stop Recording on a recording that started, Try Again when one could not start, and Open
   Transcript and Restore Recording, which takes it back out of the Trash, once a recording went to the Trash.
 - Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
-- The transcript's first line no longer hides under the column headers while the transcript is too short to scroll;
-  each new line, or the words still being recognized, kept scrolling it back under them.
-- Today, and the meetings in it, stay open while recording: the recording's time in the menu, redrawn every second,
-  closed them. It now stands still while the pointer is on an item with a submenu, and catches up once it leaves.
+- The transcript's first line no longer hides under the column headers.
 
 ## 0.5.0
 

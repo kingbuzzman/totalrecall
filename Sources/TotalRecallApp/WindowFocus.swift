@@ -1,12 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// Brings the app's windows to the front. A menu bar app's window opens behind the others: the app only becomes one
-/// that can be in front (see `DockPresence`) as the window appears, after SwiftUI has already tried. So each window is
-/// kept track of by name, and brought forward once it is in place, and again whenever the menu asks for it.
+/// Brings the app's windows to the front, and remembers where they were. A menu bar app's window opens behind the
+/// others: the app only becomes one that can be in front (see `DockPresence`) as the window appears, after SwiftUI has
+/// already tried. So each window is kept track of by name, and brought forward once it is in place, and again whenever
+/// the menu asks for it. Where each was is kept in the app's settings, rather than where AppKit keeps it, in
+/// ~/Library/Preferences.
 @MainActor
 enum WindowFocus {
     private static var windows: [String: WeakWindow] = [:]
+    private static var frameObservers: [String: [any NSObjectProtocol]] = [:]
 
     /// Brings the window named `name` to the front and gives it the keyboard, if it is open.
     static func bringToFront(_ name: String) {
@@ -20,8 +23,24 @@ enum WindowFocus {
     }
 
     fileprivate static func register(_ window: NSWindow, as name: String) {
+        if windows[name]?.window !== window { rememberFrame(of: window, as: name) }
         windows[name] = WeakWindow(window: window)
         bringToFront(name)
+    }
+
+    /// Puts the window where it was last, and saves where it is whenever it moves or changes size.
+    private static func rememberFrame(of window: NSWindow, as name: String) {
+        let key = "windowFrame.\(name)"
+        window.setFrameAutosaveName("")
+        if let frame = AppSettings.store.string(forKey: key) { window.setFrame(from: frame) }
+        frameObservers[name]?.forEach(NotificationCenter.default.removeObserver)
+        frameObservers[name] = [NSWindow.didMoveNotification, NSWindow.didResizeNotification].map { change in
+            NotificationCenter.default.addObserver(forName: change, object: window, queue: .main) { [weak window] _ in
+                MainActor.assumeIsolated {
+                    if let window { AppSettings.store.set(window.frameDescriptor, forKey: key) }
+                }
+            }
+        }
     }
 
     private struct WeakWindow {

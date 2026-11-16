@@ -4,9 +4,10 @@ import TotalRecall
 
 /// The audio format, with what each costs, and the microphone.
 struct RecordingSettings: View {
-    @AppStorage(AppSettings.Key.format) private var format = AudioFormatChoice.default
-    @AppStorage(AppSettings.Key.microphone) private var microphone = ""
-    @AppStorage(AppSettings.Key.trashesAudioOnceTranscribed) private var trashesAudioOnceTranscribed = true
+    @AppStorage(AppSettings.Key.format, store: AppSettings.store) private var format = AudioFormatChoice.default
+    @AppStorage(AppSettings.Key.microphone, store: AppSettings.store) private var microphone = ""
+    @AppStorage(AppSettings.Key.trashesAudioOnceTranscribed, store: AppSettings.store) private
+        var trashesAudioOnceTranscribed = true
     @State private var microphones: [String] = []
 
     var body: some View {

@@ -6,57 +6,103 @@ import Testing
 struct SpeakerDatabaseTests {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("transcribe-tests-\(UUID())/speakers.db")
 
-    @Test func remembersSpeakersFromOneOpeningToTheNext() throws {
-        let id = try SpeakerDatabase(url: url).add(voice: [1, 2, 3], prints: 4)
-        try #require(try SpeakerDatabase(url: url).update(id, voice: [2, 3, 4], prints: 6))
+    @Test func remembersVoicesFromOneOpeningToTheNext() throws {
+        let added = try SpeakerDatabase(url: url).addPerson(print: [1, 2, 3], prints: 4)
+        try #require(try SpeakerDatabase(url: url).update(added.id, print: [2, 3, 4], prints: 6))
 
-        let speakers = try SpeakerDatabase(url: url).speakers()
+        let voices = try SpeakerDatabase(url: url).voices()
 
-        #expect(speakers.map(\.id) == [id])
-        #expect(speakers[0].voice == [2, 3, 4])
-        #expect(speakers[0].prints == 6)
-        #expect(speakers[0].name == nil)
+        #expect(voices.map(\.id) == [added.id])
+        #expect(voices[0].person == added.person)
+        #expect(voices[0].print == [2, 3, 4])
+        #expect(voices[0].prints == 6)
+        #expect(voices[0].name == nil)
+        #expect(try SpeakerDatabase(url: url).people().map(\.id) == [added.person])
     }
 
-    @Test func namesASpeakerAndTakesTheNameAway() throws {
-        let database = try SpeakerDatabase(url: url)
-        let id = try database.add(voice: [0], prints: 1)
+    @Test func keepsEachModelsPrintsApart() throws {
+        let added = try SpeakerDatabase(url: url, model: "one").addPerson(print: [1, 2], prints: 4)
 
-        #expect(try database.rename(id, to: "Ada"))
-        #expect(try database.speaker(id)?.name == "Ada")
-        #expect(try database.rename(id, to: nil))
-        #expect(try database.speaker(id)?.name == nil)
-        #expect(try !database.rename(id + 1, to: "Nobody"))
+        #expect(try SpeakerDatabase(url: url, model: "other").voices().isEmpty)
+        #expect(try SpeakerDatabase(url: url, model: "other").people().map(\.id) == [added.person])
+        #expect(try SpeakerDatabase(url: url, model: "one").voices().map(\.print) == [[1, 2]])
     }
 
-    @Test func mergesOnePersonTakenForTwo() throws {
+    @Test func namesSomeoneAndTakesTheNameAway() throws {
         let database = try SpeakerDatabase(url: url)
-        let first = try database.add(voice: [0, 0], prints: 1)
-        let second = try database.add(voice: [4, 8], prints: 3)
-        _ = try database.rename(first, to: "Ada")
-        let firstHeard = try #require(try database.speaker(first)).createdAt
+        let person = try database.addPerson(print: [0], prints: 1).person
 
-        #expect(try database.merge(first, into: second))
+        #expect(try database.rename(person, to: "Ada"))
+        #expect(try database.person(person)?.name == "Ada")
+        #expect(try database.voices().first?.name == "Ada")
+        #expect(try database.rename(person, to: nil))
+        #expect(try database.person(person)?.name == nil)
+        #expect(try !database.rename(person + 1, to: "Nobody"))
+    }
 
-        let speakers = try database.speakers()
-        #expect(speakers.map(\.id) == [second])
-        #expect(speakers[0].voice == [3, 6])
-        #expect(speakers[0].prints == 4)
-        #expect(speakers[0].name == "Ada")
-        #expect(speakers[0].createdAt == firstHeard)
-        #expect(try !database.merge(second, into: second))
-        #expect(try !database.merge(first, into: second))
+    @Test func mergesOnePersonTakenForTwoKeepingEachVoice() throws {
+        let database = try SpeakerDatabase(url: url)
+        let first = try database.addPerson(print: [0, 0], prints: 1)
+        let second = try database.addPerson(print: [4, 8], prints: 3)
+        _ = try database.rename(first.person, to: "Ada")
+        let firstHeard = try #require(try database.person(first.person)).createdAt
+
+        #expect(try database.merge(first.person, into: second.person))
+
+        #expect(try database.people().map(\.id) == [second.person])
+        let person = try #require(try database.person(second.person))
+        #expect(person.name == "Ada")
+        #expect(person.createdAt == firstHeard)
+        let voices = try database.voices(of: second.person)
+        #expect(voices.map(\.id) == [first.id, second.id])
+        #expect(voices.map(\.print) == [[0, 0], [4, 8]])
+        #expect(try !database.merge(second.person, into: second.person))
+        #expect(try !database.merge(first.person, into: second.person))
+    }
+
+    @Test func splitsAVoiceBackOutOfAWrongMerge() throws {
+        let database = try SpeakerDatabase(url: url)
+        let ada = try database.addPerson(print: [1, 0], prints: 10)
+        let grace = try database.addPerson(print: [0, 1], prints: 10)
+        _ = try database.rename(ada.person, to: "Ada")
+        try database.addClip(Data([1]), seconds: 5, to: grace.id)
+        #expect(try database.merge(grace.person, into: ada.person))
+
+        let split = try #require(try database.split(grace.id))
+
+        #expect(try database.voices(of: ada.person).map(\.id) == [ada.id])
+        #expect(try database.voices(of: split).map(\.id) == [grace.id])
+        #expect(try database.person(split)?.name == nil)
+        #expect(try database.clips(of: split).map(\.seconds) == [5])
+        #expect(try database.split(ada.id) == nil)
+        #expect(try database.split(grace.id + 100) == nil)
+    }
+
+    @Test func tellsHowAlikeTwoPeopleSoundByTheirMostAlikeVoices() throws {
+        let database = try SpeakerDatabase(url: url)
+        let ada = try database.addPerson(print: direction(0), prints: 10)
+        let alsoAda = try database.addPerson(print: direction(0, 0.3), prints: 10)
+        let grace = try database.addPerson(print: direction(10), prints: 10)
+        let graceOnAPhone = try database.addPerson(print: direction(0, 0.2), prints: 10)
+        #expect(try database.merge(graceOnAPhone.person, into: grace.person))
+
+        let near = try #require(try database.distance(between: alsoAda.person, and: ada.person))
+        let throughOneVoice = try #require(try database.distance(between: grace.person, and: ada.person))
+
+        #expect(abs(near - (1 - cos(0.3))) < 1e-5)
+        #expect(abs(throughOneVoice - (1 - cos(0.2))) < 1e-5)
+        #expect(try database.distance(between: ada.person, and: ada.person + 100) == nil)
     }
 
     @Test func unifiesThoseSurelyOnePerson() throws {
         let database = try SpeakerDatabase(url: url)
-        let ada = try database.add(voice: direction(0), prints: 20)
-        let alsoAda = try database.add(voice: direction(0, 0.2), prints: 5)
-        let notSure = try database.add(voice: direction(0, 1.2), prints: 30)
-        let heardBriefly = try database.add(voice: direction(0, 0.1), prints: 3)
-        let grace = try database.add(voice: direction(10), prints: 20)
-        let graceAgain = try database.add(voice: direction(10, 0.5), prints: 8)
-        let notGrace = try database.add(voice: direction(10, 0.1), prints: 10)
+        let ada = try database.addPerson(print: direction(0), prints: 20).person
+        let alsoAda = try database.addPerson(print: direction(0, 0.2), prints: 5).person
+        let notSure = try database.addPerson(print: direction(0, 1.2), prints: 30).person
+        let heardBriefly = try database.addPerson(print: direction(0, 0.1), prints: 3).person
+        let grace = try database.addPerson(print: direction(10), prints: 20).person
+        let graceAgain = try database.addPerson(print: direction(10, 0.5), prints: 8).person
+        let notGrace = try database.addPerson(print: direction(10, 0.1), prints: 10).person
         _ = try database.rename(ada, to: "Ada")
         _ = try database.rename(grace, to: "Grace")
         _ = try database.rename(graceAgain, to: "Grace")
@@ -65,63 +111,78 @@ struct SpeakerDatabaseTests {
         let unified = try database.unify()
 
         #expect(unified.map { [$0.merged.id, $0.into.id] } == [[alsoAda, ada], [graceAgain, grace]])
-        #expect(try database.speakers().map(\.id) == [ada, notSure, heardBriefly, grace, notGrace])
+        #expect(try database.people().map(\.id) == [ada, notSure, heardBriefly, grace, notGrace])
+        #expect(try database.voices(of: ada).count == 2)
         #expect(try database.unify().isEmpty)
     }
 
     @Test func marksYouAndKeepsYouThroughAMerge() throws {
         let database = try SpeakerDatabase(url: url)
-        let you = try database.add(voice: [0], prints: 1)
-        let other = try database.add(voice: [0], prints: 1)
+        let you = try database.addPerson(print: [0], prints: 1)
+        let other = try database.addPerson(print: [0], prints: 1)
 
-        #expect(try database.markAsYou(you))
-        #expect(try database.speaker(you)?.isYou == true)
-        #expect(try database.speaker(other)?.isYou == false)
-        #expect(try database.merge(you, into: other))
-        #expect(try database.speaker(other)?.isYou == true)
+        #expect(try database.markAsYou(you.id))
+        #expect(try database.person(you.person)?.isYou == true)
+        #expect(try database.person(other.person)?.isYou == false)
+        #expect(try database.merge(you.person, into: other.person))
+        #expect(try database.person(other.person)?.isYou == true)
     }
 
-    @Test func keepsEachSpeakersLongestSamples() throws {
+    @Test func keepsEachPersonsLongestClipsNamedOrNot() throws {
         let database = try SpeakerDatabase(url: url)
-        let id = try database.add(voice: [0], prints: 1)
+        let added = try database.addPerson(print: [0], prints: 1)
+        _ = try database.rename(added.person, to: "Ada")
 
-        for seconds in [3.0, 9, 2, 12, 5, 7] {
-            try database.addSample(Data("\(seconds)".utf8), seconds: seconds, to: id)
+        for seconds in (1...25).map(Double.init) {
+            try database.addClip(Data("\(seconds)".utf8), seconds: seconds, to: added.id)
         }
 
-        #expect(try database.samples(of: id).map(\.seconds) == [12, 9, 7, 5])
-        #expect(try database.samples(of: id).first?.audio == Data("12.0".utf8))
-        #expect(try database.sampleCounts() == [id: 4])
+        let clips = try database.clips(of: added.person)
+        #expect(clips.map(\.seconds) == (6...25).reversed().map(Double.init))
+        #expect(clips.first?.audio == Data("25.0".utf8))
+        #expect(try database.clipCounts() == [added.person: SpeakerDatabase.clipsPerPerson])
     }
 
-    @Test func movesSamplesToWhoeverTheirSpeakerTurnsOutToBe() throws {
+    @Test func movesClipsToTheVoiceTheirsTurnsOutToBe() throws {
         let database = try SpeakerDatabase(url: url)
-        let (first, second, third) = (
-            try database.add(voice: [0], prints: 1), try database.add(voice: [0], prints: 1),
-            try database.add(voice: [0], prints: 1)
+        let (first, second) = (
+            try database.addPerson(print: [0], prints: 1), try database.addPerson(print: [0], prints: 1)
         )
-        for seconds in [3.0, 4, 5] { try database.addSample(Data([1]), seconds: seconds, to: first) }
-        for seconds in [6.0, 7] { try database.addSample(Data([2]), seconds: seconds, to: second) }
-        try database.addSample(Data([3]), seconds: 8, to: third)
+        for seconds in [3.0, 4] { try database.addClip(Data([1]), seconds: seconds, to: first.id) }
+        try database.addClip(Data([2]), seconds: 6, to: second.id)
 
-        try database.moveSamples(of: first, to: second)
-        #expect(try database.samples(of: second).map(\.seconds) == [7, 6, 5, 4])
-        #expect(try database.merge(third, into: second))
-        #expect(try database.samples(of: second).map(\.seconds) == [8, 7, 6, 5])
-        #expect(try database.samples(of: first).isEmpty)
+        try database.moveClips(of: first.id, to: second.id)
+
+        #expect(try database.clips(of: second.person).map(\.seconds) == [6, 4, 3])
+        #expect(try database.clips(of: second.person).allSatisfy { $0.voice == second.id })
+        #expect(try database.clips(of: first.person).isEmpty)
     }
 
-    @Test func forgetsASpeaker() throws {
+    @Test func forgetsSomeoneWithTheirVoicesAndClips() throws {
         let database = try SpeakerDatabase(url: url)
-        let id = try database.add(voice: [0], prints: 1)
+        let added = try database.addPerson(print: [0], prints: 1)
+        try database.addClip(Data([1]), seconds: 3, to: added.id)
 
-        try database.addSample(Data([1]), seconds: 3, to: id)
+        #expect(try database.forget(added.person))
 
-        #expect(try database.forget(id))
-        #expect(try database.speakers().isEmpty)
-        #expect(try database.sampleCounts().isEmpty)
-        #expect(try !database.forget(id))
-        #expect(try !database.update(id, voice: [1], prints: 2))
+        #expect(try database.people().isEmpty)
+        #expect(try database.voices().isEmpty)
+        #expect(try database.clipCounts().isEmpty)
+        #expect(try !database.forget(added.person))
+        #expect(try !database.update(added.id, print: [1], prints: 2))
+    }
+
+    @Test func forgetsAVoiceAndItsPersonOnlyWhenItWasTheirLast() throws {
+        let database = try SpeakerDatabase(url: url)
+        let ada = try database.addPerson(print: [1], prints: 1)
+        let alsoAda = try database.addPerson(print: [2], prints: 1)
+        #expect(try database.merge(alsoAda.person, into: ada.person))
+
+        #expect(try database.forgetVoice(alsoAda.id))
+        #expect(try database.people().map(\.id) == [ada.person])
+        #expect(try database.forgetVoice(ada.id))
+        #expect(try database.people().isEmpty)
+        #expect(try !database.forgetVoice(ada.id))
     }
 
     /// A made-up voice print: direction `axis`, turned `turn` toward the next one.

@@ -27,7 +27,7 @@ struct TranscribeLiveTests {
             from: pipe.fileHandleForReading,
             to: text,
             language: nil,
-            identifiesSpeakers: false,
+            identifyingSpeakersIn: nil,
             handlers: LiveTranscriptHandlers(
                 onLine: { line in lines.withLock { $0.append(line) } },
                 onLiveText: { live in liveTexts.withLock { $0.append(live) } },

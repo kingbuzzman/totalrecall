@@ -7,7 +7,8 @@ import SwiftUI
 struct CalendarSettings: View {
     @Environment(AppModel.self) private var model
     @State private var rules = AppSettings.calendarRules
-    @AppStorage(AppSettings.Key.newMeetingMinutes) private var newMeetingMinutes = AppSettings.defaultNewMeetingMinutes
+    @AppStorage(AppSettings.Key.newMeetingMinutes, store: AppSettings.store) private var newMeetingMinutes = AppSettings
+        .defaultNewMeetingMinutes
 
     var body: some View {
         Form {
@@ -97,7 +98,7 @@ struct CalendarSettings: View {
         Binding {
             model.defaultMeetingCalendar?.id ?? ""
         } set: { id in
-            UserDefaults.standard.set(id, forKey: AppSettings.Key.defaultMeetingCalendar)
+            AppSettings.store.set(id, forKey: AppSettings.Key.defaultMeetingCalendar)
         }
     }
 

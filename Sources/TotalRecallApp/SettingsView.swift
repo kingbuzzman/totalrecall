@@ -22,10 +22,13 @@ struct SettingsView: View {
 
 /// Where recordings go, when meetings are recorded, and opening at login.
 private struct GeneralSettings: View {
-    @AppStorage(AppSettings.Key.recordingsFolder) private var recordingsFolder = AppSettings.defaultRecordingsFolder
-    @AppStorage(AppSettings.Key.recordsAutomatically) private var recordsAutomatically = true
-    @AppStorage(AppSettings.Key.warningMinutes) private var warningMinutes = AppSettings.defaultWarningMinutes
-    @AppStorage(AppSettings.Key.hidesMenuBarIconFromCapture) private var hidesMenuBarIcon = true
+    @AppStorage(AppSettings.Key.recordingsFolder, store: AppSettings.store) private var recordingsFolder = AppSettings
+        .defaultRecordingsFolder
+    @AppStorage(AppSettings.Key.recordsAutomatically, store: AppSettings.store) private var recordsAutomatically = true
+    @AppStorage(AppSettings.Key.warningMinutes, store: AppSettings.store) private var warningMinutes = AppSettings
+        .defaultWarningMinutes
+    @AppStorage(AppSettings.Key.hidesMenuBarIconFromCapture, store: AppSettings.store) private var hidesMenuBarIcon =
+        true
     @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
     @State private var launchAtLoginError: String?
 

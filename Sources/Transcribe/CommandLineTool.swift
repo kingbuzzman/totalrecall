@@ -28,14 +28,13 @@ package func runCommandLine(_ arguments: ArraySlice<String>) async -> Never {
         listSpeakers()
     case .nameSpeaker(let speaker, let name):
         guard changingSpeakers({ try $0.rename(speaker, to: name) }) else { failNoSpeaker(speaker) }
-    case .mergeSpeaker(let speaker, let target):
-        guard changingSpeakers({ try $0.merge(speaker, into: target) }) else {
-            fail(
-                speaker == target
-                    ? "a speaker is already part of themselves"
-                    : "no speaker \(speaker) or \(target); see transcribe speakers"
-            )
+    case .mergeSpeaker(let speaker, let target, let anyway):
+        mergeSpeaker(speaker, into: target, anyway: anyway)
+    case .splitVoice(let voice):
+        guard let person = changingSpeakers({ try $0.split(voice) }) else {
+            fail("no voice \(voice) that its speaker has others besides; see transcribe speakers")
         }
+        print("voice \(voice) is speaker \(person) now")
     case .forgetSpeaker(let speaker):
         guard changingSpeakers({ try $0.forget(speaker) }) else { failNoSpeaker(speaker) }
     case .playSpeaker(let speaker):
@@ -63,28 +62,55 @@ private func listLanguages() async {
     }
 }
 
-/// `transcribe speakers`: the people remembered, how long each was heard, and those who sound alike.
+/// `transcribe speakers`: the people remembered, how long each was heard, the voices of those heard more than one way,
+/// and those who sound alike.
 private func listSpeakers() {
-    let (speakers, samples) = changingSpeakers { (try $0.speakers(), try $0.sampleCounts()) }
-    if speakers.isEmpty { print("nobody yet: transcribe --identify-speakers remembers the people it hears") }
-    for speaker in speakers {
-        let seconds = Double(speaker.prints) * SpeakerIdentifier.hopSeconds
+    let (people, voices, clips) = changingSpeakers { (try $0.people(), try $0.voices(), try $0.clipCounts()) }
+    if people.isEmpty { print("nobody yet: transcribe --identify-speakers remembers the people it hears") }
+    let voicesOf = Dictionary(grouping: voices, by: \.person)
+    func distance(_ one: Int, _ other: Int) -> Float {
+        (voicesOf[one] ?? []).flatMap { voice in (voicesOf[other] ?? []).map { voiceDistance(voice.print, $0.print) } }
+            .min() ?? .infinity
+    }
+    for person in people {
+        let theirs = voicesOf[person.id] ?? []
+        let seconds = Double(theirs.reduce(0) { $0 + $1.prints }) * SpeakerIdentifier.hopSeconds
         let heard = seconds < 60 ? "\(Int(seconds)) s" : "\(Int((seconds / 60).rounded())) min"
-        let since = speaker.createdAt.formatted(date: .abbreviated, time: .omitted)
-        let number = String(speaker.id).padding(toLength: 4, withPad: " ", startingAt: 0)
-        let name = (speaker.name ?? (speaker.isYou ? Speaker.you.rawValue : "-")) + (speaker.isYou ? " (you)" : "")
-        let count = samples[speaker.id, default: 0]
-        let sampleCount = count == 0 ? "" : ", " + counted(count, "sample")
+        let since = person.createdAt.formatted(date: .abbreviated, time: .omitted)
+        let number = String(person.id).padding(toLength: 4, withPad: " ", startingAt: 0)
+        let name = (person.name ?? (person.isYou ? Speaker.you.rawValue : "-")) + (person.isYou ? " (you)" : "")
+        let count = clips[person.id, default: 0]
+        let clipCount = count == 0 ? "" : ", " + counted(count, "clip")
+        let voiceNumbers = theirs.count < 2 ? "" : "  voices " + theirs.map { String($0.id) }.joined(separator: ", ")
         // Maybe one person, heard as two: not alike enough to be merged without being told to.
-        let alike = speakers.filter {
-            $0.id != speaker.id && voiceDistance($0.voice, speaker.voice) < SpeakerIdentifier.soundAlike
-        }
+        let alike = people.filter { $0.id != person.id && distance($0.id, person.id) < SpeakerIdentifier.soundAlike }
         let soundsLike = alike.isEmpty ? "" : "  sounds like " + alike.map { String($0.id) }.joined(separator: ", ")
-        print("\(number) \(name)  (\(heard)\(sampleCount) since \(since))\(soundsLike)")
+        print("\(number) \(name)  (\(heard)\(clipCount) since \(since))\(voiceNumbers)\(soundsLike)")
     }
 }
 
-/// `transcribe speakers play`: plays the samples kept of a speaker, one after another.
+/// `transcribe speakers merge`: one person taken for two. Refused, unless `anyway`, when no voice of the one sounds like
+/// any of the other's: then they are most likely two people, and merging them would have one taken for the other.
+private func mergeSpeaker(_ speaker: Int, into target: Int, anyway: Bool) {
+    guard speaker != target else { fail("a speaker is already part of themselves") }
+    let (exist, distance) = changingSpeakers {
+        (try $0.person(speaker) != nil && $0.person(target) != nil, try $0.distance(between: speaker, and: target))
+    }
+    guard exist else { fail("no speaker \(speaker) or \(target); see transcribe speakers") }
+    if !anyway, (distance ?? .infinity) >= SpeakerIdentifier.soundAlike {
+        let howFar =
+            distance.map {
+                String(format: "%.2f apart, where one person's voices are under %.2f", $0, SpeakerIdentifier.soundAlike)
+            } ?? "no voice of theirs to compare"
+        fail(
+            "speakers \(speaker) and \(target) do not sound alike (\(howFar)); hear them with transcribe speakers "
+                + "play, and add --anyway to merge them all the same"
+        )
+    }
+    _ = changingSpeakers { try $0.merge(speaker, into: target) }
+}
+
+/// `transcribe speakers play`: plays the clips kept of a speaker, one after another.
 private func playSamples(of speaker: Int) {
     let samples = speakerSamples(speaker)
     for (index, sample) in samples.enumerated() {
@@ -167,16 +193,16 @@ private func finishOnStopSignals() -> [any DispatchSourceSignal] {
     }
 }
 
-/// A speaker's samples, longest first, failing if there are none.
-func speakerSamples(_ speaker: Int) -> [SpeakerDatabase.Sample] {
-    let (exists, samples) = changingSpeakers { (try $0.speaker(speaker) != nil, try $0.samples(of: speaker)) }
+/// A speaker's clips, longest first, failing if there are none.
+func speakerSamples(_ speaker: Int) -> [SpeakerDatabase.Clip] {
+    let (exists, clips) = changingSpeakers { (try $0.person(speaker) != nil, try $0.clips(of: speaker)) }
     guard exists else { failNoSpeaker(speaker) }
-    guard !samples.isEmpty else {
+    guard !clips.isEmpty else {
         fail(
-            "no samples of speaker \(speaker): they are kept from stretches of \(Int(SpeakerIdentifier.shortestSample)) s or more, until they have a name"
+            "no clips of speaker \(speaker): they are kept from stretches of \(Int(SpeakerIdentifier.shortestSample)) s or more"
         )
     }
-    return samples
+    return clips
 }
 
 private func failNoSpeaker(_ speaker: Int) -> Never {

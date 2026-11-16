@@ -31,7 +31,7 @@ func transcribe(
     if source.channelCount >= 2 && !options.mixesChannels {
         (separatesSpeakers, pendingChunks) = try hasSeparateSpeakers(source)
     }
-    let voices = await Voices.load(if: options.identifiesSpeakers, warn: output.warn)
+    let voices = await Voices.load(if: options.identifiesSpeakers, from: options.speakers, warn: output.warn)
     let transcribers = try await makeTranscribers(
         for: source,
         locale: locale,
@@ -58,8 +58,8 @@ private struct Voices {
     let database: SpeakerDatabase?
     let warn: (String) -> Void
 
-    /// The speaker model and the database of the people heard before, when `identifiesSpeakers`.
-    static func load(if identifiesSpeakers: Bool, warn: @escaping (String) -> Void) async -> Voices {
+    /// The speaker model and the database at `url` of the people heard before, when `identifiesSpeakers`.
+    static func load(if identifiesSpeakers: Bool, from url: URL, warn: @escaping (String) -> Void) async -> Voices {
         let warnAboutVoices = { (message: String) in warn("--identify-speakers: \(message)") }
         guard identifiesSpeakers else { return Voices(model: nil, database: nil, warn: warnAboutVoices) }
         let model: MLModel
@@ -70,7 +70,7 @@ private struct Voices {
             return Voices(model: nil, database: nil, warn: warnAboutVoices)
         }
         do {
-            return Voices(model: model, database: try SpeakerDatabase(), warn: warnAboutVoices)
+            return Voices(model: model, database: try SpeakerDatabase(url: url), warn: warnAboutVoices)
         } catch {
             warnAboutVoices("speakers are not being remembered: \(error.localizedDescription)")
             return Voices(model: model, database: nil, warn: warnAboutVoices)
@@ -226,18 +226,21 @@ package struct LiveTranscriptHandlers: Sendable {
 
 /// A live transcript of the WAV stream `input` carries, such as the one a recording made in the same app writes into
 /// a pipe, until the stream ends: each line, as it settles, goes to `textURL` and `handlers`, as do the words still
-/// being recognized. Throws if transcribing cannot start or fails part way; the text file then has what was
-/// transcribed until then.
+/// being recognized. Given `identifyingSpeakersIn`, people are told apart by voice and remembered in the database there.
+/// Throws if transcribing cannot start or fails part way; the text file then has what was transcribed until then.
 package func transcribeLive(
     from input: FileHandle,
     to textURL: URL,
     language: String?,
-    identifiesSpeakers: Bool,
+    identifyingSpeakersIn speakers: URL?,
     handlers: LiveTranscriptHandlers
 ) async throws {
     var options = Options()
     options.language = language?.nonEmpty ?? options.language
-    options.identifiesSpeakers = identifiesSpeakers
+    if let speakers {
+        options.identifiesSpeakers = true
+        options.speakers = speakers
+    }
     let locale = try await readySpeechLocale(for: options.language)
     let source = try WAVStreamReader(handle: input)
     let output = TranscriptionOutput(

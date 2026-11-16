@@ -157,8 +157,8 @@ totalrecall --list-mics
 ```sh
 transcribe [--language LANG] [--mix] [--identify-speakers] [--force] <audio-file> [<text-file>]
 transcribe [--language LANG] [--mix] [--identify-speakers] [--force] [--live] - [<text-file>]
-transcribe speakers [name <number> <name> | merge <number> <into-number> | forget <number>]
-transcribe speakers [play <number> | save <number> <directory>]
+transcribe speakers [name <number> <name> | merge <number> <into-number> [--anyway] | forget <number>]
+transcribe speakers [split <voice> | play <number> | save <number> <directory>]
 transcribe --list-languages
 ```
 
@@ -167,8 +167,8 @@ transcribe --list-languages
 | `--language LANG` | Language spoken, e.g. `es` or `es-MX` (default `en-US`) |
 | `--mix` | Transcribe both channels together, without speaker labels |
 | `--identify-speakers` | Tell people apart by voice: `Them 1`, `Them 2`, ... (`Speaker 1`, `Speaker 2`, ... on a recording without the split, or with `--mix`). Everyone is saved as they are heard, in `~/.transcribe/speakers.db`, so they keep their number from call to call. It runs on your mic too, for when several of you share it; a line it cannot tell yet stays `You` or `Them`. Voiceprints are biometric data; see [Recording laws](#recording-laws) |
-| `speakers` | List the people `--identify-speakers` remembers; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, `forget 5` takes one out |
-| `speakers play 3`, `speakers save 3 <directory>` | Play the samples kept of someone with no name yet, their 4 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
+| `speakers` | List the people `--identify-speakers` remembers, with the voices of those heard more than one way; `name 3 Ada` names one, `merge 5 3` makes 5 part of 3, keeping each voice as it was (two who don't sound alike need `--anyway`), `split 7` takes voice 7 back out into a person of its own, `forget 5` takes one out |
+| `speakers play 3`, `speakers save 3 <directory>` | Play the clips kept of someone, their 20 longest stretches of speech of up to 15 s, to tell who they are; or save them as `.m4a` files |
 | `--list-languages` | List supported languages; `*` marks models already downloaded |
 | `-` as input | Transcribe a live WAV stream from stdin, such as `totalrecall -` |
 | `--live` | With `-`: show the live transcript, words still being recognized included, even with a `<text-file>` |
@@ -196,9 +196,8 @@ Both tools also take `--version` and `--help`.
   goes to whoever spoke longer, which matters most with `--mix`, where the recognizer often runs two people's turns
   into one line. Live, each line waits a few seconds after it is spoken, while the words still being recognized go on
   showing, so a newcomer's first words are theirs too. People keep their number from call to call; name them with
-  `transcribe speakers name`. Until someone
-  has a name, a few short samples of their speech are kept in `~/.transcribe/speakers.db` too, so you can tell who they
-  are with `transcribe speakers play`; `transcribe speakers forget` deletes them along with the person.
+  `transcribe speakers name`. Short clips of everyone's speech are kept in `~/.transcribe/speakers.db` too, so you can tell who
+  they are with `transcribe speakers play`; `transcribe speakers forget` deletes them along with the person.
 - **Saving is quick.** `totalrecall` records into `<output>.partial.caf` and converts to the format you asked for as it
   records, so Ctrl-C saves in well under a second instead of about 15 s per hour of audio. `.caf` needs no conversion.
   If converting fails or falls behind, it converts the whole recording when you stop instead, as before.
@@ -224,10 +223,11 @@ where you and the people on the call are is up to you. This is a summary, not le
 - **Keeping it.** Recordings, transcripts and summaries of them are all personal data under the GDPR: keep them only
   as long as you need them. Deleting a recording afterwards doesn't make it legal to have made it.
 - **Identifying speakers.** `--identify-speakers`, and Identify Speakers in the app, save a voiceprint of everyone
-  they hear in `~/.transcribe/speakers.db`, to recognize them in later calls. A voiceprint is biometric data. Illinois's
+  they hear, and clips of their speech, in `~/.transcribe/speakers.db` (the app in `~/Library/Application Support/TotalRecall/speakers.db`), to recognize them
+  in later calls. A voiceprint is biometric data. Illinois's
   BIPA requires each person's written consent before you collect one, and Texas, Washington and the GDPR have rules of
   their own. Use it only on calls where everyone has agreed. `transcribe speakers forget` deletes a person, their
-  voiceprint and their samples.
+  voiceprints and their clips.
 
 The simplest way to be safe anywhere: say at the start of the call that you're recording and transcribing it, and stop
 if anyone objects.

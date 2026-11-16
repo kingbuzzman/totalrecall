@@ -89,8 +89,8 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
     /// How much of the audio has come in, in seconds, and whether it has ended.
     private var heardSeconds = 0.0
     private var hasEnded = false
-    /// Who was in the database before this call, by number.
-    private var heardBefore: [SpeakerDatabase.Speaker] = []
+    /// The voices in the database before this call.
+    private var heardBefore: [SpeakerDatabase.Voice] = []
     /// Who in the database each of this call's speakers is, by their number in `voices`.
     private var people: [Int: Person] = [:]
     /// How many prints of each of this call's speakers have been saved.
@@ -101,8 +101,13 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
     private var wordsHeardThrough = 0.0
     private var unsavedSamples: [(speaker: Int, audio: [Float], seconds: Double)] = []
 
+    /// One of this call's speakers as the database has them: the voice they were recognized as, or added as, and the
+    /// person it is.
     private struct Person {
+        /// The voice.
         let id: Int
+        /// The person, whose number transcripts call them by.
+        let person: Int
         /// Added on this call, rather than heard before.
         let isNew: Bool
         /// Their voice as it was before this call.
@@ -136,7 +141,7 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         self.speechTimes = speechTimes
         self.otherSpeechTimes = otherSpeechTimes
         self.warn = warn
-        remember { heardBefore = try database?.speakers() ?? [] }
+        remember { heardBefore = try database?.voices() ?? [] }
     }
 
     func append(_ samples: [Float]) {
@@ -186,8 +191,10 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
                 let words = prints.filter(spokenPrints.contains).count
                 guard Double(words) < Double(prints.count) * Self.spokenShare else { continue }
                 remember {
-                    guard try database.speaker(person.id)?.name == nil, try database.forget(person.id) else { return }
-                    forgotten.append(person.id)
+                    guard try database.voice(person.id)?.name == nil, try database.forgetVoice(person.id) else {
+                        return
+                    }
+                    forgotten.append(person.person)
                     people[number] = nil
                 }
             }
@@ -229,7 +236,7 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
     }
 
     /// Keeps a sample of each stretch of someone's speech, once who spoke it is decided: prints one after the other,
-    /// each sure to be theirs. Only for someone with no name, and only with a database to keep them in.
+    /// each sure to be theirs. Only with a database to keep them in.
     private func takeSamples(atTheEnd: Bool) {
         guard database != nil else { return }
         var finished: [(speaker: Int, start: Double, end: Double)] = []
@@ -272,13 +279,10 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         }
     }
 
-    /// Only for someone with no name, who needs one.
+    /// Kept for everyone, named or not: to hear who someone is by, and to print their voice again with another model.
     private func saveSample(_ audio: ArraySlice<Float>, seconds: Double, of id: Int) {
         guard let database else { return }
-        remember {
-            guard try database.speaker(id)?.name == nil else { return }
-            try database.addSample(try m4a(audio), seconds: seconds, to: id)
-        }
+        remember { try database.addClip(try m4a(audio), seconds: seconds, to: id) }
     }
 
     /// Who said the words between `start` and `end`, in seconds from the start of the audio: whoever spoke the most
@@ -318,11 +322,12 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
                 return nil
             }
             // Looked up each time, so a name given while the call goes on is used from then on.
-            var saved: SpeakerDatabase.Speaker?
-            if let person = people[speaker] { remember { saved = try database?.speaker(person.id) } }
+            // So is the person: their voice may have been merged into someone else's meanwhile.
+            var saved: SpeakerDatabase.Voice?
+            if let person = people[speaker] { remember { saved = try database?.voice(person.id) } }
             if let name = saved?.name { return name }
             if speaker == you || saved?.isYou == true { return Speaker.you.rawValue }
-            if let person = people[speaker] { return "\(name) \(person.id)" }
+            if let person = people[speaker] { return "\(name) \(saved?.person ?? person.person)" }
             // Not saved yet, as they have hardly spoken: no number to go by from one call to the next, but not you,
             // which on your microphone is what a line with no speaker would say.
             return database == nil ? "\(name) \(speaker)" : name
@@ -357,7 +362,7 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         let speakers = Set(voices.speakers.map(\.number))
         // Folded into someone else, as one person heard two ways at first: someone added for them is taken back out.
         for (number, person) in people where !speakers.contains(number) {
-            if person.isNew { remember { _ = try database.forget(person.id) } }
+            if person.isNew { remember { _ = try database.forgetVoice(person.id) } }
             people[number] = nil
             savedPrints[number] = nil
         }
@@ -381,8 +386,8 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
                 else { return }
                 // Someone taken for new from their first prints may turn out to be someone heard before.
                 if person.isNew, speaker.count >= Self.settledPrints, let earlier = try recognize(speaker) {
-                    try database.moveSamples(of: person.id, to: earlier.id)
-                    _ = try database.forget(person.id)
+                    try database.moveClips(of: person.id, to: earlier.id)
+                    _ = try database.forgetVoice(person.id)
                     person = earlier
                 }
                 people[speaker.number] = person
@@ -390,7 +395,7 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
                 let total = weight + Float(speaker.count)
                 let voice = zip(person.voice, speaker.center).map { ($0 * weight + $1 * Float(speaker.count)) / total }
                 // They may have been merged or forgotten with `transcribe speakers` meanwhile: they are new again.
-                if try !database.update(person.id, voice: voice, prints: person.prints + speaker.count) {
+                if try !database.update(person.id, print: voice, prints: person.prints + speaker.count) {
                     people[speaker.number] = try add(speaker, to: database)
                 }
                 savedPrints[speaker.number] = speaker.count
@@ -423,20 +428,23 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         return voices.speakers.max { $0.count < $1.count }?.number
     }
 
-    /// Who of those heard before, and not yet found on this call, this speaker is, if anyone.
+    /// Which voice of those heard before this speaker is, if any: of someone not yet found on this call, as two
+    /// speakers of one call are two people.
     private func recognize(_ speaker: VoiceClusters.Speaker) throws -> Person? {
-        let found = Set(people.values.map(\.id))
+        let found = Set(people.values.map(\.person))
         let limit = speaker.count >= Self.settledPrints ? Self.sameVoice : Self.sameVoiceFromFewPrints
-        let match = heardBefore.filter { !found.contains($0.id) }
-            .map { ($0, voiceDistance($0.voice, speaker.center)) }
+        let match = heardBefore.filter { !found.contains($0.person) }
+            .map { ($0, voiceDistance($0.print, speaker.center)) }
             .filter { $0.1 < limit }
             .min { $0.1 < $1.1 }?.0
-        return match.map { Person(id: $0.id, isNew: false, voice: $0.voice, prints: $0.prints, isYou: $0.isYou) }
+        return match.map {
+            Person(id: $0.id, person: $0.person, isNew: false, voice: $0.print, prints: $0.prints, isYou: $0.isYou)
+        }
     }
 
     private func add(_ speaker: VoiceClusters.Speaker, to database: SpeakerDatabase) throws -> Person {
-        let id = try database.add(voice: speaker.center, prints: speaker.count)
-        return Person(id: id, isNew: true, voice: speaker.center, prints: 0, isYou: false)
+        let added = try database.addPerson(print: speaker.center, prints: speaker.count)
+        return Person(id: added.id, person: added.person, isNew: true, voice: speaker.center, prints: 0, isYou: false)
     }
 
     /// Runs a database change, warning the first time one fails.

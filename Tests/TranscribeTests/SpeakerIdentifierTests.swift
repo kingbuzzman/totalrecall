@@ -87,14 +87,14 @@ struct SpeakerIdentifierTests {
         let identifier = try makeIdentifier(database: database)
 
         feed(voice(1, seconds: 6), to: identifier)
-        let first = try database.speakers()
+        let first = try database.voices()
         feed(voice(1, seconds: 6) + voice(2, seconds: 12), to: identifier, at: 6)
 
         #expect(first.count == 1)
-        let speakers = try database.speakers()
+        let speakers = try database.voices()
         #expect(speakers.count == 2, "\(speakers.map { ($0.id, $0.prints) })")
         #expect(speakers.first.map { $0.prints > first[0].prints } == true)
-        #expect(identifier.speaker(from: 2, to: 10) == "Them \(first[0].id)")
+        #expect(identifier.speaker(from: 2, to: 10) == "Them \(first[0].person)")
     }
 
     @Test func recognizesSomeoneFromAnEarlierCall() throws {
@@ -111,7 +111,7 @@ struct SpeakerIdentifierTests {
 
         #expect(identifier.speaker(from: 2, to: 10) == "Them \(second)")
         #expect(identifier.speaker(from: 14, to: 22) == "Them \(first)")
-        #expect(try database.speakers().count == 2)
+        #expect(try database.voices().count == 2)
     }
 
     @Test func goesByANameGivenWhileTheCallGoesOn() throws {
@@ -130,9 +130,9 @@ struct SpeakerIdentifierTests {
 
         feed(voice(1, seconds: 40) + voice(2, seconds: 12), to: identifier)
 
-        let speakers = try database.speakers()
+        let speakers = try database.voices()
         #expect(identifier.speaker(from: 2, to: 10) == "You")
-        #expect(identifier.speaker(from: 43, to: 50) == "Them \(speakers[1].id)")
+        #expect(identifier.speaker(from: 43, to: 50) == "Them \(speakers[1].person)")
         #expect(speakers.map(\.isYou) == [true, false])
     }
 
@@ -144,7 +144,7 @@ struct SpeakerIdentifierTests {
 
         #expect(identifier.speaker(from: 15, to: 30) == "You")
         #expect(identifier.speaker(from: 2, to: 10) == "Them \(try id(0, in: database))")
-        #expect(try database.speakers().allSatisfy { !$0.isYou })
+        #expect(try database.voices().allSatisfy { !$0.isYou })
     }
 
     @Test func knowsYouOnYourMicrophoneEvenWhenSomeoneElseTalksMore() throws {
@@ -175,7 +175,7 @@ struct SpeakerIdentifierTests {
         say(seconds: 40, to: yours)
 
         #expect(yours.speaker(from: 25, to: 35) == "You")
-        #expect(try database.speakers().count == 2)
+        #expect(try database.voices().count == 2)
     }
 
     @Test func knowsYourVoiceWhereverElseItIsHeard() throws {
@@ -189,7 +189,7 @@ struct SpeakerIdentifierTests {
         #expect(mixed.speaker(from: 15, to: 23) == "Speaker \(try id(1, in: database))")
     }
 
-    @Test func keepsSamplesOfThoseWithNoNameToTellWhoTheyAre() throws {
+    @Test func keepsClipsOfEveryoneToTellWhoTheyAre() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
 
@@ -199,10 +199,10 @@ struct SpeakerIdentifierTests {
         )
         identifier.finish()
 
-        let speakers = try database.speakers()
+        let speakers = try database.voices()
         #expect(speakers.count == 2)
         for speaker in speakers {
-            let samples = try database.samples(of: speaker.id)
+            let samples = try database.clips(of: speaker.person)
             #expect(!samples.isEmpty)
             for sample in samples {
                 #expect((SpeakerIdentifier.shortestSample...SpeakerIdentifier.longestSample).contains(sample.seconds))
@@ -210,17 +210,17 @@ struct SpeakerIdentifierTests {
                 #expect(sample.audio.dropFirst(4).prefix(4) == Data("ftyp".utf8))
             }
         }
-        #expect(try database.samples(of: speakers[1].id).first?.seconds == SpeakerIdentifier.longestSample)
+        #expect(try database.clips(of: speakers[1].person).first?.seconds == SpeakerIdentifier.longestSample)
     }
 
     @Test func savesOnlyThoseWhoSaidWords() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
         feed(voice(1, seconds: 20), to: identifier, saying: false)
-        #expect(try database.speakers().isEmpty)
+        #expect(try database.voices().isEmpty)
 
         #expect(identifier.speaker(from: 5, to: 8) == "Them \(try id(0, in: database))")
-        #expect(try database.speakers().count == 1)
+        #expect(try database.voices().count == 1)
     }
 
     @Test func savesNobodyWhoseWordsAreFewForHowLongTheyAreHeard() throws {
@@ -229,10 +229,10 @@ struct SpeakerIdentifierTests {
         feed(voice(1, seconds: 30), to: identifier, saying: false)
 
         _ = identifier.speaker(from: 29, to: 30)
-        #expect(try database.speakers().isEmpty)
+        #expect(try database.voices().isEmpty)
 
         _ = identifier.speaker(from: 2, to: 9)
-        #expect(try database.speakers().count == 1)
+        #expect(try database.voices().count == 1)
     }
 
     @Test func forgetsSomeoneWhoInTheEndSaidTooFewWordsForHowLongTheyWereHeard() throws {
@@ -244,10 +244,10 @@ struct SpeakerIdentifierTests {
         let (music, voice) = (try id(0, in: database), try id(1, in: database))
 
         #expect(identifier.forgetThoseWhoSaidTooLittle() == [music])
-        #expect(try database.speakers().map(\.id) == [voice])
+        #expect(try database.voices().map(\.person) == [voice])
     }
 
-    @Test func keepsSamplesOfTheMiddleOfEachPrintOfTheirs() throws {
+    @Test func keepsClipsOfTheMiddleOfEachPrintOfTheirs() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
 
@@ -255,8 +255,8 @@ struct SpeakerIdentifierTests {
         identifier.finish()
 
         // Their 12 s, and a window that is half theirs: 13.5 s of prints, less the window's edges.
-        let samples = try database.samples(of: try id(1, in: database))
-        #expect(samples.map(\.seconds) == [12])
+        let clips = try database.clips(of: try id(1, in: database))
+        #expect(clips.map(\.seconds) == [12])
     }
 
     @Test func savesNobodyHeardOnlyForAMoment() throws {
@@ -266,20 +266,21 @@ struct SpeakerIdentifierTests {
         feed(voice(1, seconds: 1.5) + voice(0, seconds: 10), to: identifier)
         identifier.finish()
 
-        #expect(try database.speakers().isEmpty)
+        #expect(try database.voices().isEmpty)
         #expect(identifier.speaker(from: 0, to: 1.5) == "Them")
     }
 
-    @Test func keepsNoSamplesOfSomeoneWithAName() throws {
+    @Test func keepsClipsOfSomeoneWithANameToo() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
         feed(voice(1, seconds: 6), to: identifier)
-        _ = try database.rename(try id(0, in: database), to: "Ada")
+        let ada = try id(0, in: database)
+        _ = try database.rename(ada, to: "Ada")
 
         feed(voice(1, seconds: 20), to: identifier, at: 6)
         identifier.finish()
 
-        #expect(try database.sampleCounts().isEmpty)
+        #expect(try database.clipCounts()[ada, default: 0] > 0)
     }
 
     @Test func settlesWhoSpokeALineOnceTheAudioHasGoneFarEnoughPastIt() async throws {
@@ -385,9 +386,9 @@ struct SpeakerIdentifierTests {
 
     /// The number of the speaker saved `index`th.
     private func id(_ index: Int, in database: SpeakerDatabase) throws -> Int {
-        let speakers = try database.speakers()
+        let speakers = try database.voices()
         try #require(speakers.count > index, "\(speakers.map(\.id))")
-        return speakers[index].id
+        return speakers[index].person
     }
 
     private func temporaryDatabase() -> URL {
