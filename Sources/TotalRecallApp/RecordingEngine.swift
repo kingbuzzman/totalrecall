@@ -34,6 +34,8 @@ final class RecordingEngine: Sendable {
         case transcriptStarted
         /// The transcript is complete, or stopped short with this error.
         case transcriptFinished(String?)
+        /// The recording, `audio`, went to the Trash, to `trashed`, as asked, once its transcript was complete.
+        case audioTrashed(audio: URL, trashed: URL?, transcript: URL)
     }
 
     struct Request: Sendable {
@@ -44,6 +46,8 @@ final class RecordingEngine: Sendable {
         let microphone: String?
         let language: String?
         let identifiesSpeakers: Bool
+        /// Whether the recording goes to the Trash once saved and transcribed, keeping only the transcript.
+        let trashesAudioOnceTranscribed: Bool
     }
 
     private let queue = DispatchQueue(label: "totalrecall.app.recording")
@@ -80,6 +84,7 @@ private final class Recording: @unchecked Sendable {
     private let audio: URL
     /// Set when it stopped before it started: its transcript, empty, is then deleted once finished.
     private let isDiscarded: OSAllocatedUnfairLock<Bool>
+    private let disposal: AudioDisposal
     private let report: @Sendable (RecordingEngine.Event) -> Void
 
     private init(
@@ -87,8 +92,10 @@ private final class Recording: @unchecked Sendable {
         pipe: Pipe,
         audio: URL,
         isDiscarded: OSAllocatedUnfairLock<Bool>,
+        disposal: AudioDisposal,
         report: @escaping @Sendable (RecordingEngine.Event) -> Void
     ) {
+        self.disposal = disposal
         self.session = session
         self.pipe = pipe
         self.audio = audio
@@ -131,8 +138,22 @@ private final class Recording: @unchecked Sendable {
         }
 
         let isDiscarded = OSAllocatedUnfairLock(initialState: false)
-        transcribe(pipe.fileHandleForReading, to: transcript, for: request, isDiscarded: isDiscarded, report: report)
-        return Recording(session: session, pipe: pipe, audio: audio, isDiscarded: isDiscarded, report: report)
+        let disposal = AudioDisposal(transcript: transcript, isOn: request.trashesAudioOnceTranscribed, report: report)
+        transcribe(
+            pipe.fileHandleForReading,
+            for: request,
+            isDiscarded: isDiscarded,
+            disposal: disposal,
+            report: report
+        )
+        return Recording(
+            session: session,
+            pipe: pipe,
+            audio: audio,
+            isDiscarded: isDiscarded,
+            disposal: disposal,
+            report: report
+        )
     }
 
     /// Asks for the permissions recording needs, the first time, and throws if either is not given.
@@ -150,17 +171,18 @@ private final class Recording: @unchecked Sendable {
         }
     }
 
-    /// Transcribes the recording streamed into `input` to `transcript`, in a task of its own. The transcript goes on to
+    /// Transcribes the recording streamed into `input` to `disposal.transcript`, in a task of its own. The transcript goes on to
     /// the end of the stream, after the recording stops. If it stops early, its end of the pipe is closed, so the
     /// recording goes on without it rather than wait for it. A recording discarded, stopped before it started, leaves
     /// no transcript behind.
     private static func transcribe(
         _ input: FileHandle,
-        to transcript: URL,
         for request: RecordingEngine.Request,
         isDiscarded: OSAllocatedUnfairLock<Bool>,
+        disposal: AudioDisposal,
         report: @escaping @Sendable (RecordingEngine.Event) -> Void
     ) {
+        let transcript = disposal.transcript
         report(.transcriptStarted)
         Task.detached(priority: .userInitiated) {
             defer {
@@ -180,6 +202,7 @@ private final class Recording: @unchecked Sendable {
                     )
                 )
                 report(.transcriptFinished(nil))
+                disposal.transcribed()
             } catch {
                 report(.transcriptFinished(error.localizedDescription))
             }
@@ -202,6 +225,7 @@ private final class Recording: @unchecked Sendable {
             do {
                 try session.save()
                 report(.saved(audio))
+                disposal.saved(audio)
             } catch {
                 report(
                     .failedToSave(
@@ -209,6 +233,51 @@ private final class Recording: @unchecked Sendable {
                     )
                 )
             }
+        }
+    }
+}
+
+/// Moves a recording to the Trash once it is no longer needed, when asked to: once it is saved, and its transcript
+/// finished without an error and has words in it. Otherwise, as when the transcript stopped short or nothing in it was
+/// recognized, the recording stays: it is all there is of the meeting.
+private final class AudioDisposal: Sendable {
+    let transcript: URL
+    private let isOn: Bool
+    private let report: @Sendable (RecordingEngine.Event) -> Void
+    /// The recording once saved, and whether the transcript finished without an error.
+    private let state = OSAllocatedUnfairLock<(audio: URL?, isTranscribed: Bool)>(initialState: (nil, false))
+
+    init(transcript: URL, isOn: Bool, report: @escaping @Sendable (RecordingEngine.Event) -> Void) {
+        self.transcript = transcript
+        self.isOn = isOn
+        self.report = report
+    }
+
+    func saved(_ audio: URL) {
+        state.withLock { $0.audio = audio }
+        disposeIfDone()
+    }
+
+    /// The transcript finished without an error; one that stopped short never calls this, and its recording stays.
+    func transcribed() {
+        state.withLock { $0.isTranscribed = true }
+        disposeIfDone()
+    }
+
+    private func disposeIfDone() {
+        // Taken, so that it is only ever moved once.
+        let audio = state.withLock { state -> URL? in
+            guard isOn, state.isTranscribed, let audio = state.audio else { return nil }
+            state.audio = nil
+            return audio
+        }
+        guard let audio, RecordingFolder.hasWords(transcript: transcript) else { return }
+        do {
+            var trashed: NSURL?
+            try FileManager.default.trashItem(at: audio, resultingItemURL: &trashed)
+            report(.audioTrashed(audio: audio, trashed: trashed.map { $0 as URL }, transcript: transcript))
+        } catch {
+            report(.message("Could not move \(audio.lastPathComponent) to the Trash: \(error.localizedDescription)"))
         }
     }
 }

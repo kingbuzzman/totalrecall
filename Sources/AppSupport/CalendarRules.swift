@@ -1,4 +1,4 @@
-package import Foundation
+import Foundation
 
 /// What to record from one calendar: whether to record its meetings at all, and which of them to leave out, by their
 /// titles. Kept per calendar, by the calendar's identifier, not its title: two accounts can each have a calendar of the
@@ -73,12 +73,20 @@ package struct CalendarRules: Codable, Equatable, Sendable {
         return !phrase.isEmpty && title.localizedCaseInsensitiveContains(phrase)
     }
 
-    /// Every calendar's rules, by calendar identifier, as they are saved; none from data that is not theirs.
-    package static func decode(_ data: Data?) -> [String: CalendarRules] {
-        data.flatMap { try? JSONDecoder().decode([String: CalendarRules].self, from: $0) } ?? [:]
+    /// Every calendar's rules, by calendar identifier, from how `encode` saves them; none from anything else.
+    package static func decode(_ saved: Any?) -> [String: CalendarRules] {
+        guard let saved, PropertyListSerialization.propertyList(saved, isValidFor: .binary),
+            let data = try? PropertyListSerialization.data(fromPropertyList: saved, format: .binary, options: 0)
+        else { return [:] }
+        return (try? PropertyListDecoder().decode([String: CalendarRules].self, from: data)) ?? [:]
     }
 
-    package static func encode(_ rules: [String: CalendarRules]) -> Data {
-        (try? JSONEncoder().encode(rules)) ?? Data()
+    /// Every calendar's rules, by calendar identifier, as a dictionary of dictionaries, which the settings file shows
+    /// as they are, to be read there.
+    package static func encode(_ rules: [String: CalendarRules]) -> [String: Any] {
+        guard let data = try? PropertyListEncoder().encode(rules),
+            let saved = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return [:] }
+        return saved
     }
 }

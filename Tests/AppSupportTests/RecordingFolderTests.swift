@@ -69,6 +69,19 @@ struct RecordingFolderTests {
         }
     }
 
+    @Test func tellsATranscriptWithWordsFromAnEmptyOne() throws {
+        try withTemporaryDirectory { directory in
+            let transcript = directory.appending(path: "transcript.txt")
+            #expect(!RecordingFolder.hasWords(transcript: transcript))
+
+            try Data(" \n\n".utf8).write(to: transcript)
+            #expect(!RecordingFolder.hasWords(transcript: transcript))
+
+            try Data("[00:00:03] You: Hello.\n".utf8).write(to: transcript)
+            #expect(RecordingFolder.hasWords(transcript: transcript))
+        }
+    }
+
     @Test func findsRecordingsThatWereNeverSaved() throws {
         try withTemporaryDirectory { directory in
             let meeting = directory.appending(path: "Work/46-2026/11-14/10h00-standup")

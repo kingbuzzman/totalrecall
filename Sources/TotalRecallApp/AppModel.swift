@@ -97,6 +97,7 @@ final class AppModel {
     init() {
         calendar = CalendarSource()
         calendar.onChange = { [weak self] in self?.readCalendar() }
+        notifier.onAction { [weak self] action, info in self?.perform(action, info) }
         notifier.requestPermission()
         prepareTranscription()
         findUnsavedRecordings()
@@ -142,11 +143,11 @@ final class AppModel {
     }
 
     /// Starts recording a new meeting named `name`, filed under `calendar`, or the default meeting calendar, stopping
-    /// the one being recorded first; when `addsEvent` and Settings say so, added to that calendar too.
+    /// the one being recorded first; when `addsEvent`, as New Meeting does, put on that calendar too.
     func startMeeting(named name: String, on calendar: CalendarSource.Calendar? = nil, addsEvent: Bool = false) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = trimmed.isEmpty ? "Meeting" : trimmed
-        if addsEvent, AppSettings.addsNewMeetingsToCalendar, let target = calendar ?? defaultMeetingCalendar {
+        if addsEvent, let target = calendar ?? defaultMeetingCalendar {
             let scheduled = ScheduledMeeting.startingNow(
                 title,
                 now: Date(),
@@ -216,7 +217,8 @@ final class AppModel {
             format: AppSettings.format,
             microphone: AppSettings.microphone,
             language: AppSettings.language,
-            identifiesSpeakers: AppSettings.identifiesSpeakers
+            identifiesSpeakers: AppSettings.identifiesSpeakers,
+            trashesAudioOnceTranscribed: AppSettings.trashesAudioOnceTranscribed
         )
         // Through the main queue rather than a task each, so the events keep their order.
         engine.start(request) { [weak self] id, event in
@@ -245,22 +247,18 @@ final class AppModel {
             guard isLatest, state == .starting else { return }
             state = .recording(since: Date())
             updateElapsed()
-            notifier.post(title: "Recording “\(meeting?.name ?? "")”", body: "Stop it from the menu bar.")
+            announceStarted(meeting?.name ?? "")
         case .failedToStart(let reason):
             log.error("could not start recording: \(reason, privacy: .public)")
             if isLatest { state = .idle }
-            notifier.post(title: "Could not record", body: reason)
+            announceFailedToRecord(reason)
         case .nothingRecorded:
             break
         case .stopped:
             savingCount += 1
         case .saved(let url):
             savingCount -= 1
-            notifier.post(
-                title: "Saved “\(url.deletingLastPathComponent().lastPathComponent)”",
-                body: url.lastPathComponent,
-                revealing: url
-            )
+            announceSaved(url)
             becameIdleIfDone()
         case .failedToSave(let reason):
             savingCount -= 1
@@ -284,6 +282,8 @@ final class AppModel {
                 notifier.post(title: "The transcript stopped", body: error)
             }
             becameIdleIfDone()
+        case .audioTrashed(let audio, let trashed, let transcript):
+            announceTrashed(audio, to: trashed, keeping: transcript)
         }
     }
 
@@ -378,7 +378,7 @@ extension AppModel {
             let body =
                 AppSettings.recordsAutomatically && !isRecording
                 ? "Recording starts at \(time)." : "It starts at \(time)."
-            notifier.post(title: MeetingSchedule.warning(for: meeting, now: now), body: body)
+            announceWarning(of: meeting, now: now, body: body)
             chime?.stop()
             chime?.play()
         }

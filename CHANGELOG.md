@@ -10,14 +10,23 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
   first calendar recorded until then), instead of `other/`; with no calendar recorded, it goes straight under the
   recordings folder, by week. Holding ⌘ with the menu open turns them into Start Recording On… and New Meeting On…,
   which ask for the calendar, to pick another for one recording.
-- New Meeting… suggests the last name given, and adds the meeting to its calendar, from when it starts until it's
-  stopped (a switch in Settings). Until then it lasts the default meeting length, 30 minutes unless changed in
-  Settings.
+- New Meeting… suggests the last name given, and puts the meeting on its calendar, from when it starts until it's
+  stopped; until then it lasts the default meeting length, 30 minutes unless changed in Settings. Start Recording
+  only records. New Meeting… is in the menu while a calendar is turned on, and the ⌘ items while there are two or
+  more to pick from.
 - Read-only calendars, such as holidays, which events can't be added to, are greyed out in Settings and never
   recorded.
 - Submenus, such as Today, no longer close by themselves: the menu was redrawn every second. Now only the elapsed time
   updates, and only while recording with the menu open.
 - Open Recordings Folder is gone from the menu; Show, beside the folder in Settings, opens it.
+- Delete Recordings Once Transcribed, in Settings › Recording, on unless turned off: each recording goes to the Trash
+  once its transcript is complete, keeping only the transcript. One whose transcript stopped short, or has no words in
+  it, is kept.
+- Each calendar's settings are saved as plain dictionaries in the app's preferences, readable with `defaults read
+  local.totalrecall.app calendarRules`, rather than as encoded data.
+- Notifications have buttons: Record Now and Skip on a meeting about to start (Record Now stops whatever is being
+  recorded first), Stop Recording on a recording that started, Try Again when one could not start, and Open
+  Transcript and Restore Recording, which takes it back out of the Trash, once a recording went to the Trash.
 - Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
 
 ## 0.5.0

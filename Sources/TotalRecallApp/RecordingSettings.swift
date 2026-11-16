@@ -6,6 +6,7 @@ import TotalRecall
 struct RecordingSettings: View {
     @AppStorage(AppSettings.Key.format) private var format = AudioFormatChoice.default
     @AppStorage(AppSettings.Key.microphone) private var microphone = ""
+    @AppStorage(AppSettings.Key.trashesAudioOnceTranscribed) private var trashesAudioOnceTranscribed = true
     @State private var microphones: [String] = []
 
     var body: some View {
@@ -29,6 +30,16 @@ struct RecordingSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Toggle("Delete recordings once transcribed", isOn: $trashesAudioOnceTranscribed)
+            } footer: {
+                Text(
+                    "Keeps only the transcript: each recording goes to the Trash once its transcript is complete. One "
+                        + "whose transcript stopped short, or has no words in it, is kept."
+                )
+                .foregroundStyle(.secondary)
             }
 
             Section("Microphone") {

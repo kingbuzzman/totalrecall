@@ -60,6 +60,13 @@ package enum RecordingFolder {
         }
     }
 
+    /// Whether the transcript at `url` has any words in it: a meeting in which nothing was recognized leaves it empty,
+    /// and its recording is then all there is of it.
+    package static func hasWords(transcript url: URL) -> Bool {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return text.contains { !$0.isWhitespace }
+    }
+
     /// Partial recordings under `root` that were never saved, as a crash or a forced quit leaves them: each
     /// `<output>.partial.caf`, with the output file it was meant to become.
     package static func unsavedRecordings(under root: URL) -> [(partial: URL, output: URL)] {

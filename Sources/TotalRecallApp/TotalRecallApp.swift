@@ -98,31 +98,31 @@ struct MenuContent: View {
                 Button("Stop Recording") { model.stop() }
                     .keyboardShortcut(".")
             } else {
-                Button(startTitle("Start Recording")) { model.startMeeting(named: "") }
-                    .modifierKeyAlternate(.command) {
-                        Button("Start Recording On…") {
-                            if let choice = askForMeeting(name: false, calendar: true) {
-                                model.startMeeting(named: "", on: choice.calendar)
-                            }
+                choosingCalendar(Button(startTitle("Start Recording")) { model.startMeeting(named: "") }) {
+                    Button("Start Recording On…") {
+                        if let choice = askForMeeting(name: false, calendar: true) {
+                            model.startMeeting(named: "", on: choice.calendar)
                         }
                     }
+                }
                 if let meeting = model.meeting {
                     Button("Continue “\(meeting.name)”") { model.continueMeeting() }
                 }
             }
-            // Without keyboard shortcuts: holding ⌘ swaps these for ones that ask for the calendar too, and an item
-            // with a ⌘ shortcut cannot also have an alternate for ⌘. The alternates ask in a dialog rather than a
-            // submenu: the menu is redrawn every second, for the clock, which closes a submenu of an alternate.
-            let newMeeting = model.isRecording ? "Stop and Start a New Meeting" : "New Meeting"
-            Button(startTitle(newMeeting) + "…") {
-                if let choice = askForMeeting(name: true, calendar: false) {
-                    model.startMeeting(named: choice.name, addsEvent: true)
-                }
-            }
-            .modifierKeyAlternate(.command) {
-                Button("\(newMeeting) On…") {
-                    if let choice = askForMeeting(name: true, calendar: true) {
-                        model.startMeeting(named: choice.name, on: choice.calendar, addsEvent: true)
+            // New Meeting puts the meeting on a calendar, so it is there only while there is one to put it on.
+            if !model.meetingCalendars.isEmpty {
+                let newMeeting = model.isRecording ? "Stop and Start a New Meeting" : "New Meeting"
+                choosingCalendar(
+                    Button(startTitle(newMeeting) + "…") {
+                        if let choice = askForMeeting(name: true, calendar: false) {
+                            model.startMeeting(named: choice.name, addsEvent: true)
+                        }
+                    }
+                ) {
+                    Button("\(newMeeting) On…") {
+                        if let choice = askForMeeting(name: true, calendar: true) {
+                            model.startMeeting(named: choice.name, on: choice.calendar, addsEvent: true)
+                        }
                     }
                 }
             }
@@ -213,6 +213,19 @@ struct MenuContent: View {
         }
     }
 
+    /// `item`, and, while there is more than one calendar to file a recording under, `alternate` for when ⌘ is held,
+    /// which asks which. Neither has a keyboard shortcut: an item with a ⌘ shortcut cannot also have an alternate for
+    /// ⌘. The alternates ask in a dialog rather than a submenu, which the clock, redrawing its line of the menu every
+    /// second, would close.
+    @ViewBuilder
+    private func choosingCalendar(_ item: some View, @ViewBuilder alternate: () -> some View) -> some View {
+        if model.meetingCalendars.count > 1 {
+            item.modifierKeyAlternate(.command, alternate)
+        } else {
+            item
+        }
+    }
+
     /// "Start Recording on Work": an item that starts a meeting, with the calendar it is filed under, when there is a
     /// choice of calendars, as holding ⌘ gives.
     private func startTitle(_ title: String) -> String {
@@ -238,8 +251,6 @@ struct MenuContent: View {
         if let index = calendars.firstIndex(where: { $0 == model.defaultMeetingCalendar }) {
             popUp.selectItem(at: index)
         }
-        popUp.isEnabled = !calendars.isEmpty
-        if calendars.isEmpty { popUp.addItem(withTitle: "No calendar is recorded") }
         // Laid out by frame, top to bottom, 8 points apart: in a stack view, the field shrinks to nothing.
         let views: [NSView] = (asksName ? [field] : []) + (asksCalendar ? [popUp] : [])
         let height = views.map(\.frame.height).reduce(0, +) + CGFloat(views.count - 1) * 8

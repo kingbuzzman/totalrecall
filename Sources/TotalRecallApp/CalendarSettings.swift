@@ -6,7 +6,6 @@ import SwiftUI
 struct CalendarSettings: View {
     @Environment(AppModel.self) private var model
     @State private var rules = AppSettings.calendarRules
-    @AppStorage(AppSettings.Key.addsNewMeetingsToCalendar) private var addsNewMeetingsToCalendar = true
     @AppStorage(AppSettings.Key.newMeetingMinutes) private var newMeetingMinutes = AppSettings.defaultNewMeetingMinutes
 
     var body: some View {
@@ -19,20 +18,17 @@ struct CalendarSettings: View {
                                 Text(calendar.title).tag(calendar.id)
                             }
                         }
-                        Toggle("Add new meetings to the calendar", isOn: $addsNewMeetingsToCalendar)
                         Picker("Default meeting length", selection: $newMeetingMinutes) {
                             ForEach(AppSettings.newMeetingLengths, id: \.self) { minutes in
                                 Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes])))
                                     .tag(minutes)
                             }
                         }
-                        .disabled(!addsNewMeetingsToCalendar)
                     } footer: {
                         Text(
-                            "Recordings started with Start Recording or New Meeting are filed under it. Hold ⌘ in the "
-                                + "menu to pick another calendar for one recording. New Meeting can add the meeting "
-                                + "to the calendar too, as long as the default meeting length until it's stopped, "
-                                + "when it ends then."
+                            "Recordings started from the menu are filed under this calendar; hold ⌘ in the menu to "
+                                + "pick another. New Meeting… also puts the meeting on it, the default length long "
+                                + "while it's recorded, then ending when you stop."
                         )
                         .foregroundStyle(.secondary)
                     }

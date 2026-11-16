@@ -13,9 +13,9 @@ enum AppSettings {
         static let warningMinutes = "warningMinutes"
         static let calendarRules = "calendarRules"
         static let defaultMeetingCalendar = "defaultMeetingCalendar"
-        static let addsNewMeetingsToCalendar = "addsNewMeetingsToCalendar"
         static let lastMeetingName = "lastMeetingName"
         static let newMeetingMinutes = "newMeetingMinutes"
+        static let trashesAudioOnceTranscribed = "trashesAudioOnceTranscribed"
         static let hidesTranscriptFromCapture = "hidesTranscriptFromCapture"
         static let hidesMenuBarIconFromCapture = "hidesMenuBarIconFromCapture"
     }
@@ -41,7 +41,7 @@ enum AppSettings {
     /// What to record from each calendar set up in Settings, by calendar identifier. A calendar not set up goes by
     /// `CalendarRules.defaults`, so one added later is recorded too.
     static var calendarRules: [String: CalendarRules] {
-        get { CalendarRules.decode(UserDefaults.standard.data(forKey: Key.calendarRules)) }
+        get { CalendarRules.decode(UserDefaults.standard.object(forKey: Key.calendarRules)) }
         set { UserDefaults.standard.set(CalendarRules.encode(newValue), forKey: Key.calendarRules) }
     }
 
@@ -64,12 +64,6 @@ enum AppSettings {
     static var lastMeetingName: String {
         get { UserDefaults.standard.string(forKey: Key.lastMeetingName) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: Key.lastMeetingName) }
-    }
-
-    /// Whether New Meeting adds the meeting to its calendar, as an event lasting as long as it is recorded; on unless
-    /// turned off.
-    static var addsNewMeetingsToCalendar: Bool {
-        flag(Key.addsNewMeetingsToCalendar, unset: true)
     }
 
     /// The rules of `calendar`: as set up, or its defaults; a read-only calendar is never recorded, whatever was set.
@@ -107,6 +101,12 @@ enum AppSettings {
             let language = $0.trimmingCharacters(in: .whitespaces)
             return language.isEmpty ? nil : language
         }
+    }
+
+    /// Whether a recording goes to the Trash once saved and transcribed, keeping only the transcript; on unless turned
+    /// off.
+    static var trashesAudioOnceTranscribed: Bool {
+        flag(Key.trashesAudioOnceTranscribed, unset: true)
     }
 
     static var identifiesSpeakers: Bool {

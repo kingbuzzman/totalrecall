@@ -135,7 +135,16 @@ struct CalendarRulesTests {
 
         #expect(CalendarRules.decode(CalendarRules.encode(rules)) == rules)
         #expect(CalendarRules.decode(nil).isEmpty)
-        #expect(CalendarRules.decode(Data("not rules".utf8)).isEmpty)
+        #expect(CalendarRules.decode("not rules").isEmpty)
+        #expect(CalendarRules.decode(["A": "not rules"]).isEmpty)
+    }
+
+    @Test func savesTheRulesAsPlainDictionaries() throws {
+        let saved = CalendarRules.encode(["A": CalendarRules(isRecorded: false, ignoredPhrases: ["1:1"])])
+
+        let rules = try #require(saved["A"] as? [String: Any])
+        #expect(rules["isRecorded"] as? Bool == false)
+        #expect(rules["ignoredPhrases"] as? [String] == ["1:1"])
     }
 
     @Test func triesARuleOnTheTwoWeeksBeforeThisOneThisWeekAndTheTwoAfter() {

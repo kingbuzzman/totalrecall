@@ -89,7 +89,8 @@ need icalbuddy.
 - **Start Recording** starts right away. **New Meeting…** asks for a name first. Both file the recording under the
   default meeting calendar, set in Settings; hold ⌘ with the menu open for **Start Recording On…** and **New Meeting
   On…**, which ask which calendar, to pick another for one recording. **New Meeting…** suggests the last name given,
-  and adds the meeting to that calendar, from when it starts until it's stopped, unless turned off in Settings.
+  and puts the meeting on that calendar, from when it starts until it's stopped; Start Recording only records. New
+  Meeting… is there while a calendar is turned on, and the ⌘ items while there are two or more to pick from.
   **Stop Recording** stops at once, and the next recording can start straight after. The file is saved and the last words written in the background.
 - **Continue "…"** records the last meeting again, into its folder, as `rec-2` and `transcript-2`.
 - **Show Transcript**, while recording, opens a window with the transcript as it's written, as a table of time, speaker
@@ -98,12 +99,17 @@ need icalbuddy.
   sharing, which some screen-sharing apps may not honor; turn that off in Settings to take a screenshot of it. The menu
   bar icon, red dot and all, is kept out of them the same way, unless turned off in Settings.
 - A notification says when a recording starts and when it's saved. Click the "saved" one to show the file in Finder.
+  Some have buttons, under Options: **Record Now** and **Skip** on a meeting about to start, **Stop Recording** on a
+  recording that started, **Try Again** when one could not start, and **Open Transcript** and **Restore Recording**
+  once a recording went to the Trash.
   While it records, the menu bar icon has a red dot.
 - **Settings** has a tab each for where recordings go (`~/Meetings` by default) and when they start, which calendars,
   the format and the mic, the transcript's language and identifying speakers, and the version. Recordings go in the
   same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a meeting on the calendar, by when it was
   meant to start, so a restarted meeting lands next to the first recording, and the same under its calendar for one
   started from the menu (`WEEK-YEAR/...` straight under the folder when no calendar is recorded).
+- Once a recording's transcript is complete, the recording goes to the Trash and only the transcript stays, unless
+  turned off in Settings › Recording. One whose transcript stopped short, or has no words in it, is kept.
 - After a crash or a forced quit, the menu offers to save any recording that was left unsaved.
 
 It needs Xcode to build (`make build-app`, or `make build` for the tools and the app together, then `make install-app`
