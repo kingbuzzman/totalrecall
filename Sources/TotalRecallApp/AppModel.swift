@@ -13,28 +13,6 @@ import os
 /// recorded; it never stops a recording itself.
 @MainActor @Observable
 final class AppModel {
-    enum State: Equatable {
-        case idle
-        /// Waiting for the captures to deliver audio, which takes a second or so, 2–3 s with AirPods.
-        case starting
-        case recording(since: Date)
-    }
-
-    /// A meeting being recorded, or the last one: its name, the folder its recordings go in, and the meeting on the
-    /// calendar it is, if any.
-    struct Meeting: Equatable {
-        let name: String
-        let directory: URL
-        var scheduled: ScheduledMeeting?
-        /// The event the app added to the calendar for it, which ends when it stops.
-        var eventID: String?
-    }
-
-    /// Where one of today's meetings stands, for the menu.
-    enum MeetingStatus {
-        case upcoming, underway, recorded, skipped, ended
-    }
-
     private(set) var state = State.idle
     /// The meeting being recorded, or the last one, which Continue records into again.
     private(set) var meeting: Meeting?
@@ -54,8 +32,9 @@ final class AppModel {
     /// How long the recording has been going, as H:MM:SS, every second while recording and a menu is open; only the
     /// line showing it reads it.
     private(set) var elapsed = "0:00:00"
-    /// How many menus are open, submenus included: the elapsed time only needs updating while one is.
-    @ObservationIgnored private var openMenus = 0
+    /// The menus open, submenus included: the elapsed time only needs updating while one is, and must not while a
+    /// submenu is open or about to open (see `updateElapsed()`).
+    @ObservationIgnored private var openMenus: [NSMenu] = []
     /// The time the meetings' places in the menu go by, such as whether one is underway: now as of when a meeting last
     /// started or ended.
     private(set) var scheduleTime = Date()
@@ -110,32 +89,38 @@ final class AppModel {
         RunLoop.main.add(clock, forMode: .common)
         self.clock = clock
         // A Mac that slept through a meeting's start records it on waking; the calendar may have changed meanwhile.
-        observe(NSWorkspace.didWakeNotification, on: NSWorkspace.shared.notificationCenter) { $0.readCalendar() }
+        observe(NSWorkspace.didWakeNotification, on: NSWorkspace.shared.notificationCenter) { model, _ in
+            model.readCalendar()
+        }
         // On opening the menu, the elapsed time as of now, not of when it was last open.
-        for (name, change) in [(NSMenu.didBeginTrackingNotification, 1), (NSMenu.didEndTrackingNotification, -1)] {
-            observe(name, queue: nil) { model in
-                model.openMenus = max(0, model.openMenus + change)
+        for (name, opens) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+            observe(name, queue: nil) { model, notification in
+                guard let menu = notification.object as? NSMenu else { return }
+                model.openMenus.removeAll { $0 === menu }
+                if opens { model.openMenus.append(menu) }
                 model.updateElapsed()
             }
         }
         // Such as calendars turned off in Settings.
-        observe(UserDefaults.didChangeNotification) { $0.readCalendar() }
+        observe(UserDefaults.didChangeNotification) { model, _ in model.readCalendar() }
         Task {
             await calendar.requestAccess()
             readCalendar()
         }
     }
 
-    /// Calls `handle` with the model whenever `center` posts `name`, on `queue`, for as long as the model is around.
+    /// Calls `handle` with the model and the notification whenever `center` posts `name`, on `queue`, for as long as
+    /// the model is around.
     private func observe(
         _ name: Notification.Name,
         on center: NotificationCenter = .default,
         queue: OperationQueue? = .main,
-        _ handle: @escaping @MainActor (AppModel) -> Void
+        _ handle: @escaping @MainActor (AppModel, Notification) -> Void
     ) {
         observers.append(
-            center.addObserver(forName: name, object: nil, queue: queue) { [weak self] _ in
-                MainActor.assumeIsolated { if let self { handle(self) } }
+            center.addObserver(forName: name, object: nil, queue: queue) { [weak self] notification in
+                nonisolated(unsafe) let notification = notification  // delivered on the main thread, used there
+                MainActor.assumeIsolated { if let self { handle(self, notification) } }
             }
         )
     }
@@ -389,8 +374,14 @@ extension AppModel {
         }
     }
 
+    /// Only while a menu is open, and the pointer on none of its items: a change redraws the menu, which throws off the
+    /// highlighted item and closes the submenu open, or about to open, under the pointer.
     private func updateElapsed() {
-        guard openMenus > 0, case .recording(let since) = state else { return }
+        let highlighted = openMenus.compactMap { $0.highlightedItem?.title }
+        Logger(subsystem: "local.totalrecall.app", category: "menu").debug(
+            "open menus: \(self.openMenus.count, privacy: .public), highlighted: \(highlighted, privacy: .public)"
+        )
+        guard !openMenus.isEmpty, highlighted.isEmpty, case .recording(let since) = state else { return }
         elapsed = clockTime(max(0, Int(now.timeIntervalSince(since))), padsHours: false)
     }
 }
