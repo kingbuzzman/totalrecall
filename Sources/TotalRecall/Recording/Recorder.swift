@@ -37,12 +37,10 @@ final class Recorder {
     private let lock = UnfairLock()
     private let microphone = Track()
     private let system = Track()
-    private let startedAt = Date()
+    /// When the recording started, from which the tracks are waited for to start.
+    private var startedAt: Date?
     private var recordingStart: UInt64?
     private var recordingEnd: UInt64?
-    private var systemHasDelivered = false
-    /// Host time of the microphone's first buffer with sound in it.
-    private var microphoneSoundStart: UInt64?
     /// Frames taken from the tracks for the file so far, which is the file's timeline position.
     private var framesTaken = 0
     private var isAligned = false
@@ -69,26 +67,11 @@ final class Recorder {
         echoCanceller = includesMicrophone && cancelsEcho ? EchoCanceller() : nil
     }
 
-    /// Whether the recording can start: the captures deliver audio (the microphone actual sound, which it may not for
-    /// a while after it starts: AirPods deliver silence for a second or two while they switch Bluetooth into their call
-    /// profile), and the microphone has delivered the echo canceller's baseline of ambient sound.
-    var isReadyToRecord: Bool {
-        lock.withLock {
-            guard systemHasDelivered else { return false }
-            guard includesMicrophone else { return true }
-            guard let microphoneSoundStart else { return false }
-            guard echoCanceller != nil else { return true }
-            let soundNanos =
-                AudioConvertHostTimeToNanos(AudioGetCurrentHostTime())
-                - AudioConvertHostTimeToNanos(microphoneSoundStart)
-            return Double(soundNanos) / 1e9 >= EchoCanceller.baselineSeconds
-        }
-    }
-
     /// Starts the recording at the moment the user is told it started.
     func startRecording(at hostTime: UInt64 = AudioGetCurrentHostTime()) {
         lock.withLock {
             recordingStart = hostTime
+            startedAt = Date()
             // The level meter starts with the recording.
             _ = microphone.takePeak()
             _ = system.takePeak()
@@ -111,7 +94,6 @@ final class Recorder {
 
     func appendMicrophone(_ samples: [Float], hostTime: UInt64, session: Int) {
         lock.withLock {
-            if microphoneSoundStart == nil, samples.contains(where: { $0 != 0 }) { microphoneSoundStart = hostTime }
             guard let kept = beforeRecordingEnd(samples, hostTime: hostTime, track: microphone) else { return }
             microphone.append(kept, hostTime: hostTime, source: session)
         }
@@ -119,7 +101,6 @@ final class Recorder {
 
     func appendSystem(_ samples: [Float], hostTime: UInt64) {
         lock.withLock {
-            systemHasDelivered = true
             guard let kept = beforeRecordingEnd(samples, hostTime: hostTime, track: system) else { return }
             system.append(kept, hostTime: hostTime)
         }
@@ -232,7 +213,7 @@ final class Recorder {
         guard recordingStart != nil else { return ([], [], 0) }
         if !isAligned {
             let allStarted = recordedTracks.allSatisfy { $0.startHostTime != nil }
-            let gaveUpWaiting = Date().timeIntervalSince(startedAt) > Self.startupGraceSeconds
+            let gaveUpWaiting = startedAt.map { Date().timeIntervalSince($0) > Self.startupGraceSeconds } ?? false
             guard allStarted || final || gaveUpWaiting else { return ([], [], 0) }
             alignTracks()
             isAligned = true

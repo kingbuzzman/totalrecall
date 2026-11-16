@@ -9,6 +9,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Remembered speakers start over in a new layout: a person has voices, kept apart when merged.
 - `transcribe speakers split <voice>` undoes a merge; `merge` refuses voices that don't sound alike unless `--anyway`.
 - Up to 20 clips are kept per person, named or not.
+- On your microphone, a voice not saved yet is "You", not "Them": AirPods sounding different after a pause no longer turn you into someone else.
 - Someone new is saved only together with a clip of them: at least 5 s of them alone, speaking without a pause.
 
 ### TotalRecall.app
@@ -36,6 +37,8 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
 - The transcript's first line no longer hides under the column headers.
 - The transcript window's recording time keeps counting while the menu is closed.
+- Recording starts as soon as the system audio and the microphone run, which start at once: under a second with the Mac's microphone, about 3 s with AirPods, down from 4–6 s. The noise suppressor learns the room as it records.
+- The transcript keeps up while no window is open: macOS no longer naps the app while it records or transcribes, nor sleeps the Mac mid-meeting.
 - A People window, from the transcript or Settings › Transcript, names, plays, merges and splits the people Identify Speakers remembers.
 - Dropping a recording on the People window learns the voices in it.
 

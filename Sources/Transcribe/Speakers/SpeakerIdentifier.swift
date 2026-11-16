@@ -371,9 +371,11 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
             if let name = saved?.name { return name }
             if speaker == you || saved?.isYou == true { return Speaker.you.rawValue }
             if let person = people[speaker] { return "\(name) \(saved?.person ?? person.person)" }
-            // Not saved yet, as they have hardly spoken: no number to go by from one call to the next, but not you,
-            // which on your microphone is what a line with no speaker would say.
-            return database == nil ? "\(name) \(speaker)" : name
+            // Not saved yet, as no clip of them is kept yet: no number to go by from one call to the next. On your
+            // microphone, that is you, as far as anyone knows, rather than someone else: a voice of yours that sounds
+            // different for a while, as AirPods do after a pause, is not taken for someone else's.
+            if database == nil { return "\(name) \(speaker)" }
+            return isYours ? Speaker.you.rawValue : name
         }
     }
 

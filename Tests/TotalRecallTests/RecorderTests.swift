@@ -193,36 +193,22 @@ struct RecorderTests {
         #expect(sink.right.count == frameCount(milliseconds: 990))
     }
 
-    @Test func isReadyOnceSystemAudioArrivesWithoutAMicrophone() {
+    @Test func linesUpSystemAudioThatStartsAfterTheRecordingWithItsStart() throws {
         let recorder = makeRecorder(microphone: false)
-        #expect(!recorder.isReadyToRecord)
+        recorder.startRecording(at: clock.at(milliseconds: 0))
 
-        recorder.appendSystem(silence(480), hostTime: clock.at(milliseconds: 0))
+        // The tap's first audio, 500 ms into the recording, as it starts as the recording does.
+        recorder.appendSystem(
+            constant(0.5, count: frameCount(milliseconds: 500)),
+            hostTime: clock.at(milliseconds: 500)
+        )
+        recorder.stopRecording(at: clock.at(milliseconds: 1_000))
+        try recorder.close()
 
-        #expect(recorder.isReadyToRecord)
-    }
-
-    @Test func isReadyOnceTheMicrophoneMakesASound() {
-        let recorder = makeRecorder()
-        recorder.appendSystem(silence(480), hostTime: clock.at(milliseconds: 0))
-        recorder.appendMicrophone(silence(480), hostTime: clock.at(milliseconds: 0), session: 1)
-        #expect(!recorder.isReadyToRecord)
-
-        recorder.appendMicrophone(constant(0.1, count: 480), hostTime: clock.at(milliseconds: 10), session: 1)
-
-        #expect(recorder.isReadyToRecord)
-    }
-
-    @Test func waitsForTheEchoCancellersBaselineOfAmbientSound() {
-        let early = makeRecorder(echoCancellation: true)
-        early.appendSystem(silence(480), hostTime: clock.origin)
-        early.appendMicrophone(constant(0.1, count: 480), hostTime: clock.origin, session: 1)
-        #expect(!early.isReadyToRecord)
-
-        let settled = makeRecorder(echoCancellation: true)
-        settled.appendSystem(silence(480), hostTime: clock.origin)
-        settled.appendMicrophone(constant(0.1, count: 480), hostTime: clock.before(milliseconds: 1_500), session: 1)
-        #expect(settled.isReadyToRecord)
+        let silent = frameCount(milliseconds: 500)
+        #expect(sink.right.count == frameCount(milliseconds: 1_000))
+        #expect(sink.right.prefix(silent).allSatisfy { $0 == 0 })
+        #expect(sink.right.dropFirst(silent).allSatisfy { $0 == 0.5 })
     }
 
     @Test func measuresTheRecordingFromStartToStop() {

@@ -174,6 +174,17 @@ struct SpeakerIdentifierTests {
         #expect(speakers.map(\.isYou) == [true, false])
     }
 
+    @Test func takesAVoiceOnYourMicrophoneNotSavedYetForYours() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(isYours: true, database: database)
+
+        // You, then a voice that sounds different for a few seconds: too few for a clip, so not saved.
+        feed(voice(1, seconds: 30) + voice(2, seconds: 6), to: identifier)
+
+        #expect(identifier.speaker(from: 31, to: 35) == "You")
+        #expect(try database.voices().count == 1)
+    }
+
     @Test func savesYouOnlyOnceItIsClearWhoYouAre() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(isYours: true, database: database)

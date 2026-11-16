@@ -87,6 +87,8 @@ private final class Recording: @unchecked Sendable {
     private let isDiscarded = OSAllocatedUnfairLock(initialState: false)
     private let disposal: AudioDisposal
     private let report: @Sendable (RecordingEngine.Event) -> Void
+    /// Held until the file is saved and the transcript finished: the save holds the recording, the transcript this.
+    private let busy = Busy()
 
     /// Starts recording into a free rec.EXT in `request.directory`, and transcribing it into the transcript.txt beside
     /// it as it records.
@@ -146,11 +148,14 @@ private final class Recording: @unchecked Sendable {
     /// started, leaves no transcript behind.
     private func transcribe(_ request: RecordingEngine.Request) {
         // Not `self`, which would keep the recording, and its captures, until the transcript is finished.
-        let (input, isDiscarded, disposal, report) = (pipe.fileHandleForReading, isDiscarded, disposal, report)
+        let (input, isDiscarded, disposal, report, busy) = (
+            pipe.fileHandleForReading, isDiscarded, disposal, report, busy
+        )
         let transcript = disposal.transcript
         report(.transcriptStarted)
         Task.detached(priority: .userInitiated) {
             defer {
+                withExtendedLifetime(busy) {}
                 try? input.close()
                 if isDiscarded.withLock({ $0 }) { try? FileManager.default.removeItem(at: transcript) }
             }
@@ -247,5 +252,19 @@ private final class AudioDisposal: Sendable {
             )
             report(.message("Could not move \(audio.lastPathComponent) to the Trash: \(error.localizedDescription)"))
         }
+    }
+}
+
+/// Keeps macOS from napping the app while a recording goes on and its file is saved and its transcript finished, which
+/// with no window open it would: a menu bar app then looks idle, and its timers, the transcript's among them, would be
+/// held back until a window opened. Also keeps the Mac from sleeping, idle, through a meeting. Ends once nothing holds it.
+private final class Busy: @unchecked Sendable {
+    private let activity = ProcessInfo.processInfo.beginActivity(
+        options: .userInitiated,
+        reason: "Recording and transcribing a meeting"
+    )
+
+    deinit {
+        ProcessInfo.processInfo.endActivity(activity)
     }
 }

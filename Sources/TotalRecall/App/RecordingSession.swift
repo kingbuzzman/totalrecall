@@ -13,10 +13,6 @@ package struct StoppedBeforeRecording: LocalizedError {
 package final class RecordingSession {
     private static let tickSeconds = 0.25
     private static let ticksPerLevelUpdate = 4
-    /// How often to check whether the recording can start.
-    private static let startupPollSeconds = 0.01
-    /// Longest to wait for the recording to be able to start, such as with a muted microphone, before starting anyway.
-    private static let maxStartupWaitSeconds = 6.0
 
     /// Called on the writer queue when only streaming to stdout and the program reading it has gone away. With
     /// `--stream`, the file keeps recording instead.
@@ -35,10 +31,11 @@ package final class RecordingSession {
     /// Whether it runs in the command-line tool, which Ctrl-C stops, rather than an app given `messages`.
     private let isCommandLine: Bool
     private let writerQueue: DispatchQueue
-    private let startupTimer: any DispatchSourceTimer
     private let writerTimer: any DispatchSourceTimer
     /// Whether the recording started; used only on the writer queue.
     private var hasStarted = false
+    /// Whether `stop()` came first, before the recording could start; used only on the writer queue.
+    private var isStopped = false
     /// Whether `stop()` found the recording started, so `save()` has something to save.
     private var hasRecording = false
     private var isOutputClosed = false
@@ -86,7 +83,6 @@ package final class RecordingSession {
             microphoneCapture: microphoneCapture,
             announce: status.announce
         )
-        startupTimer = DispatchSource.makeTimerSource(queue: writerQueue)
         writerTimer = DispatchSource.makeTimerSource(queue: writerQueue)
         if let fileAndStream, let file = destination.file {
             fileAndStream.onStreamClosed = { [status] in
@@ -125,12 +121,13 @@ package final class RecordingSession {
         }
     }
 
-    /// Starts the captures, and the recording as soon as the recorder is ready. If a capture cannot start, deletes the
-    /// partial recording and throws.
+    /// Starts the captures, and the recording the moment they run: not after the microphone's first sound, nor after a
+    /// baseline of the room for the noise suppressor, which goes on learning the room as the recording goes. What a
+    /// capture delivers later, as AirPods do while they switch into their call profile, is silence before it. If a
+    /// capture cannot start, deletes the partial recording and throws.
     package func start() throws {
         do {
-            try systemCapture.start()
-            try microphoneCapture?.start()
+            try startCaptures()
         } catch {
             // In an app, unlike the command line, the process goes on: leave nothing running behind.
             microphoneCapture?.stop()
@@ -142,15 +139,29 @@ package final class RecordingSession {
         stopWatchingDevices = onSystemDeviceChange(queue: writerQueue) { [supervisor] in
             supervisor.systemDevicesChanged()
         }
-
-        let deadline = uptimeSeconds() + Self.maxStartupWaitSeconds
-        startupTimer.schedule(deadline: .now(), repeating: Self.startupPollSeconds)
-        startupTimer.setEventHandler { [weak self] in
-            guard let self, recorder.isReadyToRecord || uptimeSeconds() >= deadline else { return }
-            startupTimer.cancel()
-            beginRecording()
+        nonisolated(unsafe) let session = self  // used on the writer queue, as everything else of the recording is
+        writerQueue.async {
+            guard !session.isStopped else { return }
+            session.beginRecording()
         }
-        startupTimer.resume()
+    }
+
+    /// Starts the system audio's capture and the microphone's at once, rather than one after the other: each takes a
+    /// second or two, the tap to be made, and AirPods to switch Bluetooth into their call profile. Throws the first
+    /// failure, once both have tried.
+    private func startCaptures() throws {
+        nonisolated(unsafe) let systemCapture = systemCapture  // started on another thread, while this one waits
+        nonisolated(unsafe) var systemFailure: (any Error)?  // written before `started.leave()`, read after the wait
+        let started = DispatchGroup()
+        started.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do { try systemCapture.start() } catch { systemFailure = error }
+            started.leave()
+        }
+        var microphoneFailure: (any Error)?
+        do { try microphoneCapture?.start() } catch { microphoneFailure = error }
+        started.wait()
+        if let failure = systemFailure ?? microphoneFailure { throw failure }
     }
 
     /// Length of the recording so far, in seconds; 0 until it has started.
@@ -168,7 +179,7 @@ package final class RecordingSession {
     package func stop() throws {
         let stopTime = AudioGetCurrentHostTime()
         hasRecording = writerQueue.sync {
-            startupTimer.cancel()
+            isStopped = true
             if hasStarted {
                 recorder.stopRecording(at: stopTime)
                 writerTimer.cancel()
@@ -217,7 +228,6 @@ package final class RecordingSession {
     /// Starts the recording at the moment it tells the user so. Runs on the writer queue.
     private func beginRecording() {
         hasStarted = true
-        let isReady = recorder.isReadyToRecord
         recorder.startRecording()
         onRecordingStarted?()
         let channelLayout = recorder.isolatesSpeakers ? " (mic left, system right)" : " (mixed)"
@@ -226,9 +236,6 @@ package final class RecordingSession {
             ?? "system audio"
         say("Recording \(source) -> \(destination.description)")
         if isCommandLine { say("Press Ctrl-C to stop and save.") }
-        if !isReady {
-            status.announce("no sound from the mic or system audio yet; recording anyway")
-        }
         status.showLevels(LevelSnapshot(microphonePeak: 0, systemPeak: 0))
 
         writerTimer.schedule(deadline: .now() + Self.tickSeconds, repeating: Self.tickSeconds)
