@@ -94,6 +94,38 @@ struct SpeakerDatabaseTests {
         #expect(try database.distance(between: ada.person, and: ada.person + 100) == nil)
     }
 
+    @Test func flagsAVoiceThatSoundsUnlikeTheRestOfItsPersons() throws {
+        let database = try SpeakerDatabase(url: url)
+        let (alike, nearly) = (direction(0), blend(direction(0), direction(1), 0.2))
+        // Three voices of one person, one of them someone else's merged in by mistake, heard the least.
+        let person = try database.addPerson(print: alike, prints: 40)
+        let other = try database.addPerson(print: nearly, prints: 10)
+        let stranger = try database.addPerson(print: direction(2), prints: 5)
+        try database.merge(other.person, into: person.person)
+        try database.merge(stranger.person, into: person.person)
+        // Two that sound alike, and someone on their own.
+        let pair = try database.addPerson(print: direction(3), prints: 8)
+        try database.merge(
+            try database.addPerson(print: blend(direction(3), direction(4), 0.2), prints: 3).person,
+            into: pair.person
+        )
+        _ = try database.addPerson(print: direction(5), prints: 8)
+
+        let odd = SpeakerDatabase.oddVoices(try database.voices())
+
+        #expect(Set(odd.keys) == [stranger.id])
+        #expect(odd[stranger.id].map { $0 < 0.1 } == true)
+    }
+
+    @Test func flagsTheVoiceHeardLessOfTwoThatSoundUnlike() throws {
+        let database = try SpeakerDatabase(url: url)
+        let first = try database.addPerson(print: direction(0), prints: 5)
+        let second = try database.addPerson(print: direction(1), prints: 20)
+        try database.merge(first.person, into: second.person)
+
+        #expect(Set(SpeakerDatabase.oddVoices(try database.voices()).keys) == [first.id])
+    }
+
     @Test func unifiesThoseSurelyOnePerson() throws {
         let database = try SpeakerDatabase(url: url)
         let ada = try database.addPerson(print: direction(0), prints: 20).person
@@ -192,4 +224,11 @@ struct SpeakerDatabaseTests {
         voice[axis + 1] = sin(turn)
         return voice
     }
+}
+
+/// A print between two, `share` of the way to the second.
+private func blend(_ one: [Float], _ other: [Float], _ share: Float) -> [Float] {
+    let mixed = zip(one, other).map { $0 * (1 - share) + $1 * share }
+    let length = mixed.reduce(0) { $0 + $1 * $1 }.squareRoot()
+    return mixed.map { $0 / length }
 }

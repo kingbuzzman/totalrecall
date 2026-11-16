@@ -15,6 +15,9 @@ final class People {
         let person: SpeakerDatabase.Person
         let voices: [SpeakerDatabase.Voice]
         let clips: Int
+        /// Their voices that sound unlike the rest of theirs, as one merged in by mistake would, and how alike each
+        /// sounds to the others, in percent.
+        let oddVoices: [Int: Int]
 
         var id: Int { person.id }
 
@@ -45,9 +48,19 @@ final class People {
     func reload() {
         change(reloading: false) {
             let people = try $0.people()
-            let voices = Dictionary(grouping: try $0.voices(), by: \.person)
+            let all = try $0.voices()
+            let odd = SpeakerDatabase.oddVoices(all).mapValues { Int(($0 * 100).rounded()) }
+            let voices = Dictionary(grouping: all, by: \.person)
             let clips = try $0.clipCounts()
-            entries = people.map { Entry(person: $0, voices: voices[$0.id] ?? [], clips: clips[$0.id] ?? 0) }
+            entries = people.map { person in
+                let theirs = voices[person.id] ?? []
+                return Entry(
+                    person: person,
+                    voices: theirs,
+                    clips: clips[person.id] ?? 0,
+                    oddVoices: odd.filter { id, _ in theirs.contains { $0.id == id } }
+                )
+            }
         }
     }
 

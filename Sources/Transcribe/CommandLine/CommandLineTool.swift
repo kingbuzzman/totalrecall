@@ -76,6 +76,7 @@ private func listSpeakers() {
     let (people, voices, clips) = changingSpeakers { (try $0.people(), try $0.voices(), try $0.clipCounts()) }
     if people.isEmpty { print("nobody yet: transcribe --identify-speakers remembers the people it hears") }
     let voicesOf = Dictionary(grouping: voices, by: \.person)
+    let odd = SpeakerDatabase.oddVoices(voices)
     func distance(_ one: Int, _ other: Int) -> Float {
         (voicesOf[one] ?? []).flatMap { voice in (voicesOf[other] ?? []).map { voiceDistance(voice.print, $0.print) } }
             .min() ?? .infinity
@@ -89,7 +90,10 @@ private func listSpeakers() {
         let name = (person.name ?? (person.isYou ? Speaker.you.rawValue : "-")) + (person.isYou ? " (you)" : "")
         let count = clips[person.id, default: 0]
         let clipCount = count == 0 ? "" : ", " + counted(count, "clip")
-        let voiceNumbers = theirs.count < 2 ? "" : "  voices " + theirs.map { String($0.id) }.joined(separator: ", ")
+        // A voice that sounds unlike the rest of theirs is marked "!": most likely someone else's, merged in by mistake.
+        let voiceNumbers =
+            theirs.count < 2
+            ? "" : "  voices " + theirs.map { "\($0.id)\(odd[$0.id] == nil ? "" : "!")" }.joined(separator: ", ")
         // Maybe one person, heard as two: not alike enough to be merged without being told to.
         let alike = people.filter { $0.id != person.id && distance($0.id, person.id) < SpeakerIdentifier.soundAlike }
         let soundsLike = alike.isEmpty ? "" : "  sounds like " + alike.map { String($0.id) }.joined(separator: ", ")

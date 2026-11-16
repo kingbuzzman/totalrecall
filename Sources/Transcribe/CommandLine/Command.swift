@@ -25,7 +25,7 @@ let usage = """
       --force              overwrite <text-file> if it exists
 
     transcribe speakers lists the people --identify-speakers remembers, in ~/.transcribe/speakers.db (or the file
-    TRANSCRIBE_SPEAKERS names), with the voices of those heard more than one way. name gives one a name to go by instead of their number; merge makes the first number
+    TRANSCRIBE_SPEAKERS names), with the voices of those heard more than one way, ! marking one that sounds like someone else. name gives one a name to go by instead of their number; merge makes the first number
     part of the second, for one person taken for two, keeping each voice as it was, and refuses two who do not sound
     alike unless --anyway; split takes a voice back out into a person of its own, for a merge that was wrong; forget
     takes one out. The longest stretches of everyone's speech are kept, to tell who they are by: play plays them, save

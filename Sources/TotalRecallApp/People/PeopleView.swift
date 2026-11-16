@@ -58,6 +58,14 @@ struct PeopleView: View {
         .formStyle(.grouped)
         .frame(minHeight: 260, maxHeight: 560)
         .onAppear { people.reload() }
+        // Read again now and then while open, as a call that ends adds people and voices, and the voices that sound
+        // unlike the rest of their person's are found again with them.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                people.reload()
+            }
+        }
         .dropDestination(for: URL.self) { urls, _ in
             guard let file = urls.first(where: People.canLearn(from:)) else { return false }
             people.learnVoices(from: file)
@@ -166,12 +174,21 @@ private struct PersonRow: View {
             Text(summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !entry.oddVoices.isEmpty {
+                Label(
+                    "\(counted(entry.oddVoices.count, "voice")) may be someone else's: listen, and split it out if so",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
             if entry.clips > 0 {
                 DisclosureGroup(isExpanded: $showsClips) {
                     ForEach(clips, id: \.id) { clip in
                         ClipRow(
                             clip: clip,
                             voiceNumber: entry.voices.count > 1 ? clip.voice : nil,
+                            isOdd: entry.oddVoices[clip.voice] != nil,
                             isPlaying: people.playingClip == clip.id,
                             isRecording: isRecording,
                             play: { people.play(clip, of: entry.id) }
@@ -186,6 +203,14 @@ private struct PersonRow: View {
             if entry.voices.count > 1 {
                 ForEach(entry.voices, id: \.id) { voice in
                     HStack {
+                        if let alike = entry.oddVoices[voice.id] {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .help(
+                                    "Sounds unlike the rest of \(entry.name)'s voices, \(alike)% alike: most likely "
+                                        + "someone else's, merged in by mistake. Play its clips, and split it out if so."
+                                )
+                        }
                         Text("Voice \(voice.id) · \(heard(Double(voice.prints) * SpeakerDatabase.secondsPerPrint))")
                             .font(.caption)
                         Spacer()
@@ -235,12 +260,19 @@ private struct PersonRow: View {
 private struct ClipRow: View {
     let clip: SpeakerDatabase.Clip
     let voiceNumber: Int?
+    /// Of a voice that sounds unlike the rest of its person's.
+    let isOdd: Bool
     let isPlaying: Bool
     let isRecording: Bool
     let play: () -> Void
 
     var body: some View {
         HStack {
+            if isOdd {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help("Of a voice that sounds unlike the rest of theirs")
+            }
             Text(description).font(.caption).monospacedDigit()
             Spacer()
             // The explanation on the button's frame rather than the button, as a disabled one shows none.
