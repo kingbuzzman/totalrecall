@@ -27,7 +27,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Delete Recordings Once Transcribed, in Settings › Recording, on unless turned off: each recording goes to the Trash
   once its transcript is complete, keeping only the transcript. One whose transcript stopped short, or has no words in
   it, is kept.
-- Settings, window positions and remembered speakers live in `~/Library/Application Support/TotalRecall/`.
+- Settings and remembered speakers live in `~/Library/Application Support/TotalRecall/`.
 - Each calendar's settings are saved as plain dictionaries rather than encoded data.
 - Notifications have buttons: Record Now and Skip on a meeting about to start (Record Now stops whatever is being
   recorded first), Stop Recording on a recording that started, Try Again when one could not start, and Open

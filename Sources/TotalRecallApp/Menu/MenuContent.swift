@@ -10,6 +10,7 @@ struct MenuContent: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Group {
@@ -91,7 +92,7 @@ struct MenuContent: View {
             Divider()
 
             Button("Settings…") {
-                openWindow(id: Self.settingsWindow)
+                openSettings()
                 WindowFocus.bringToFront(Self.settingsWindow)
             }
             .keyboardShortcut(",")

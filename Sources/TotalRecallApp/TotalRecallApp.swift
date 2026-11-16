@@ -23,15 +23,12 @@ struct TotalRecallApp: App {
         }
         .defaultSize(width: 560, height: 480)
 
-        // A window of its own rather than SwiftUI's Settings scene, which keeps its position and tab in
-        // ~/Library/Preferences whatever is done to it; this one's position goes in the app's own settings.
-        Window("Settings", id: MenuContent.settingsWindow) {
+        Settings {
             SettingsView()
                 .environment(delegate.model)
                 .showsAppInDock()
                 .focusedWhenOpened(as: MenuContent.settingsWindow)
         }
-        .windowResizability(.contentSize)
     }
 }
 
