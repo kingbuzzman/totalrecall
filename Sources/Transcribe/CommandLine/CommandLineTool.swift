@@ -151,7 +151,7 @@ private func transcribe(inputPath: String, textPath: String?, options: Options) 
         fail("nothing is piped in; - reads a live stream, e.g. totalrecall - | transcribe -")
     }
     do {
-        try checkCanCreate(textURL.map { [$0] } ?? [], overwrite: options.overwrite)
+        try FileManager.default.checkCanCreate(textURL.map { [$0] } ?? [], overwrite: options.overwrite)
     } catch {
         fail(error.localizedDescription)
     }

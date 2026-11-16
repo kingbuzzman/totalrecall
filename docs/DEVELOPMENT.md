@@ -79,11 +79,11 @@ each with a small command-line target on top, so the menu bar app runs both in i
 | --- | --- |
 | `TotalRecall/` | The recorder library (layout below), and `totalrecall`'s `Info.plist` |
 | `TotalRecallCommand/` | `totalrecall`'s entry point, and the only code that exits: parses options, checks the output and permissions, starts the session, saves on a stop signal |
-| `Transcribe/` | The transcriber library: arguments and the command-line tool (`CommandLineTool.swift`), the transcription the tool and the app share (`Transcription.swift`), audio sources (file or stream), speaker detection, one recognizer per speaker, telling people apart by voice, and the transcript printer |
+| `Transcribe/` | The transcriber library: `CommandLine/` (arguments and the tool), `Transcription/` (what the tool and the app share: audio sources, one recognizer per speaker, the echo filter, the transcript printer), and `Speakers/` (telling people apart by voice, and the database of those remembered) |
 | `TranscribeCommand/` | `transcribe`'s entry point |
-| `TotalRecallApp/` | The menu bar app: the menu, the transcript window, Settings, notifications, today's meetings from Calendar.app through EventKit (`CalendarSource`), and `RecordingEngine`, which records and transcribes as `record-meetings` pipes the tools, but streaming through a pipe in the same process |
+| `TotalRecallApp/` | The menu bar app: `Model/` (`AppModel`, notifications, today's meetings from Calendar.app through EventKit, and `RecordingEngine`, which records and transcribes as `record-meetings` pipes the tools, but streaming through a pipe in the same process), `Menu/`, `Transcript/`, `Settings/` and `Windows/` |
 | `AppSupport/` | What the app decides without a user interface, so it can be tested, as `record-meetings` decides it: which events are meetings, which to record next and when to warn of them (`MeetingSchedule`), the folders recordings go in, and the formats it offers |
-| `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, and the version |
+| `Shared/` | The WAV stream format between `totalrecall` and `transcribe -`, the input both tools feed their audio converters through, the error type, stop signals, and the version |
 | `CSpeexDSP/` | The module map through which `totalrecall` uses speexdsp |
 
 Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
@@ -93,11 +93,14 @@ Inside `TotalRecall/`, each folder is a layer that only uses the ones below it:
 | `App/` | Command-line options, the recording session (startup, writer timer, saving), stop signals, status output |
 | `Capture/` | System-audio tap, microphone capture with make-before-break switching, and the supervisor that restarts stalled captures |
 | `Recording/` | Per-channel timelines, echo cancellation, the file or stream it writes to, the live encoder, and export to the final format |
-| `Devices/` | Core Audio property helpers, input-device discovery, microphone permission |
-| `Common.swift` | The shared error type and clock |
+| `Devices/` | Core Audio property helpers, input-device discovery, the microphone and system audio permissions |
 
 `TOTALRECALL_RAW=1` also saves the unprocessed mic and system audio as `<output>.raw.caf`, for tuning the processing
 against real recordings.
+
+Files are named the Swift way: after the main type they declare (`StatusLine.swift`), `Type+Topic.swift` for an
+extension (`AppModel+Notifications.swift`, `Date+ShortTime.swift`), or after their topic for free functions
+(`StopSignals.swift`). The larger targets group files by feature in folders; the small ones stay flat.
 
 Code below `main.swift` reports failures by throwing. Formatting follows `.swift-format`: run `make format` to apply it
 and `make lint` to check it. `make lint` also checks the GitHub workflows for security problems with

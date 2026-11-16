@@ -1,6 +1,4 @@
 import AppKit
-import AppSupport
-import Shared
 import SwiftUI
 
 /// TotalRecall.app: records and transcribes meetings from the menu bar, as `scripts/record-meetings` does from the
@@ -25,12 +23,15 @@ struct TotalRecallApp: App {
         }
         .defaultSize(width: 560, height: 480)
 
-        Settings {
+        // A window of its own rather than SwiftUI's Settings scene, which keeps its position and tab in
+        // ~/Library/Preferences whatever is done to it; this one's position goes in the app's own settings.
+        Window("Settings", id: MenuContent.settingsWindow) {
             SettingsView()
                 .environment(delegate.model)
                 .showsAppInDock()
                 .focusedWhenOpened(as: MenuContent.settingsWindow)
         }
+        .windowResizability(.contentSize)
     }
 }
 

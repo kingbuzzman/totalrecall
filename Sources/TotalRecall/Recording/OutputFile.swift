@@ -41,7 +41,7 @@ package struct OutputFile {
 
     /// Throws unless the directory exists and, without `overwrite`, neither file exists yet.
     package func checkCanCreate(overwrite: Bool) throws {
-        try Shared.checkCanCreate([url, partialURL], overwrite: overwrite)
+        try FileManager.default.checkCanCreate([url, partialURL], overwrite: overwrite)
     }
 
     /// Where `LiveEncoder` encodes the recording while it is recorded, such as `meeting.encoding.mp3` for

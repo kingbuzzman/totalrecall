@@ -39,12 +39,14 @@ struct CalendarSettings: View {
                             Text(calendar.title).tag(calendar.id)
                         }
                     }
+                    .disabled(model.meetingCalendars.isEmpty)
                     Picker("Default meeting length", selection: $newMeetingMinutes) {
                         ForEach(AppSettings.newMeetingLengths, id: \.self) { minutes in
                             Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes])))
                                 .tag(minutes)
                         }
                     }
+                    .disabled(model.meetingCalendars.isEmpty)
                 } footer: {
                     Text(
                         "Recordings started from the menu are filed under this calendar; hold ⌘ in the menu to "
@@ -53,7 +55,6 @@ struct CalendarSettings: View {
                     )
                     .foregroundStyle(.secondary)
                 }
-                .disabled(model.meetingCalendars.isEmpty)
                 ForEach(accounts, id: \.self) { account in
                     Section(account.isEmpty ? "Other" : account) {
                         ForEach(model.calendar.calendars.filter { $0.account == account }) { calendar in
