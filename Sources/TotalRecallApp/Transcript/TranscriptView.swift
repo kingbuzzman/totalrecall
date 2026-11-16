@@ -1,5 +1,6 @@
 import AppKit
 import AppSupport
+import Shared
 import SwiftUI
 
 /// The transcript of the recording going on, or the last one, as it is written: each line as it settles, in a table that
@@ -65,8 +66,14 @@ struct TranscriptView: View {
                 .foregroundStyle(model.isRecording ? .red : .secondary)
             Text(model.meeting?.name ?? "TotalRecall")
                 .font(.headline)
-            if case .recording = model.state {
-                Text(model.elapsed).monospacedDigit().foregroundStyle(.secondary)
+            if case .recording(let since) = model.state {
+                // A clock of its own, every second while the window is open: the model's elapsed time only moves
+                // while the menu is open.
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    Text(clockTime(max(0, Int(context.date.timeIntervalSince(since))), padsHours: false))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             // The same setting as in Settings › Transcript, at hand for when a screenshot of it is wanted.

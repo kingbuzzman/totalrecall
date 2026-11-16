@@ -34,6 +34,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
   Transcript and Restore Recording, which takes it back out of the Trash, once a recording went to the Trash.
 - Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
 - The transcript's first line no longer hides under the column headers.
+- The transcript window's recording time keeps counting while the menu is closed.
 
 ## 0.5.0
 
