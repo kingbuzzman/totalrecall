@@ -7,6 +7,7 @@ import SwiftUI
 struct MenuContent: View {
     static let transcriptWindow = "transcript"
     static let settingsWindow = "settings"
+    static let peopleWindow = "people"
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -101,7 +102,13 @@ struct MenuContent: View {
 
         }
         // In case AppKit made the icon's window afresh, such as after the menu bar was rebuilt.
-        .onAppear { MenuBarIconSharing.apply() }
+        .onAppear {
+            MenuBarIconSharing.apply()
+            HiddenPeopleItem.openPeople = {
+                openWindow(id: Self.peopleWindow)
+                WindowFocus.bringToFront(Self.peopleWindow)
+            }
+        }
     }
 
     /// The next meeting on the calendar, and today's meetings, any of which can be recorded now from its submenu.

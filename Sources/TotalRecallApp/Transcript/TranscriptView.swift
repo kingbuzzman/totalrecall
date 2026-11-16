@@ -8,6 +8,7 @@ import SwiftUI
 /// of their own at the bottom of the window.
 struct TranscriptView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @Setting(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture =
         true
     /// Whether the table is scrolled to the bottom, to offer a way back there when it is not.
@@ -88,6 +89,11 @@ struct TranscriptView: View {
                     ? "Hidden from screenshots and screen sharing; click to show it"
                     : "Shown in screenshots and screen sharing; click to hide it"
             )
+            Button("People") {
+                openWindow(id: MenuContent.peopleWindow)
+                WindowFocus.bringToFront(MenuContent.peopleWindow)
+            }
+            .help("The people Identify Speakers remembers: name, hear, merge or split them")
             if let directory = model.meeting?.directory {
                 Button("Show in Finder") { NSWorkspace.shared.open(directory) }
                     .disabled(!FileManager.default.fileExists(atPath: directory.path))

@@ -41,8 +41,8 @@ final class VoicePrinter: VoicePrinting {
     // Kaldi's filterbank, as WeSpeaker computes it: 25 ms frames every 10 ms, the DC offset removed, pre-emphasized,
     // Hamming-windowed, the power spectrum through 80 triangular mel bands from 20 Hz to 8 kHz, of samples at the scale
     // of 16-bit audio.
-    private static let frameLength = 400
-    private static let hopLength = 160
+    static let frameLength = 400
+    static let hopLength = 160
     private static let fftLength = 512
     private static let bandCount = 80
     private static let preemphasis: Float = 0.97
@@ -99,13 +99,29 @@ final class VoicePrinter: VoicePrinting {
     ) throws
         -> [Float]?
     {
+        let (frames, isSpeech) = speech(in: samples)
+        let speech = frames.indices.filter { isSpeech[$0] }.map { frames[$0].bands }
+        guard !frames.isEmpty, speech.count >= max(Self.minimumFrames, Int(Double(frames.count) * minimumSpeech))
+        else { return nil }
+        return try embed(speech)
+    }
+
+    /// Which frames of this audio, `hopLength` apart, are speech, as `voicePrint` takes them.
+    func speechFrames(of samples: ArraySlice<Float>) -> [Bool] {
+        speech(in: samples).isSpeech
+    }
+
+    /// The audio's frames, and which are speech.
+    private func speech(
+        in samples: ArraySlice<Float>
+    ) -> (frames: [(loudness: Float, lowShare: Float, formantShare: Float, bands: [Float])], isSpeech: [Bool]) {
         var frames: [(loudness: Float, lowShare: Float, formantShare: Float, bands: [Float])] = []
         var start = samples.startIndex
         while start + Self.frameLength <= samples.endIndex {
             frames.append(analyze(samples[start..<start + Self.frameLength]))
             start += Self.hopLength
         }
-        guard let loudest = frames.map(\.loudness).max() else { return nil }
+        guard let loudest = frames.map(\.loudness).max() else { return ([], []) }
         let isLoud = frames.map { $0.loudness > max(loudest - Self.speechRange, Self.silence) }
         let isVoiced = isLoud.indices.map {
             isLoud[$0] && frames[$0].lowShare >= Self.lowSoundShare && frames[$0].formantShare >= Self.formantShare
@@ -117,9 +133,7 @@ final class VoicePrinter: VoicePrinting {
                 nearVoiced[near] = true
             }
         }
-        let speech = frames.indices.filter { isLoud[$0] && nearVoiced[$0] }.map { frames[$0].bands }
-        guard speech.count >= max(Self.minimumFrames, Int(Double(frames.count) * minimumSpeech)) else { return nil }
-        return try embed(speech)
+        return (frames, frames.indices.map { isLoud[$0] && nearVoiced[$0] })
     }
 
     /// Whether the audio from `start` has a pitch: it matches itself, a period later, as a voice does and noise not.
@@ -207,13 +221,15 @@ final class VoicePrinter: VoicePrinting {
 protocol VoicePrinting {
     /// The print of this audio, or nil if less than `minimumSpeech` of it is speech.
     func voicePrint(of samples: ArraySlice<Float>, minimumSpeech: Double) throws -> [Float]?
+    /// Which of its frames, `VoicePrinter.frameLength` long and `VoicePrinter.hopLength` apart, are speech.
+    func speechFrames(of samples: ArraySlice<Float>) -> [Bool]
 }
 
 /// How different two voice prints sound: 1 less the cosine of the angle between them, from 0 for the same direction
 /// to 2 for opposite ones: up to about 0.3 from one stretch of someone's speech to the average of theirs, 0.5 and up
 /// from someone else's. An average of prints is shorter than a print, which does not change its direction. Prints that
 /// are not this version's, such as ones saved by an earlier one, sound as different as can be.
-func voiceDistance(_ a: [Float], _ b: [Float]) -> Float {
+package func voiceDistance(_ a: [Float], _ b: [Float]) -> Float {
     guard a.count == VoicePrinter.printLength, b.count == VoicePrinter.printLength else { return .infinity }
     let lengths = (vDSP.sumOfSquares(a) * vDSP.sumOfSquares(b)).squareRoot()
     return lengths > 0 ? 1 - vDSP.dot(a, b) / lengths : .infinity
@@ -264,9 +280,9 @@ final class VoiceResampler {
 /// weights into transcribe, as sections of its binary, so it stays one file to install, and Core ML loads them from
 /// there, in memory. They must stay there for as long as the model is used: Core ML reads the weights again whenever
 /// it plans the model for a length of speech it has not had yet.
-enum SpeakerModel {
+package enum SpeakerModel {
     /// What the database labels this model's prints with, as another model's mean nothing to it.
-    static let name = "wespeaker-voxceleb-resnet34-lm"
+    package static let name = "wespeaker-voxceleb-resnet34-lm"
     /// The package's files, as the Makefile builds them in: the model, which names its weights `weights`, and those.
     private static let model = "Data/com.apple.CoreML/model.mlmodel"
     private static let weights = "Data/com.apple.CoreML/weights/weight.bin"

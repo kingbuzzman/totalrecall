@@ -224,6 +224,34 @@ package struct LiveTranscriptHandlers: Sendable {
     }
 }
 
+/// The audio files `learnVoices` reads: what TotalRecall saves recordings as, and the other formats macOS reads.
+package let voiceFileExtensions: Set<String> = [
+    "mp3", "m4a", "mp4", "aac", "wav", "wave", "aif", "aiff", "caf", "flac",
+]
+
+/// Tells apart the people in the audio file at `url` and remembers them in the database at `speakers`, as a recording
+/// with Identify Speakers does, without writing a transcript; the speech is still recognized, as only those who say
+/// words are kept. `onMessage` hears of problems it goes on without.
+package func learnVoices(
+    from url: URL,
+    language: String?,
+    speakers: URL,
+    onMessage: @escaping @Sendable (String) -> Void
+) async throws {
+    var options = Options()
+    options.language = language?.nonEmpty ?? options.language
+    options.identifiesSpeakers = true
+    options.speakers = speakers
+    let locale = try await readySpeechLocale(for: options.language)
+    let output = TranscriptionOutput(
+        makePrinter: { _ in TranscriptPrinter(printsLines: false, isLive: false) },
+        warn: onMessage,
+        report: onMessage,
+        onSaveFailure: { _ in }
+    )
+    try await transcribe(try FileAudioSource(url: url), locale: locale, options: options, textURL: nil, output: output)
+}
+
 /// A live transcript of the WAV stream `input` carries, such as the one a recording made in the same app writes into
 /// a pipe, until the stream ends: each line, as it settles, goes to `textURL` and `handlers`, as do the words still
 /// being recognized. Given `identifyingSpeakersIn`, people are told apart by voice and remembered in the database there.

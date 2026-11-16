@@ -9,6 +9,7 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Remembered speakers start over in a new layout: a person has voices, kept apart when merged.
 - `transcribe speakers split <voice>` undoes a merge; `merge` refuses voices that don't sound alike unless `--anyway`.
 - Up to 20 clips are kept per person, named or not.
+- Someone new is saved only together with a clip of them: at least 5 s of them alone, speaking without a pause.
 
 ### TotalRecall.app
 
@@ -35,6 +36,8 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 - Start Now is gone from the menu too: Record Now, on the meeting in Today, does the same.
 - The transcript's first line no longer hides under the column headers.
 - The transcript window's recording time keeps counting while the menu is closed.
+- A People window, from the transcript or Settings › Transcript, names, plays, merges and splits the people Identify Speakers remembers.
+- Dropping a recording on the People window learns the voices in it.
 
 ## 0.5.0
 

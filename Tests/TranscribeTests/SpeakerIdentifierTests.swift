@@ -82,27 +82,63 @@ struct SpeakerIdentifierTests {
         #expect(identifier.speaker(from: 15, to: 23) == "Them 2")
     }
 
-    @Test func savesEveryoneTheMomentTheyAreToldApart() throws {
+    @Test func savesSomeoneNewOnlyWithAClipOfThem() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
 
         feed(voice(1, seconds: 6), to: identifier)
-        let first = try database.voices()
+        let beforeAnyClip = try database.voices()
         feed(voice(1, seconds: 6) + voice(2, seconds: 12), to: identifier, at: 6)
+        identifier.finish()
 
-        #expect(first.count == 1)
+        #expect(beforeAnyClip.isEmpty)
         let speakers = try database.voices()
         #expect(speakers.count == 2, "\(speakers.map { ($0.id, $0.prints) })")
-        #expect(speakers.first.map { $0.prints > first[0].prints } == true)
-        #expect(identifier.speaker(from: 2, to: 10) == "Them \(first[0].person)")
+        for speaker in speakers { #expect(try !database.clips(of: speaker.person).isEmpty) }
+        #expect(identifier.speaker(from: 2, to: 10) == "Them \(speakers[0].person)")
+    }
+
+    @Test func keepsNoClipOfWordsWithPausesBetweenThem() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+        let word = voice(1, seconds: 1) + voice(0, seconds: 0.8)
+
+        feed(Array(Array(repeating: word, count: 40).joined()), to: identifier)
+        identifier.finish()
+
+        #expect(try database.voices().isEmpty)
+    }
+
+    @Test func keepsNoClipOfTwoPeopleTakingTurnsTooQuickly() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+        let turns = voice(1, seconds: 4) + voice(2, seconds: 4)
+
+        feed(Array(Array(repeating: turns, count: 8).joined()), to: identifier)
+        identifier.finish()
+
+        #expect(try database.clipCounts().isEmpty)
+    }
+
+    @Test func savesSomeoneWhoKeepsTalkingOnceTheirLongestClipIsCut() throws {
+        let database = try SpeakerDatabase(url: temporaryDatabase())
+        let identifier = try makeIdentifier(database: database)
+
+        feed(voice(1, seconds: 24), to: identifier)
+
+        let speakers = try database.voices()
+        #expect(speakers.count == 1)
+        let clips = try database.clips(of: try id(0, in: database))
+        try #require(clips.count == 1)
+        // Cut on the 10 ms frames speech is told in.
+        #expect(abs(clips[0].seconds - SpeakerIdentifier.longestSample) < 0.02)
     }
 
     @Test func recognizesSomeoneFromAnEarlierCall() throws {
         let url = temporaryDatabase()
-        feed(
-            voice(1, seconds: 12) + voice(2, seconds: 12),
-            to: try makeIdentifier(database: try SpeakerDatabase(url: url))
-        )
+        let earlier = try makeIdentifier(database: try SpeakerDatabase(url: url))
+        feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: earlier)
+        earlier.finish()
         let database = try SpeakerDatabase(url: url)
         let (first, second) = (try id(0, in: database), try id(1, in: database))
 
@@ -117,7 +153,7 @@ struct SpeakerIdentifierTests {
     @Test func goesByANameGivenWhileTheCallGoesOn() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 6), to: identifier)
+        feed(voice(1, seconds: 24), to: identifier)
 
         _ = try database.rename(try id(0, in: database), to: "Ada")
 
@@ -129,8 +165,10 @@ struct SpeakerIdentifierTests {
         let identifier = try makeIdentifier(isYours: true, database: database)
 
         feed(voice(1, seconds: 40) + voice(2, seconds: 12), to: identifier)
+        identifier.finish()
 
         let speakers = try database.voices()
+        try #require(speakers.count == 2)
         #expect(identifier.speaker(from: 2, to: 10) == "You")
         #expect(identifier.speaker(from: 43, to: 50) == "Them \(speakers[1].person)")
         #expect(speakers.map(\.isYou) == [true, false])
@@ -173,6 +211,8 @@ struct SpeakerIdentifierTests {
         }
         say(seconds: 40, to: theirs)
         say(seconds: 40, to: yours)
+        theirs.finish()
+        yours.finish()
 
         #expect(yours.speaker(from: 25, to: 35) == "You")
         #expect(try database.voices().count == 2)
@@ -184,6 +224,7 @@ struct SpeakerIdentifierTests {
 
         let mixed = try makeIdentifier(name: "Speaker", database: database)
         feed(voice(1, seconds: 12) + voice(2, seconds: 12), to: mixed)
+        mixed.finish()
 
         #expect(mixed.speaker(from: 2, to: 10) == "You")
         #expect(mixed.speaker(from: 15, to: 23) == "Speaker \(try id(1, in: database))")
@@ -210,13 +251,14 @@ struct SpeakerIdentifierTests {
                 #expect(sample.audio.dropFirst(4).prefix(4) == Data("ftyp".utf8))
             }
         }
-        #expect(try database.clips(of: speakers[1].person).first?.seconds == SpeakerIdentifier.longestSample)
+        let longest = try #require(try database.clips(of: speakers[1].person).first)
+        #expect(abs(longest.seconds - SpeakerIdentifier.longestSample) < 0.02)
     }
 
     @Test func savesOnlyThoseWhoSaidWords() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 20), to: identifier, saying: false)
+        feed(voice(1, seconds: 24), to: identifier, saying: false)
         #expect(try database.voices().isEmpty)
 
         #expect(identifier.speaker(from: 5, to: 8) == "Them \(try id(0, in: database))")
@@ -254,9 +296,11 @@ struct SpeakerIdentifierTests {
         feed(voice(1, seconds: 12) + voice(2, seconds: 12) + voice(1, seconds: 12), to: identifier)
         identifier.finish()
 
-        // Their 12 s, and a window that is half theirs: 13.5 s of prints, less the window's edges.
+        // Only the prints wholly theirs, from 12 to 24 s, less the windows' edges: none of the window that is half
+        // someone else's.
         let clips = try database.clips(of: try id(1, in: database))
-        #expect(clips.map(\.seconds) == [12])
+        try #require(clips.count == 1)
+        #expect(abs(clips[0].seconds - 10.5) < 0.02)
     }
 
     @Test func savesNobodyHeardOnlyForAMoment() throws {
@@ -273,14 +317,15 @@ struct SpeakerIdentifierTests {
     @Test func keepsClipsOfSomeoneWithANameToo() throws {
         let database = try SpeakerDatabase(url: temporaryDatabase())
         let identifier = try makeIdentifier(database: database)
-        feed(voice(1, seconds: 6), to: identifier)
+        feed(voice(1, seconds: 24), to: identifier)
         let ada = try id(0, in: database)
         _ = try database.rename(ada, to: "Ada")
+        let clipsBefore = try database.clipCounts()[ada, default: 0]
 
-        feed(voice(1, seconds: 20), to: identifier, at: 6)
+        feed(voice(1, seconds: 20), to: identifier, at: 24)
         identifier.finish()
 
-        #expect(try database.clipCounts()[ada, default: 0] > 0)
+        #expect(try database.clipCounts()[ada, default: 0] > clipsBefore)
     }
 
     @Test func settlesWhoSpokeALineOnceTheAudioHasGoneFarEnoughPastIt() async throws {
@@ -413,6 +458,16 @@ private struct StandInPrinter: VoicePrinting {
         let speech = print.reduce(0, +)
         guard speech > 0, Double(speech) >= Double(samples.count) * minimumSpeech - 1 else { return nil }
         return print.map { $0 / speech }
+    }
+
+    /// Any frame with sound in it is speech.
+    func speechFrames(of samples: ArraySlice<Float>) -> [Bool] {
+        stride(
+            from: samples.startIndex,
+            through: samples.endIndex - VoicePrinter.frameLength,
+            by: VoicePrinter.hopLength
+        )
+        .map { start in samples[start..<start + VoicePrinter.frameLength].contains { abs($0) > 0.05 } }
     }
 }
 

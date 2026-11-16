@@ -22,6 +22,21 @@ struct TotalRecallApp: App {
                 .focusedWhenOpened(as: MenuContent.transcriptWindow)
         }
         .defaultSize(width: 560, height: 480)
+        // ⌘P opens People: not in the menu bar icon's menu, only in the app's own menus, while one of its windows is in
+        // front; in the place of Print, which the app has nothing for.
+        .commands {
+            CommandGroup(replacing: .printItem) { PeopleMenuItem() }
+        }
+
+        // The people Identify Speakers remembers, opened from the transcript.
+        Window("People", id: MenuContent.peopleWindow) {
+            PeopleView()
+                .environment(delegate.model)
+                .frame(width: 540)
+                .showsAppInDock()
+                .focusedWhenOpened(as: MenuContent.peopleWindow)
+        }
+        .windowResizability(.contentSize)
 
         Settings {
             SettingsView()
@@ -42,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        HiddenPeopleItem.start()
         // The menu bar icon's window is made as the app finishes launching; it is there on the next turn of the run loop.
         DispatchQueue.main.async { MenuBarIconSharing.apply() }
         NotificationCenter.default.addObserver(forName: SettingsFile.didChange, object: nil, queue: .main) {
@@ -55,5 +71,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard model.isRecording || model.isBusy else { return .terminateNow }
         model.stopAndFinish { sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
+    }
+}
+
+/// People…, ⌘P, in the app's own menus.
+private struct PeopleMenuItem: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("People…") {
+            openWindow(id: MenuContent.peopleWindow)
+            WindowFocus.bringToFront(MenuContent.peopleWindow)
+        }
+        .keyboardShortcut("p")
     }
 }

@@ -17,6 +17,9 @@ import Shared
 final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this type_body_length
     static let windowSeconds = 3.0
     static let hopSeconds = 1.5
+    /// What a clip leaves out at each end of a stretch: each print goes by the middle of its window, as the rest of it
+    /// may be someone else's.
+    private static let clipEdge = (windowSeconds - hopSeconds) / 2
     /// Until anyone has been heard, a window with this little speech will do, and what has come in of the first one
     /// is tried every `firstTrySeconds`, so the first words have a speaker too.
     static let firstSpeech = 1.0 / 3
@@ -31,10 +34,18 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
     static let settledYou = 20
     /// How many prints of someone's voice from earlier calls count against this call's, which may sound different.
     static let rememberedPrints = 100
-    /// Samples of the speech of someone with no name yet, to tell who they are by, are kept from stretches at least this
-    /// long where they were sure to be speaking, and at most this much of each.
-    static let shortestSample = 2.0
+    /// Clips of someone's speech are at least this long, in seconds, of them alone speaking without a pause (see
+    /// `ClipCutter`), and at most this long.
+    static let shortestSample = 5.0
     static let longestSample = 15.0
+    /// A clip is only cut where every print, and the clip's own, is clearly its speaker's: within a limit of their
+    /// voice, and a margin further from everyone else's. Benchmarked on real meetings, one person's 3 s prints, as the
+    /// stretch is printed in, are within 0.43 of their voice 95% of the time, their 5 s prints, as a clip is at least,
+    /// within 0.32, and different people at least 0.73 apart.
+    static let printLimit: Float = 0.45
+    static let printMargin: Float = 0.15
+    static let clipLimit: Float = 0.40
+    static let clipMargin: Float = 0.20
     /// Who spoke a stretch is taken as decided this many prints after it, as someone new is recognized in a few.
     static let sampleDelay = 4
     /// Samples of those not saved yet, as they have said no words yet, are kept until they have, up to this many.
@@ -73,6 +84,8 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
     private var historyStart = 0
     /// How many prints have been looked at for samples, and the stretch of someone's speech going on at the last.
     private var decidedPrints = 0
+    /// The prints not looked at for clips yet, from `decidedPrints` on.
+    private var undecidedPrints: [[Float]] = []
     private var stretch: (speaker: Int, start: Double, end: Double)?
     private let lock = NSLock()
     private var voices: VoiceClusters
@@ -176,7 +189,11 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         if pending.count > windowFrames - hopFrames { identify(pending[...]) }
         pending = []
         takeSamples(atTheEnd: true)
-        lock.withLock { hasEnded = true }
+        lock.withLock {
+            // Someone whose first clip came with the last of the audio is saved with it.
+            save()
+            hasEnded = true
+        }
     }
 
     /// Once every line has said who spoke it: takes back out of the database anyone added on this call who, in the
@@ -230,6 +247,7 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         lock.withLock {
             voices.add(print)
             spans.append((span.start, span.end))
+            if database != nil { undecidedPrints.append(print) }
             save()
         }
         takeSamples(atTheEnd: false)
@@ -243,12 +261,19 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         lock.withLock {
             let decided = atTheEnd ? voices.labels.count : voices.labels.count - Self.sampleDelay
             while decidedPrints < decided {
-                let (speaker, isSure, span) = (
-                    voices.labels[decidedPrints], voices.isSure[decidedPrints], spans[decidedPrints]
-                )
+                let (speaker, span) = (voices.labels[decidedPrints], spans[decidedPrints])
+                let isSure =
+                    voices.isSure[decidedPrints]
+                    && isClearly(undecidedPrints.removeFirst(), speaker, within: Self.printLimit, by: Self.printMargin)
                 decidedPrints += 1
                 if let current = stretch, current.speaker == speaker, isSure, span.start <= current.end {
                     stretch?.end = max(current.end, span.end)
+                    // Cut into a clip as it reaches the longest one, rather than only once they stop talking: until
+                    // a clip of them is kept, someone new is not saved.
+                    if let long = stretch, long.end - long.start - 2 * Self.clipEdge >= Self.longestSample {
+                        finished.append(long)
+                        stretch = nil
+                    }
                     continue
                 }
                 if let current = stretch { finished.append(current) }
@@ -262,21 +287,39 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
         for stretch in finished { keepSample(of: stretch) }
     }
 
+    /// Cuts a clip from a stretch of someone's speech: its longest sentence, without a pause, of at least `shortestSample`,
+    /// which, printed whole, must still clearly be theirs, as a second voice in it pulls its print away from theirs.
+    /// Otherwise there is no clip of it.
     private func keepSample(of stretch: (speaker: Int, start: Double, end: Double)) {
-        // Each print goes by the middle of its window, as the rest of it may be someone else's.
-        let edge = (Self.windowSeconds - Self.hopSeconds) / 2
-        let seconds = min(stretch.end - stretch.start - 2 * edge, Self.longestSample)
-        let start = Int((stretch.start + edge) * VoicePrinter.sampleRate) - historyStart
-        let end = start + Int(seconds * VoicePrinter.sampleRate)
-        guard seconds >= Self.shortestSample, start >= 0, end <= history.count else { return }
+        let rate = VoicePrinter.sampleRate
+        let first = Int((stretch.start + Self.clipEdge) * rate) - historyStart
+        let last = Int((stretch.end - Self.clipEdge) * rate) - historyStart
+        guard first >= 0, last <= history.count, Double(last - first) >= Self.shortestSample * rate,
+            let run = ClipCutter.longestRun(in: printer.speechFrames(of: history[first..<last]))
+        else { return }
+        let start = first + run.lowerBound
+        let end = min(first + run.upperBound, last, start + Int(Self.longestSample * rate))
+        let seconds = Double(end - start) / rate
+        guard seconds >= Self.shortestSample else { return }
+        let audio = Array(history[start..<end])
+        guard let print = try? printer.voicePrint(of: audio[...], minimumSpeech: VoicePrinter.minimumSpeech),
+            lock.withLock({ isClearly(print, stretch.speaker, within: Self.clipLimit, by: Self.clipMargin) })
+        else { return }
         lock.withLock {
-            if let id = people[stretch.speaker]?.id {
-                return saveSample(history[start..<end], seconds: seconds, of: id)
-            }
-            unsavedSamples.append((stretch.speaker, Array(history[start..<end]), seconds))
+            if let id = people[stretch.speaker]?.id { return saveSample(audio[...], seconds: seconds, of: id) }
+            unsavedSamples.append((stretch.speaker, audio, seconds))
             unsavedSamples.sort { $0.seconds > $1.seconds }
             if unsavedSamples.count > Self.unsavedSampleCount { unsavedSamples.removeLast() }
         }
+    }
+
+    /// Whether `print` is clearly this call's `speaker`: within `limit` of their voice, and `margin` further from
+    /// everyone else heard on it.
+    private func isClearly(_ print: [Float], _ speaker: Int, within limit: Float, by margin: Float) -> Bool {
+        guard let own = voices.speakers.first(where: { $0.number == speaker }) else { return false }
+        let distance = voiceDistance(print, own.center)
+        let nearestOther = voices.speakers.filter { $0.number != speaker }.map { voiceDistance(print, $0.center) }.min()
+        return distance <= limit && (nearestOther ?? .infinity) - distance >= margin
     }
 
     /// Kept for everyone, named or not: to hear who someone is by, and to print their voice again with another model.
@@ -380,9 +423,11 @@ final class SpeakerIdentifier: @unchecked Sendable {  // swiftlint:disable:this 
                 // Someone new only once they have been heard as long as it takes to tell someone new apart, so a
                 // cough or a moment of noise does not stay behind as a speaker.
                 let isHeardEnough = speaker.count >= VoiceClusters.newSpeakerPrints
+                // Nor without a clip of them, saved with them: no one is kept who cannot be heard.
+                let hasClip = unsavedSamples.contains { $0.speaker == speaker.number }
                 guard
                     var person = try people[speaker.number] ?? recognize(speaker)
-                        ?? (isHeardEnough ? add(speaker, to: database) : nil)
+                        ?? (isHeardEnough && hasClip ? add(speaker, to: database) : nil)
                 else { return }
                 // Someone taken for new from their first prints may turn out to be someone heard before.
                 if person.isNew, speaker.count >= Self.settledPrints, let earlier = try recognize(speaker) {

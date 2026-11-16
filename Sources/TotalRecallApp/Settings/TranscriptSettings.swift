@@ -7,6 +7,7 @@ struct TranscriptSettings: View {
     @Setting(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture =
         true
     @State private var asksToIdentifySpeakers = false
+    @Environment(\.openWindow) private var openWindow
 
     /// What turning on Identify Speakers means in law, said each time it is turned on, before it is.
     static let identifyingSpeakersNotice =
@@ -37,11 +38,17 @@ struct TranscriptSettings: View {
                 )
                 Text(
                     "Tells people apart by voice, as Them 1, Them 2, …, and remembers them from call to call by "
-                        + "saving their voiceprints, which some laws only allow with their consent."
+                        + "saving their voiceprints."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                LabeledContent("The people it remembers") {
+                    Button("People…") {
+                        openWindow(id: MenuContent.peopleWindow)
+                        WindowFocus.bringToFront(MenuContent.peopleWindow)
+                    }
+                }
             }
             .alert("Identify speakers?", isPresented: $asksToIdentifySpeakers) {
                 Button("Turn On") { identifiesSpeakers = true }

@@ -1,4 +1,4 @@
-import Foundation
+package import Foundation
 import Shared
 
 /// The people `--identify-speakers` has heard, so each keeps their number, or the name given them, from one call to the
@@ -11,38 +11,38 @@ import Shared
 /// that turns out wrong can be undone by splitting a voice back out. With each voice go clips of its speech, as AAC
 /// audio in an MPEG-4 file (the bytes of a .m4a), to hear who someone is by and to print their voice again with another
 /// model. A voice's print is kept per speaker model, as one model's prints mean nothing to another.
-final class SpeakerDatabase: @unchecked Sendable {
+package final class SpeakerDatabase: @unchecked Sendable {
     /// Someone heard, under the number transcripts call them by ("Them 3"), until given a name.
-    struct Person: Equatable {
-        let id: Int
-        var name: String?
+    package struct Person: Equatable, Sendable {
+        package let id: Int
+        package var name: String?
         /// Heard on your microphone: you.
-        var isYou: Bool
+        package var isYou: Bool
         /// When they were first heard.
-        var createdAt: Date
+        package var createdAt: Date
     }
 
     /// One way someone sounds, as the identifier recognizes them: the average of its prints in the database's model,
     /// and how many prints, `SpeakerIdentifier.hopSeconds` of speech each; with its person's name and whether that is
     /// you.
-    struct Voice: Equatable {
-        let id: Int
-        let person: Int
-        var name: String?
-        var isYou: Bool
-        var print: [Float]
-        var prints: Int
-        var createdAt: Date
+    package struct Voice: Equatable, Sendable {
+        package let id: Int
+        package let person: Int
+        package var name: String?
+        package var isYou: Bool
+        package var print: [Float]
+        package var prints: Int
+        package var createdAt: Date
     }
 
     /// Some seconds of a voice's speech.
-    struct Clip: Equatable {
-        let id: Int
-        let voice: Int
+    package struct Clip: Equatable, Sendable {
+        package let id: Int
+        package let voice: Int
         /// A .m4a file's bytes.
-        let audio: Data
-        let seconds: Double
-        let recordedAt: Date
+        package let audio: Data
+        package let seconds: Double
+        package let recordedAt: Date
     }
 
     /// Each person keeps their longest clips, this many.
@@ -51,8 +51,13 @@ final class SpeakerDatabase: @unchecked Sendable {
     /// closer than 0.5.
     static let samePerson: Float = 0.35
     static let samePersonPrints = SpeakerIdentifier.settledPrints
+    /// People this far apart, between their most alike voices, or further, most likely are two: merging them asks
+    /// first.
+    package static let soundAlike = SpeakerIdentifier.soundAlike
+    /// How long a voice is heard for each of its prints, in seconds.
+    package static let secondsPerPrint = SpeakerIdentifier.hopSeconds
 
-    static var defaultURL: URL {
+    package static var defaultURL: URL {
         if let path = ProcessInfo.processInfo.environment["TRANSCRIBE_SPEAKERS"] { return URL(typedPath: path) }
         return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".transcribe/speakers.db")
     }
@@ -100,7 +105,7 @@ final class SpeakerDatabase: @unchecked Sendable {
     let model: String
     private let sqlite: SQLiteDatabase
 
-    init(url: URL = defaultURL, model: String = SpeakerModel.name) throws {
+    package init(url: URL = defaultURL, model: String = SpeakerModel.name) throws {
         self.model = model
         sqlite = try SQLiteDatabase(url: url)
         for statement in Self.schema { try sqlite.execute(statement) }
@@ -109,13 +114,13 @@ final class SpeakerDatabase: @unchecked Sendable {
     // MARK: - People
 
     /// Everyone, in the order they were first heard.
-    func people() throws -> [Person] {
+    package func people() throws -> [Person] {
         try sqlite.query("SELECT id, name, is_you, created_at FROM people ORDER BY id") { row in
             Person(id: row.integer(0), name: row.text(1), isYou: row.bool(2), createdAt: row.date(3))
         }
     }
 
-    func person(_ id: Int) throws -> Person? {
+    package func person(_ id: Int) throws -> Person? {
         try sqlite.query("SELECT id, name, is_you, created_at FROM people WHERE id = ?", [.integer(id)]) { row in
             Person(id: row.integer(0), name: row.text(1), isYou: row.bool(2), createdAt: row.date(3))
         }
@@ -123,12 +128,14 @@ final class SpeakerDatabase: @unchecked Sendable {
     }
 
     /// Names someone, or with nil takes their name away. False if there is no such person.
-    func rename(_ person: Int, to name: String?) throws -> Bool {
+    @discardableResult
+    package func rename(_ person: Int, to name: String?) throws -> Bool {
         try changes("UPDATE people SET name = ? WHERE id = ?", [.textOrNull(name), .integer(person)])
     }
 
     /// Takes someone out, with their voices and clips. False if there is no such person.
-    func forget(_ person: Int) throws -> Bool {
+    @discardableResult
+    package func forget(_ person: Int) throws -> Bool {
         try changes("DELETE FROM people WHERE id = ?", [.integer(person)])
     }
 
@@ -136,7 +143,8 @@ final class SpeakerDatabase: @unchecked Sendable {
     /// keeps its name unless it has none, is you if either was, and was first heard when the earlier of the two was.
     /// Each voice stays as it was, to be split back out if the merge was wrong. False if either is missing, or they
     /// are the same.
-    func merge(_ person: Int, into target: Int) throws -> Bool {
+    @discardableResult
+    package func merge(_ person: Int, into target: Int) throws -> Bool {
         try sqlite.transaction {
             guard person != target, let merged = try self.person(person), let kept = try self.person(target) else {
                 return false
@@ -160,7 +168,8 @@ final class SpeakerDatabase: @unchecked Sendable {
 
     /// Takes a voice out of its person into a person of its own, with no name, for a merge that was wrong. Returns the
     /// new person, or nil if there is no such voice, or it is its person's only one.
-    func split(_ voice: Int) throws -> Int? {
+    @discardableResult
+    package func split(_ voice: Int) throws -> Int? {
         try sqlite.transaction {
             guard let found = try self.voice(voice, inAnyModel: true), try voices(of: found.person).count > 1 else {
                 return nil
@@ -173,7 +182,7 @@ final class SpeakerDatabase: @unchecked Sendable {
 
     /// How alike two people sound: the distance between the most alike of their voices; nil when either has no voice
     /// in this model.
-    func distance(between person: Int, and other: Int) throws -> Float? {
+    package func distance(between person: Int, and other: Int) throws -> Float? {
         let (theirs, others) = (try voices(of: person), try voices(of: other))
         return theirs.flatMap { voice in others.map { voiceDistance(voice.print, $0.print) } }.min()
     }
@@ -181,7 +190,7 @@ final class SpeakerDatabase: @unchecked Sendable {
     // MARK: - Voices
 
     /// Every voice with a print in this model, in the order they were first heard.
-    func voices() throws -> [Voice] {
+    package func voices() throws -> [Voice] {
         try voices(where: "1")
     }
 
@@ -189,7 +198,7 @@ final class SpeakerDatabase: @unchecked Sendable {
         try voices(where: "voices.id = ?", [.integer(id)]).first
     }
 
-    func voices(of person: Int) throws -> [Voice] {
+    package func voices(of person: Int) throws -> [Voice] {
         try voices(where: "voices.person_id = ?", [.integer(person)])
     }
 
@@ -334,7 +343,7 @@ extension SpeakerDatabase {
     }
 
     /// Someone's clips, of all their voices, the longest first.
-    func clips(of person: Int) throws -> [Clip] {
+    package func clips(of person: Int) throws -> [Clip] {
         try sqlite.query(
             """
             SELECT clips.id, clips.voice_id, clips.audio, clips.seconds, clips.recorded_at
@@ -354,7 +363,7 @@ extension SpeakerDatabase {
     }
 
     /// How many clips each person has, by number; those with none are left out.
-    func clipCounts() throws -> [Int: Int] {
+    package func clipCounts() throws -> [Int: Int] {
         Dictionary(
             uniqueKeysWithValues: try sqlite.query(
                 "SELECT voices.person_id, count(*) FROM clips JOIN voices ON voices.id = clips.voice_id GROUP BY 1"
