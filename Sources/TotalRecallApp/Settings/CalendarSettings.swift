@@ -7,11 +7,10 @@ import SwiftUI
 /// meetings are recorded and which of them to ignore.
 struct CalendarSettings: View {
     @Environment(AppModel.self) private var model
-    @State private var rules = AppSettings.calendarRules
-    @AppStorage(AppSettings.Key.newMeetingMinutes, store: AppSettings.store) private var newMeetingMinutes = AppSettings
+    @Setting(AppSettings.Key.newMeetingMinutes) private var newMeetingMinutes = AppSettings
         .defaultNewMeetingMinutes
-    @AppStorage(AppSettings.Key.recordsAutomatically, store: AppSettings.store) private var recordsAutomatically = true
-    @AppStorage(AppSettings.Key.warningMinutes, store: AppSettings.store) private var warningMinutes = AppSettings
+    @Setting(AppSettings.Key.recordsAutomatically) private var recordsAutomatically = true
+    @Setting(AppSettings.Key.warningMinutes) private var warningMinutes = AppSettings
         .defaultWarningMinutes
 
     var body: some View {
@@ -101,11 +100,6 @@ struct CalendarSettings: View {
         }
         .formStyle(.grouped)
         .frame(minHeight: 260, maxHeight: 560)
-        // Such as a meeting ignored from the menu while Settings is open.
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
-            let saved = AppSettings.calendarRules
-            if saved != rules { rules = saved }
-        }
     }
 
     private var accounts: [String] {
@@ -118,15 +112,16 @@ struct CalendarSettings: View {
         Binding {
             model.defaultMeetingCalendar?.id ?? ""
         } set: { id in
-            AppSettings.store.set(id, forKey: AppSettings.Key.defaultMeetingCalendar)
+            AppSettings.file[AppSettings.Key.defaultMeetingCalendar] = id
         }
     }
 
-    /// A calendar's rules, as set up or its defaults, saved as soon as they change.
+    /// A calendar's rules, as set up or its defaults, straight from the settings, saved as soon as they change.
     private func binding(for calendar: CalendarSource.Calendar) -> Binding<CalendarRules> {
         Binding {
-            AppSettings.rules(for: calendar, in: rules)
+            AppSettings.rules(for: calendar)
         } set: { newRules in
+            var rules = AppSettings.calendarRules
             rules[calendar.id] = newRules
             AppSettings.calendarRules = rules
         }

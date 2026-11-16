@@ -3,7 +3,7 @@ import Foundation
 import Shared
 
 /// The settings, kept in ~/Library/Application Support/TotalRecall/Settings.plist, beside the people the app remembers;
-/// Settings changes them through `@AppStorage` with the same keys and `store`.
+/// Settings changes them through `@Setting` with the same keys.
 enum AppSettings {
     /// Where the app keeps what it keeps: its settings, and the people it remembers.
     static let folder = URL.applicationSupportDirectory.appending(path: "TotalRecall")
@@ -11,14 +11,7 @@ enum AppSettings {
     /// The people Identify Speakers remembers: the app's own, apart from those `transcribe` remembers.
     static let speakers = folder.appending(path: "speakers.db")
 
-    /// The settings file, as user defaults; which, as Apple documents, any thread may use.
-    nonisolated(unsafe) static let store: UserDefaults = {
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        guard let store = UserDefaults(suiteName: folder.appending(path: "Settings").path) else {
-            preconditionFailure("cannot keep settings in \(folder.path)")
-        }
-        return store
-    }()
+    static let file = SettingsFile(url: folder.appending(path: "Settings.plist"))
 
     enum Key {
         static let recordingsFolder = "recordingsFolder"
@@ -51,21 +44,20 @@ enum AppSettings {
     /// no warnings.
     static let defaultWarningMinutes = 5
     static var warningMinutes: Int {
-        defaults.object(forKey: Key.warningMinutes) == nil
-            ? defaultWarningMinutes : defaults.integer(forKey: Key.warningMinutes)
+        file[Key.warningMinutes] as? Int ?? defaultWarningMinutes
     }
 
     /// What to record from each calendar set up in Settings, by calendar identifier. A calendar not set up goes by
     /// `CalendarRules.defaults`, so one added later is recorded too.
     static var calendarRules: [String: CalendarRules] {
-        get { CalendarRules.decode(defaults.object(forKey: Key.calendarRules)) }
-        set { defaults.set(CalendarRules.encode(newValue), forKey: Key.calendarRules) }
+        get { CalendarRules.decode(file[Key.calendarRules]) }
+        set { file[Key.calendarRules] = CalendarRules.encode(newValue) }
     }
 
     /// The identifier of the calendar a meeting started from the menu is filed under, as chosen in Settings; nil when
     /// none was chosen.
     static var defaultMeetingCalendar: String? {
-        defaults.string(forKey: Key.defaultMeetingCalendar)?.nonEmpty
+        (file[Key.defaultMeetingCalendar] as? String)?.nonEmpty
     }
 
     /// How long the event New Meeting adds lasts until the meeting is stopped, when its end moves to then; 30 minutes
@@ -73,14 +65,14 @@ enum AppSettings {
     static let defaultNewMeetingMinutes = 30
     static let newMeetingLengths = [15, 30, 45, 60, 90, 120]
     static var newMeetingMinutes: Int {
-        let minutes = defaults.integer(forKey: Key.newMeetingMinutes)
+        let minutes = file[Key.newMeetingMinutes] as? Int ?? 0
         return minutes > 0 ? minutes : defaultNewMeetingMinutes
     }
 
     /// The name last given to New Meeting, which it suggests next time, to be changed or kept.
     static var lastMeetingName: String {
-        get { defaults.string(forKey: Key.lastMeetingName) ?? "" }
-        set { defaults.set(newValue, forKey: Key.lastMeetingName) }
+        get { file[Key.lastMeetingName] as? String ?? "" }
+        set { file[Key.lastMeetingName] = newValue }
     }
 
     /// The rules of `calendar`: as set up, or its defaults; a read-only calendar is never recorded, whatever was set.
@@ -100,21 +92,21 @@ enum AppSettings {
         .path
 
     static var recordingsFolder: URL {
-        URL(filePath: defaults.string(forKey: Key.recordingsFolder) ?? defaultRecordingsFolder)
+        URL(filePath: file[Key.recordingsFolder] as? String ?? defaultRecordingsFolder)
     }
 
     static var format: AudioFormatChoice {
-        defaults.string(forKey: Key.format).flatMap(AudioFormatChoice.init) ?? .default
+        (file[Key.format] as? String).flatMap(AudioFormatChoice.init) ?? .default
     }
 
     /// Part of the name of a microphone to prefer whenever it is connected; nil for the system input.
     static var microphone: String? {
-        defaults.string(forKey: Key.microphone)?.nonEmpty
+        (file[Key.microphone] as? String)?.nonEmpty
     }
 
     /// The language spoken, such as es or es-MX; nil for transcribe's default, en-US.
     static var language: String? {
-        defaults.string(forKey: Key.language)?.trimmingCharacters(in: .whitespaces).nonEmpty
+        (file[Key.language] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty
     }
 
     /// Whether a recording goes to the Trash once saved and transcribed, keeping only the transcript; on unless turned
@@ -124,14 +116,11 @@ enum AppSettings {
     }
 
     static var identifiesSpeakers: Bool {
-        defaults.bool(forKey: Key.identifiesSpeakers)
+        flag(Key.identifiesSpeakers, unset: false)
     }
 
-    private static var defaults: UserDefaults { store }
-
-    /// A setting that is on or off, or `unset` when never set. Read with `bool(forKey:)`, which also takes text such
-    /// as `defaults write` can leave, "NO", where a cast to Bool would take it for unset.
+    /// A setting that is on or off, or `unset` when never set.
     private static func flag(_ key: String, unset: Bool) -> Bool {
-        defaults.object(forKey: key) == nil ? unset : defaults.bool(forKey: key)
+        file[key] as? Bool ?? unset
     }
 }

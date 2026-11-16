@@ -102,7 +102,7 @@ final class AppModel {
             }
         }
         // Such as calendars turned off in Settings.
-        observe(UserDefaults.didChangeNotification) { model, _ in model.readCalendar() }
+        observe(SettingsFile.didChange) { model, _ in model.readCalendar() }
         Task {
             await calendar.requestAccess()
             readCalendar()

@@ -7,7 +7,7 @@ import SwiftUI
 /// of their own at the bottom of the window.
 struct TranscriptView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(AppSettings.Key.hidesTranscriptFromCapture, store: AppSettings.store) private var hidesFromCapture =
+    @Setting(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture =
         true
     /// Whether the table is scrolled to the bottom, to offer a way back there when it is not.
     @State private var isAtBottom = true

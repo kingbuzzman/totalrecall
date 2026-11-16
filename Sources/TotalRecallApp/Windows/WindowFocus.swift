@@ -32,12 +32,12 @@ enum WindowFocus {
     private static func rememberFrame(of window: NSWindow, as name: String) {
         let key = "windowFrame.\(name)"
         window.setFrameAutosaveName("")
-        if let frame = AppSettings.store.string(forKey: key) { window.setFrame(from: frame) }
+        if let frame = AppSettings.file[key] as? String { window.setFrame(from: frame) }
         frameObservers[name]?.forEach(NotificationCenter.default.removeObserver)
-        frameObservers[name] = [NSWindow.didMoveNotification, NSWindow.didResizeNotification].map { change in
+        frameObservers[name] = [NSWindow.didMoveNotification, NSWindow.didEndLiveResizeNotification].map { change in
             NotificationCenter.default.addObserver(forName: change, object: window, queue: .main) { [weak window] _ in
                 MainActor.assumeIsolated {
-                    if let window { AppSettings.store.set(window.frameDescriptor, forKey: key) }
+                    if let window { AppSettings.file[key] = window.frameDescriptor }
                 }
             }
         }

@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The menu bar icon's window is made as the app finishes launching; it is there on the next turn of the run loop.
         DispatchQueue.main.async { MenuBarIconSharing.apply() }
-        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) {
+        NotificationCenter.default.addObserver(forName: SettingsFile.didChange, object: nil, queue: .main) {
             _ in
             MainActor.assumeIsolated { MenuBarIconSharing.apply() }
         }

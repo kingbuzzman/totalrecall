@@ -4,9 +4,9 @@ import SwiftUI
 
 /// Where recordings go, hiding the menu bar icon, and opening at login.
 struct GeneralSettings: View {
-    @AppStorage(AppSettings.Key.recordingsFolder, store: AppSettings.store) private var recordingsFolder = AppSettings
+    @Setting(AppSettings.Key.recordingsFolder) private var recordingsFolder = AppSettings
         .defaultRecordingsFolder
-    @AppStorage(AppSettings.Key.hidesMenuBarIconFromCapture, store: AppSettings.store) private var hidesMenuBarIcon =
+    @Setting(AppSettings.Key.hidesMenuBarIconFromCapture) private var hidesMenuBarIcon =
         true
     @State private var launchesAtLogin = SMAppService.mainApp.status == .enabled
     @State private var launchAtLoginError: String?
