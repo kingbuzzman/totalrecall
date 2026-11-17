@@ -8,6 +8,10 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 - Fixed: someone new who sounds a lot like someone known was taken for them; recognizing someone now takes a closer match.
 
+### TotalRecall.app
+
+- The transcript window's dot blinks while recording; hover and click it to stop.
+
 ## 0.6.1
 
 ### totalrecall

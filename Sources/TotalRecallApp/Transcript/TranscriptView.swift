@@ -63,8 +63,7 @@ struct TranscriptView: View {
 
     private var header: some View {
         HStack {
-            Image(systemName: model.isRecording ? "record.circle.fill" : "record.circle")
-                .foregroundStyle(model.isRecording ? .red : .secondary)
+            RecordingIndicator()
             Text(model.meeting?.name ?? "TotalRecall")
                 .font(.headline)
             if case .recording(let since) = model.state {
@@ -129,6 +128,31 @@ struct TranscriptView: View {
                     .padding(10)
                 }
             }
+    }
+}
+
+/// The red dot, blinking, while it records; under the pointer, a button that stops it, as Stop Recording in the menu.
+private struct RecordingIndicator: View {
+    @Environment(AppModel.self) private var model
+    @State private var isHovered = false
+
+    var body: some View {
+        if model.isRecording {
+            Button {
+                model.stop()
+            } label: {
+                Image(systemName: isHovered ? "stop.circle.fill" : "record.circle.fill")
+                    .foregroundStyle(.red)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !isHovered)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.borderless)
+            .onHover { isHovered = $0 }
+            .help("Stop recording")
+        } else {
+            Image(systemName: "record.circle")
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

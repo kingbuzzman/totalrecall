@@ -102,7 +102,7 @@ need icalbuddy.
   Some have buttons, under Options: **Record Now** and **Skip** on a meeting about to start, **Stop Recording** on a
   recording that started, **Try Again** when one could not start, and **Open Transcript** and **Restore Recording**
   once a recording went to the Trash.
-  While it records, the menu bar icon has a red dot.
+  While it records, the menu bar icon has a red dot; the transcript window's dot blinks, and stops it when clicked.
 - **Settings** has a tab each for where recordings go (`~/Meetings` by default) and when they start, which calendars,
   the format and the mic, the transcript's language and identifying speakers, and the version. Recordings go in the
   same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a meeting on the calendar, by when it was
