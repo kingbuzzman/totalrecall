@@ -48,7 +48,7 @@ package final class SpeakerDatabase: @unchecked Sendable {
     /// Each person keeps their longest clips, this many.
     static let clipsPerPerson = 20
     /// People whose voices are this alike, both heard this many prints at least, are one: different people's are rarely
-    /// closer than 0.5.
+    /// closer than 0.5, and have been as close as 0.43.
     static let samePerson: Float = 0.35
     static let samePersonPrints = SpeakerIdentifier.settledPrints
     /// People this far apart, between their most alike voices, or further, most likely are two: merging them asks

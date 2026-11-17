@@ -5,9 +5,12 @@ import Foundation
 /// is over, and, once it is over, remembered if they are new.
 extension SpeakerIdentifier {
     /// Someone heard before sounds this alike from one call to the next; this call's speaker needs `settledPrints` to
-    /// be sure enough of, and a stricter `sameVoiceFromFewPrints` until then.
-    static let sameVoice: Float = 0.45
-    static let sameVoiceFromFewPrints: Float = 0.4
+    /// be sure enough of, and a stricter `sameVoiceFromFewPrints` until then. Benchmarked on real meetings, one person
+    /// heard on two calls is at most 0.38 apart, and within 0.32 of their voice saved from several, while two different
+    /// people came as close as 0.43: someone new taken for someone else is worse than one person taken for two, whom
+    /// `transcribe speakers merge` makes one.
+    static let sameVoice: Float = 0.38
+    static let sameVoiceFromFewPrints: Float = 0.33
     static let settledPrints = 4
     /// The voice heard the most on your microphone is remembered as you once it has this many prints, about 50 s of
     /// speech, and at least twice as many as anyone else there.
