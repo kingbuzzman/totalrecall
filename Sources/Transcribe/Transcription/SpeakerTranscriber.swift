@@ -3,6 +3,7 @@ import Accelerate
 import Foundation
 import Shared
 import Speech
+import os
 
 /// Who is speaking, from totalrecall's channel split: your microphone on the left, everyone else on the right.
 enum Speaker: String {
@@ -54,6 +55,8 @@ final class SpeakerTranscriber: @unchecked Sendable {
     private let converterInput = ConverterInput()
     private let inputStream: AsyncStream<AnalyzerInput>
     private let input: AsyncStream<AnalyzerInput>.Continuation
+    /// How far into the audio the recognizer has listened, in seconds.
+    private let heardThrough = OSAllocatedUnfairLock(initialState: 0.0)
 
     init(speaker: Speaker?, locale: Locale, sampleRate: Double, identifier: SpeakerIdentifier? = nil) async throws {
         self.speaker = speaker
@@ -91,8 +94,9 @@ final class SpeakerTranscriber: @unchecked Sendable {
         onRecognized: (@Sendable (TranscriptUpdate) -> Void)? = nil,
         onHeard: (@Sendable (Double) -> Void)? = nil
     ) async throws {
-        if let onHeard {
-            await analyzer.setVolatileRangeChangedHandler { range, _, _ in onHeard(range.end.seconds) }
+        await analyzer.setVolatileRangeChangedHandler { [heardThrough] range, _, _ in
+            heardThrough.withLock { $0 = max($0, range.end.seconds) }
+            onHeard?(range.end.seconds)
         }
         try await analyzer.start(inputSequence: inputStream)
         let (lines, line) = AsyncStream.makeStream(of: TranscriptUpdate.self)
@@ -154,6 +158,11 @@ final class SpeakerTranscriber: @unchecked Sendable {
             }
         }
         return words
+    }
+
+    /// How far into the audio the recognizer has listened so far, in seconds, speech or not.
+    var heard: Double {
+        heardThrough.withLock { $0 }
     }
 
     func append(_ samples: [Float]) {

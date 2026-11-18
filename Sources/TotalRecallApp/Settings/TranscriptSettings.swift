@@ -1,7 +1,10 @@
+import AppSupport
+import Shared
 import SwiftUI
 
-/// The language spoken, and telling people apart by voice.
+/// The language spoken, by default and on each calendar recorded, and telling people apart by voice.
 struct TranscriptSettings: View {
+    @Environment(AppModel.self) private var model
     @Setting(AppSettings.Key.language) private var language = ""
     @Setting(AppSettings.Key.identifiesSpeakers) private var identifiesSpeakers = false
     @Setting(AppSettings.Key.hidesTranscriptFromCapture) private var hidesFromCapture =
@@ -17,13 +20,39 @@ struct TranscriptSettings: View {
         + "Illinois. Turn it on only for calls where everyone has agreed. You are responsible for following the "
         + "law where you and they are."
 
+    /// The default language, as set, or transcribe's own, en-US, when it is not.
+    private var defaultLanguage: Binding<String> {
+        Binding {
+            language.trimmingCharacters(in: .whitespaces).nonEmpty ?? "en-US"
+        } set: {
+            language = $0
+        }
+    }
+
     var body: some View {
         Form {
             Section {
-                TextField("Language", text: $language, prompt: Text("en-US"))
-                Text("The language spoken, such as es or es-MX.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker("Default language", selection: defaultLanguage) {
+                    SpeechLanguagePickerItems(
+                        options: SpeechLanguage.options(model.speech.languages, including: defaultLanguage.wrappedValue)
+                    )
+                }
+                ForEach(model.meetingCalendars) { calendar in
+                    CalendarLanguagePicker(
+                        calendar: calendar,
+                        defaultLanguage: defaultLanguage.wrappedValue,
+                        languages: model.speech.languages
+                    )
+                }
+                Text(
+                    model.meetingCalendars.isEmpty
+                        ? "The language spoken. Switch a meeting's language as it is recorded in the transcript window."
+                        : "Each calendar's meetings are transcribed in the default language unless set otherwise "
+                            + "here. Switch a meeting's language as it is recorded in the transcript window."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             Section {
                 // Turning it on asks first; turning it off doesn't.
@@ -68,5 +97,54 @@ struct TranscriptSettings: View {
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The language a calendar's meetings are transcribed in: the default unless another is picked.
+private struct CalendarLanguagePicker: View {
+    let calendar: CalendarSource.Calendar
+    let defaultLanguage: String
+    /// The languages the speech recognizer has.
+    let languages: [String]
+
+    var body: some View {
+        Picker(selection: language) {
+            Text("Default (\(defaultLanguage))").tag("")
+            Divider()
+            SpeechLanguagePickerItems(options: SpeechLanguage.options(languages, including: language.wrappedValue))
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(calendar.color.map { Color(cgColor: $0) } ?? .secondary)
+                    .frame(width: 10, height: 10)
+                Text(calendar.title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+
+    /// The calendar's language, "" for the default, saved as soon as it changes.
+    private var language: Binding<String> {
+        Binding {
+            AppSettings.rules(for: calendar).language ?? ""
+        } set: { language in
+            var rules = AppSettings.calendarRules
+            var calendarRules = AppSettings.rules(for: calendar)
+            calendarRules.language = language.nonEmpty
+            rules[calendar.id] = calendarRules
+            AppSettings.calendarRules = rules
+        }
+    }
+}
+
+/// A language picker's items: the common languages, then, after a divider, all the others; each tagged with itself.
+private struct SpeechLanguagePickerItems: View {
+    let options: (common: [String], others: [String])
+
+    var body: some View {
+        ForEach(options.common, id: \.self) { Text(SpeechLanguage.name(of: $0)).tag($0) }
+        if !options.common.isEmpty && !options.others.isEmpty { Divider() }
+        ForEach(options.others, id: \.self) { Text(SpeechLanguage.name(of: $0)).tag($0) }
     }
 }

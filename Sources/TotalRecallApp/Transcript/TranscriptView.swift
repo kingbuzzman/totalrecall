@@ -23,17 +23,24 @@ struct TranscriptView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if model.transcript.isEmpty {
-                ContentUnavailableView(
-                    model.isRecording ? "Listening…" : "No transcript yet",
-                    systemImage: "text.bubble",
-                    description: Text("What is said shows up here as it is recognized.")
-                )
-                .frame(maxHeight: .infinity)
-            } else if isOpen {
-                lines
-            } else {
-                Spacer()
+            VStack(spacing: 0) {
+                if model.transcript.isEmpty {
+                    ContentUnavailableView(
+                        model.isRecording ? "Listening…" : "No transcript yet",
+                        systemImage: "text.bubble",
+                        description: Text("What is said shows up here as it is recognized.")
+                    )
+                    .frame(maxHeight: .infinity)
+                } else if isOpen {
+                    lines
+                } else {
+                    Spacer()
+                }
+            }
+            .overlay {
+                if let stage = model.languageSwitch {
+                    LanguageSwitchOverlay(stage: stage, isRecording: model.isRecording)
+                }
             }
             let liveLines = TranscriptLine.parsing(liveText: model.liveText)
             if !liveLines.isEmpty {
@@ -77,6 +84,7 @@ struct TranscriptView: View {
             }
             Spacer()
             if model.isRecording {
+                LanguageMenu()
                 Toggle(
                     "Voice processing",
                     isOn: Binding(get: { model.usesVoiceProcessing }, set: { model.useVoiceProcessing($0) })
@@ -128,6 +136,74 @@ struct TranscriptView: View {
                     .padding(10)
                 }
             }
+    }
+}
+
+/// The language the transcript is in, as a menu of the languages the speech recognizer has, to switch to while it
+/// records: the recording goes on, and the transcript starts over in the one picked.
+private struct LanguageMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let current = model.transcriptLanguage
+        Menu {
+            // The one it is in first, as set, such as es, which the recognizer lists only by region.
+            Button(SpeechLanguage.name(of: current)) {}
+                .disabled(true)
+            Divider()
+            let options = SpeechLanguage.options(model.speech.languages.filter { $0 != current }, including: "")
+            ForEach(options.common, id: \.self) { language in
+                Button(SpeechLanguage.name(of: language)) { model.switchLanguage(to: language) }
+            }
+            Divider()
+            ForEach(options.others, id: \.self) { language in
+                Button(SpeechLanguage.name(of: language)) { model.switchLanguage(to: language) }
+            }
+        } label: {
+            Label(current, systemImage: "globe")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(model.speech.languages.isEmpty)
+        .help(
+            "The language the transcript is in. Pick another and it starts over in it, from the start of the "
+                + "recording, which goes on all the while."
+        )
+    }
+}
+
+/// Over the transcript while it is switched to another language: that it is, and that the recording goes on. The lines
+/// show through it, as they come again.
+private struct LanguageSwitchOverlay: View {
+    let stage: AppModel.LanguageSwitchStage
+    let isRecording: Bool
+
+    var body: some View {
+        let language = Locale.current.localizedString(forIdentifier: stage.language) ?? stage.language
+        VStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text(title(language))
+                .font(.headline)
+            Text(
+                isRecording ? "Still recording, don't worry." : "Recording stopped; the transcript finishes on its own."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(radius: 8)
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+
+    private func title(_ language: String) -> String {
+        switch stage {
+        case .preparing: "Getting \(language) ready…"
+        case .catchingUp: "Transcribing everything so far in \(language)…"
+        }
     }
 }
 

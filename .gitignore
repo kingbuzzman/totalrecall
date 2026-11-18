@@ -11,3 +11,4 @@ build/
 .build/
 __pycache__/
 *.pyc
+.vscode

@@ -104,9 +104,14 @@ enum AppSettings {
         (file[Key.microphone] as? String)?.nonEmpty
     }
 
-    /// The language spoken, such as es or es-MX; nil for transcribe's default, en-US.
+    /// The language spoken, such as es or es-MX, unless a calendar says otherwise; nil for transcribe's default, en-US.
     static var language: String? {
         (file[Key.language] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty
+    }
+
+    /// The language spoken in a meeting on the calendar `id`: the calendar's own, if set, else `language`.
+    static func language(forCalendar id: String?) -> String? {
+        CalendarRules.language(ofCalendar: id, in: calendarRules, defaultLanguage: language)
     }
 
     /// Whether a recording goes to the Trash once saved and transcribed, keeping only the transcript; on unless turned

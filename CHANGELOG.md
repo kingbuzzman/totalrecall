@@ -11,6 +11,9 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 ### TotalRecall.app
 
 - The transcript window's dot blinks while recording; hover and click it to stop.
+- Settings › Transcript sets a language per calendar; the default language covers the rest.
+- The transcript window's language menu switches a meeting's language as it records, transcribing it again from the
+  start.
 
 ## 0.6.1
 

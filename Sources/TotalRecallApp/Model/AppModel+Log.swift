@@ -19,6 +19,9 @@ extension AppModel {
             case .transcriptFinished(let error): error == nil ? "transcript finished" : nil
             case .audioTrashed(let audio, _, _): "moved \(audio.lastPathComponent) to the Trash, transcribed"
             case .rewritten(let lines): "transcript written again by who turned out to speak: \(lines.count) lines"
+            case .transcriptRestarted(let language): "transcript started over in \(language)"
+            case .transcriptCaughtUp: "transcript caught up with the recording"
+            case .languageSwitchFailed(let language, let reason): "could not switch to \(language): \(reason)"
             case .failedToStart, .failedToSave, .line, .liveText: nil
             }
         if let what { log.info("recording \(id, privacy: .public): \(what, privacy: .public)") }

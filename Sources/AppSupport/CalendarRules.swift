@@ -1,7 +1,7 @@
 import Foundation
 
-/// What to record from one calendar: whether to record its meetings at all, and which of them to leave out, by their
-/// titles. Kept per calendar, by the calendar's identifier, not its title: two accounts can each have a calendar of the
+/// What to record from one calendar: whether to record its meetings at all, which of them to leave out, by their titles,
+/// and the language spoken in them. Kept per calendar, by the calendar's identifier, not its title: two accounts can each have a calendar of the
 /// same name, such as "Holidays in United States", and each has rules of its own.
 package struct CalendarRules: Codable, Equatable, Sendable {
     /// Whether this calendar's meetings are warned of and recorded.
@@ -11,11 +11,33 @@ package struct CalendarRules: Codable, Equatable, Sendable {
     /// Meetings whose title contains any of these, ignoring case, are left out. One between slashes, such as
     /// `/^1:1|standup$/`, is a regular expression the title is matched against, also ignoring case.
     package var ignoredPhrases: [String]
+    /// The language spoken in its meetings, such as es or es-MX; nil, or blank, for the default language.
+    package var language: String?
 
-    package init(isRecorded: Bool = true, skipsFocusAndPrep: Bool = true, ignoredPhrases: [String] = []) {
+    package init(
+        isRecorded: Bool = true,
+        skipsFocusAndPrep: Bool = true,
+        ignoredPhrases: [String] = [],
+        language: String? = nil
+    ) {
         self.isRecorded = isRecorded
         self.skipsFocusAndPrep = skipsFocusAndPrep
         self.ignoredPhrases = ignoredPhrases
+        self.language = language
+    }
+
+    /// The language a meeting on calendar `id` is transcribed in: the calendar's own, if it has one, else
+    /// `defaultLanguage`; nil, for the transcriber's default, when neither is set. Blanks count as unset.
+    package static func language(
+        ofCalendar id: String?,
+        in rules: [String: CalendarRules],
+        defaultLanguage: String?
+    ) -> String? {
+        func set(_ language: String?) -> String? {
+            guard let language = language?.trimmingCharacters(in: .whitespaces), !language.isEmpty else { return nil }
+            return language
+        }
+        return set(id.flatMap { rules[$0]?.language }) ?? set(defaultLanguage)
     }
 
     /// The rules of a calendar never set up: its meetings recorded, focus time and prep blocks left out; unless it is

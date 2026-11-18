@@ -131,6 +131,7 @@ struct CalendarRulesTests {
         let rules = [
             "A": CalendarRules(isRecorded: false),
             "B": CalendarRules(skipsFocusAndPrep: false, ignoredPhrases: ["1:1"]),
+            "C": CalendarRules(language: "es-MX"),
         ]
 
         #expect(CalendarRules.decode(CalendarRules.encode(rules)) == rules)
@@ -145,6 +146,44 @@ struct CalendarRulesTests {
         let rules = try #require(saved["A"] as? [String: Any])
         #expect(rules["isRecorded"] as? Bool == false)
         #expect(rules["ignoredPhrases"] as? [String] == ["1:1"])
+        #expect(rules["language"] == nil, "no language is saved for one never set")
+    }
+
+    @Test func readsRulesSavedWithoutALanguageAsUsingTheDefault() {
+        let saved: [String: Any] = ["A": ["isRecorded": true, "skipsFocusAndPrep": true, "ignoredPhrases": [String]()]]
+
+        #expect(CalendarRules.decode(saved) == ["A": CalendarRules()])
+    }
+
+    @Test(
+        arguments: [
+            // The calendar's own language wins over the default.
+            ("A", "es", "pt-BR"),
+            ("A", nil, "pt-BR"),
+            // A calendar without one, a blank one, an unknown calendar, or none at all goes by the default.
+            ("B", "es", "es"),
+            ("C", "es", "es"),
+            ("Z", "es", "es"),
+            (nil, "es", "es"),
+            // Nothing set anywhere: the transcriber's own default.
+            ("B", nil, nil),
+            ("B", "  ", nil),
+        ] as [(String?, String?, String?)]
+    )
+    func transcribesEachCalendarsMeetingsInItsLanguageOrTheDefault(
+        calendar: String?,
+        defaultLanguage: String?,
+        expected: String?
+    ) {
+        let rules = [
+            "A": CalendarRules(language: " pt-BR "),
+            "B": CalendarRules(),
+            "C": CalendarRules(language: " "),
+        ]
+
+        let language = CalendarRules.language(ofCalendar: calendar, in: rules, defaultLanguage: defaultLanguage)
+
+        #expect(language == expected)
     }
 
     @Test func triesARuleOnTheTwoWeeksBeforeThisOneThisWeekAndTheTwoAfter() {

@@ -15,14 +15,17 @@ import os
 final class AppModel {
     private(set) var state = State.idle
     /// The meeting being recorded, or the last one, which Continue records into again.
-    private(set) var meeting: Meeting?
+    var meeting: Meeting?
     /// The transcript of the latest recording so far, line by line, and the words still being recognized.
-    private(set) var transcript: [TranscriptLine] = []
-    private(set) var liveText = ""
-    private(set) var lastMessage = ""
+    var transcript: [TranscriptLine] = []
+    var liveText = ""
+    var lastMessage = ""
     /// Whether the microphone of the recording going on is recorded through voice processing; switched in
     /// AppModel+VoiceProcessing.swift too.
     var usesVoiceProcessing = false
+    /// The transcript being switched to another language, while it is (see AppModel+Transcript.swift).
+    var languageSwitch: LanguageSwitchStage?
+    let speech = SpeechModels()
     /// Recordings being saved, after they stopped, and transcripts going on, including the one being recorded, until
     /// their last words are written. Saving is counted in AppModel+UnsavedRecordings.swift too.
     var savingCount = 0
@@ -82,7 +85,7 @@ final class AppModel {
         calendar.onChange = { [weak self] in self?.readCalendar() }
         notifier.onAction { [weak self] action, info in self?.perform(action, info) }
         notifier.requestPermission()
-        prepareTranscription()
+        speech.prepare([AppSettings.language])
         findUnsavedRecordings()
         // For every run loop mode: an open menu runs the run loop in its own, in which a timer of the default mode
         // waits, so the elapsed time in the menu would stand still until it is opened again.
@@ -154,13 +157,14 @@ final class AppModel {
                 notifier.post(title: "Could not add “\(title)” to \(target.title)", body: error.localizedDescription)
             }
         }
+        let filedUnder = calendar ?? defaultMeetingCalendar
         let directory = RecordingFolder.directory(
             root: AppSettings.recordingsFolder,
-            calendar: (calendar ?? defaultMeetingCalendar)?.title,
+            calendar: filedUnder?.title,
             name: title,
             start: Date()
         )
-        start(Meeting(name: title, directory: directory))
+        start(Meeting(name: title, directory: directory, filedUnder: filedUnder?.id))
     }
 
     /// Records the last meeting again, into its folder, as rec-2, transcript-2 and so on, the way `record-meetings`
@@ -201,13 +205,14 @@ final class AppModel {
         liveText = ""
         lastMessage = ""
         usesVoiceProcessing = false
+        languageSwitch = nil
         state = .starting
         let request = RecordingEngine.Request(
             id: recordingID,
             directory: meeting.directory,
             format: AppSettings.format,
             microphone: AppSettings.microphone,
-            language: AppSettings.language,
+            language: meeting.language,
             identifiesSpeakers: AppSettings.identifiesSpeakers,
             trashesAudioOnceTranscribed: AppSettings.trashesAudioOnceTranscribed
         )
@@ -261,14 +266,8 @@ final class AppModel {
             log.error("could not save: \(reason, privacy: .public)")
             notifier.post(title: "Could not save the recording", body: reason)
             becameIdleIfDone()
-        case .line(let line, let isYours):
-            if isLatest { transcript.append(TranscriptLine(parsing: line, heardOn: isYours ? .you : .them)) }
-        case .rewritten(let lines):
-            if isLatest {
-                transcript = lines.map { TranscriptLine(parsing: $0.line, heardOn: $0.isYours ? .you : .them) }
-            }
-        case .liveText(let text):
-            if isLatest { liveText = text }
+        case .line, .rewritten, .liveText, .transcriptRestarted, .transcriptCaughtUp, .languageSwitchFailed:
+            if isLatest { followTranscript(event) }
         case .message(let message):
             if isLatest { lastMessage = message }
         case .voiceProcessing(let isOn):
@@ -277,6 +276,7 @@ final class AppModel {
             transcribingCount += 1
         case .transcriptFinished(let error):
             transcribingCount -= 1
+            if isLatest { languageSwitch = nil }
             if let error {
                 log.error("transcript stopped: \(error, privacy: .public)")
                 if isLatest { lastMessage = "The transcript stopped: \(error)" }
@@ -319,6 +319,7 @@ extension AppModel {
         // Each set only if it changed: the menu redraws for any change, and a redraw closes the submenu open in it.
         let recorded = calendar.calendars.filter { AppSettings.rules(for: $0).isRecorded }
         set(\.meetingCalendars, to: recorded)
+        speech.prepare(recorded.map { AppSettings.rules(for: $0).language })
         let defaultID = MeetingCalendar.resolve(
             chosen: AppSettings.defaultMeetingCalendar,
             recorded: recorded.map(\.id)

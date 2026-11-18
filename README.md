@@ -103,11 +103,14 @@ need icalbuddy.
   recording that started, **Try Again** when one could not start, and **Open Transcript** and **Restore Recording**
   once a recording went to the Trash.
   While it records, the menu bar icon has a red dot; the transcript window's dot blinks, and stops it when clicked.
+- The transcript window's language menu switches a meeting to another language as it's recorded: the recording goes
+  on, and the transcript starts over in that language, from the start, then carries on live.
 - **Settings** has a tab each for where recordings go (`~/Meetings` by default) and when they start, which calendars,
-  the format and the mic, the transcript's language and identifying speakers, and the version. Recordings go in the
-  same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a meeting on the calendar, by when it was
-  meant to start, so a restarted meeting lands next to the first recording, and the same under its calendar for one
-  started from the menu (`WEEK-YEAR/...` straight under the folder when no calendar is recorded).
+  the format and the mic, the transcript's language, by default and for each calendar, and identifying speakers, and
+  the version. Recordings go in the same tree `record-meetings` uses: `CALENDAR/WEEK-YEAR/MM-DD/HHhMM-name/` for a
+  meeting on the calendar, by when it was meant to start, so a restarted meeting lands next to the first recording, and
+  the same under its calendar for one started from the menu (`WEEK-YEAR/...` straight under the folder when no
+  calendar is recorded).
 - Once a recording's transcript is complete, the recording goes to the Trash and only the transcript stays, unless
   turned off in Settings › Recording. One whose transcript stopped short, or has no words in it, is kept.
 - After a crash or a forced quit, the menu offers to save any recording that was left unsaved.

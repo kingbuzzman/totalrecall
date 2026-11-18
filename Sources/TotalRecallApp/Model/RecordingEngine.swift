@@ -41,6 +41,13 @@ final class RecordingEngine: Sendable {
         case transcriptFinished(String?)
         /// The recording, `audio`, went to the Trash, to `trashed`, as asked, once its transcript was complete.
         case audioTrashed(audio: URL, trashed: URL?, transcript: URL)
+        /// The transcript started over in the language switched to, from the start of the recording; its lines come
+        /// again, and the text file is written afresh.
+        case transcriptRestarted(language: String)
+        /// The transcript started over has caught up with the recording.
+        case transcriptCaughtUp
+        /// The transcript could not be switched to `language`, and goes on as it was.
+        case languageSwitchFailed(language: String, reason: String)
     }
 
     struct Request: Sendable {
@@ -76,6 +83,12 @@ final class RecordingEngine: Sendable {
         queue.async { [self] in current?.useVoiceProcessing(isOn) }
     }
 
+    /// Switches the transcript of the recording going on to `language`, as `transcribeLive` does, the recording going
+    /// on all the while.
+    func switchLanguage(to language: String) {
+        queue.async { [self] in current?.switchLanguage(to: language) }
+    }
+
     /// Stops the recording going on, if any, and saves it in the background; then calls `done` on the main queue, after
     /// the events of the stop.
     func stop(then done: (@MainActor @Sendable () -> Void)? = nil) {
@@ -98,6 +111,8 @@ private final class Recording: @unchecked Sendable {
     private let report: @Sendable (RecordingEngine.Event) -> Void
     /// Held until the file is saved and the transcript finished: the save holds the recording, the transcript this.
     private let busy = Busy()
+    /// Switches the transcript to another language.
+    private let switches = LanguageSwitch()
 
     /// Starts recording into a free rec.EXT in `request.directory`, and transcribing it into the transcript.txt beside
     /// it as it records.
@@ -158,28 +173,35 @@ private final class Recording: @unchecked Sendable {
     /// started, leaves no transcript behind.
     private func transcribe(_ request: RecordingEngine.Request) {
         // Not `self`, which would keep the recording, and its captures, until the transcript is finished.
-        let (input, isDiscarded, disposal, report, busy) = (
-            pipe.fileHandleForReading, isDiscarded, disposal, report, busy
+        let (input, isDiscarded, disposal, report, busy, switches) = (
+            pipe.fileHandleForReading, isDiscarded, disposal, report, busy, switches
         )
+        // Opened now, before saving can delete it: a transcript switched to another language reads it from the start.
+        let recording = try? FileHandle(forReadingFrom: OutputFile(path: audio.path).partialURL)
         let transcript = disposal.transcript
         report(.transcriptStarted)
         Task.detached(priority: .userInitiated) {
             defer {
                 withExtendedLifetime(busy) {}
                 try? input.close()
+                try? recording?.close()
                 if isDiscarded.withLock({ $0 }) { try? FileManager.default.removeItem(at: transcript) }
             }
             do {
                 try await transcribeLive(
                     from: input,
+                    recordedIn: recording,
                     to: transcript,
                     language: request.language,
+                    switches: switches,
                     identifyingSpeakersIn: request.identifiesSpeakers ? AppSettings.speakers : nil,
                     handlers: LiveTranscriptHandlers(
                         onLine: { report(.line($0, isYours: $1)) },
                         onLiveText: { report(.liveText($0)) },
                         onRewrite: { report(.rewritten($0)) },
-                        onMessage: { report(.message($0)) }
+                        onMessage: { report(.message($0)) },
+                        onRestart: { report(.transcriptRestarted(language: $0)) },
+                        onCaughtUp: { report(.transcriptCaughtUp) }
                     )
                 )
                 report(.transcriptFinished(nil))
@@ -192,6 +214,18 @@ private final class Recording: @unchecked Sendable {
 
     func useVoiceProcessing(_ isOn: Bool) {
         session.useVoiceProcessing(isOn)
+    }
+
+    /// Switches the transcript to `language` once its speech model is ready, in the background.
+    func switchLanguage(to language: String) {
+        let (switches, report) = (switches, report)
+        Task.detached(priority: .userInitiated) {
+            do {
+                try await switches.switchTo(language)
+            } catch {
+                report(.languageSwitchFailed(language: language, reason: error.localizedDescription))
+            }
+        }
     }
 
     /// Stops recording at once, ends the stream so the transcript can finish, and saves the file in the background.

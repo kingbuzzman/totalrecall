@@ -1,6 +1,7 @@
 import CoreML
 package import Foundation
 import Shared
+import Speech
 
 /// Where a transcript goes, and who hears of what happens on the way.
 struct TranscriptionOutput {
@@ -12,6 +13,11 @@ struct TranscriptionOutput {
     let report: (String) -> Void
     /// Gets a failure to write the text file.
     let onSaveFailure: (any Error) -> Void
+    /// Gets the recognizers once they are made, to follow how far they have listened.
+    var onTranscribers: ([SpeakerTranscriber]) -> Void = { _ in }
+    /// Says, once the audio has ended, whether the transcript was given up part way, to be made again: it is then not
+    /// written again by who turned out to speak, nor are the people heard remembered.
+    var isAbandoned: () -> Bool = { false }
 }
 
 /// Transcribes `source`, in the language of `locale`, whose speech model is installed, to the end: tells whether it has
@@ -39,6 +45,7 @@ func transcribe(
         separatesSpeakers: separatesSpeakers,
         voices: voices
     )
+    output.onTranscribers(transcribers)
     let textFile = try textURL.map(createTextFile)
     // Each line goes out the moment it settles, in that order. For a file, the two speakers' recognizers race through
     // it independently, so their lines can come out of time order.
@@ -49,7 +56,7 @@ func transcribe(
     printer.finish()
     try textFile?.close()
     let identifiers = transcribers.compactMap(\.identifier)
-    guard !identifiers.isEmpty else { return }
+    guard !identifiers.isEmpty, !output.isAbandoned() else { return }
     for identifier in identifiers { identifier.conclude() }
     let text = printer.rewritten { line in
         transcribers.first { $0.speaker == line.speaker }?.identifier?.parts(of: line) ?? [line]
@@ -219,26 +226,9 @@ package func prepareTranscription(language: String?) async throws {
     _ = try await readySpeechLocale(for: language?.nonEmpty ?? Options().language)
 }
 
-/// Who a live transcript goes to, as it is written: each line as it settles, and whether it was heard on your microphone;
-/// the words still being recognized ("" once there are none); telling people apart, all the lines again at the end,
-/// each said by whoever turned out to say it; and warnings and news of the people it heard.
-package struct LiveTranscriptHandlers: Sendable {
-    package let onLine: @Sendable (_ line: String, _ isYours: Bool) -> Void
-    package let onLiveText: @Sendable (String) -> Void
-    package let onRewrite: @Sendable ([(line: String, isYours: Bool)]) -> Void
-    package let onMessage: @Sendable (String) -> Void
-
-    package init(
-        onLine: @escaping @Sendable (_ line: String, _ isYours: Bool) -> Void,
-        onLiveText: @escaping @Sendable (String) -> Void,
-        onRewrite: @escaping @Sendable ([(line: String, isYours: Bool)]) -> Void,
-        onMessage: @escaping @Sendable (String) -> Void
-    ) {
-        self.onLine = onLine
-        self.onLiveText = onLiveText
-        self.onRewrite = onRewrite
-        self.onMessage = onMessage
-    }
+/// The languages the speech recognizer has, such as en-US and es-MX, in order.
+package func speechLanguages() async -> [String] {
+    Array(Set(await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47) })).sorted()
 }
 
 /// The audio files `learnVoices` reads: what TotalRecall saves recordings as, and the other formats macOS reads.
@@ -267,43 +257,6 @@ package func learnVoices(
         onSaveFailure: { _ in }
     )
     try await transcribe(try FileAudioSource(url: url), locale: locale, options: options, textURL: nil, output: output)
-}
-
-/// A live transcript of the WAV stream `input` carries, such as the one a recording made in the same app writes into
-/// a pipe, until the stream ends: each line, as it settles, goes to `textURL` and `handlers`, as do the words still
-/// being recognized. Given `identifyingSpeakersIn`, people are told apart by voice and remembered in the database there.
-/// Throws if transcribing cannot start or fails part way; the text file then has what was transcribed until then.
-package func transcribeLive(
-    from input: FileHandle,
-    to textURL: URL,
-    language: String?,
-    identifyingSpeakersIn speakers: URL?,
-    handlers: LiveTranscriptHandlers
-) async throws {
-    var options = Options()
-    options.language = language?.nonEmpty ?? options.language
-    if let speakers {
-        options.identifiesSpeakers = true
-        options.speakers = speakers
-    }
-    let locale = try await readySpeechLocale(for: options.language)
-    let source = try WAVStreamReader(handle: input)
-    let output = TranscriptionOutput(
-        makePrinter: { save in
-            TranscriptPrinter(
-                printsLines: false,
-                isLive: false,
-                save: save,
-                showLine: handlers.onLine,
-                showLive: handlers.onLiveText,
-                showAll: handlers.onRewrite
-            )
-        },
-        warn: handlers.onMessage,
-        report: handlers.onMessage,
-        onSaveFailure: { handlers.onMessage("cannot write the transcript: \($0.localizedDescription)") }
-    )
-    try await transcribe(source, locale: locale, options: options, textURL: textURL, output: output)
 }
 
 /// Creates the text file, emptying it if it exists (`--force`).
