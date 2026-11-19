@@ -44,6 +44,44 @@ struct TranscribeLiveTests {
         #expect(liveTexts.withLock { $0.last }?.isEmpty == true, "the live text is cleared at the end")
     }
 
+    /// Before anyone joins, the recording is digital silence on both channels, longer than the split is listened for;
+    /// it is still you and them.
+    @Test(.enabled("needs on-device speech recognition") { await speechRecognitionIsAvailable() })
+    func keepsYouAndThemApartAfterASilentStart() async throws {
+        let speech = try await SystemVoice.samples(saying: "Good morning everyone, thanks for joining the call.")
+        let silence = [Float](repeating: 0, count: Int(48_000 * (maxSpeakerDetectionSeconds + 1)))
+        let pipe = Pipe()
+        let text = FileManager.default.temporaryDirectory.appending(path: "transcribe-live-\(UUID()).txt")
+        defer { try? FileManager.default.removeItem(at: text) }
+        let lines = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+        let writer = Task.detached {
+            let handle = pipe.fileHandleForWriting
+            let right = silence + speech
+            let left = [Float](repeating: 0, count: right.count)
+            try handle.write(contentsOf: WAVStream.header(sampleRate: 48_000, channelCount: 2))
+            try handle.write(contentsOf: WAVStream.samples([left, right], count: right.count))
+            try handle.close()
+        }
+        try await transcribeLive(
+            from: pipe.fileHandleForReading,
+            to: text,
+            language: nil,
+            identifyingSpeakersIn: nil,
+            handlers: LiveTranscriptHandlers(
+                onLine: { line, _ in lines.withLock { $0.append(line) } },
+                onLiveText: { _ in },
+                onRewrite: { _ in },
+                onMessage: { _ in }
+            )
+        )
+        try await writer.value
+
+        let heard = lines.withLock { $0 }
+        #expect(heard.contains { $0.contains("Good morning") })
+        #expect(heard.allSatisfy { $0.wholeMatch(of: /\[\d{2}:\d{2}:\d{2}\] Them: .*/) != nil }, "\(heard)")
+    }
+
     @Test(.enabled("needs on-device speech recognition") { await speechRecognitionIsAvailable() })
     func startsOverInTheLanguageSwitchedToAndGoesOnLive() async throws {
         let first = try await SystemVoice.samples(saying: "Good morning everyone, thanks for joining the call.")
@@ -120,17 +158,20 @@ struct TranscribeLiveTests {
             try pipe.fileHandleForWriting.write(contentsOf: WAVStream.header(sampleRate: 48_000, channelCount: 2))
         }
 
-        /// `samples` on both channels: recorded, then streamed, as the recorder does.
+        /// `samples` said by them, on the right channel, your microphone on the left silent: recorded, then streamed,
+        /// as the recorder does.
         func write(_ samples: [Float]) throws {
+            let silence = [Float](repeating: 0, count: samples.count)
             let buffer = AVAudioPCMBuffer(
                 pcmFormat: file!.processingFormat,
                 frameCapacity: AVAudioFrameCount(samples.count)
             )!
             buffer.frameLength = AVAudioFrameCount(samples.count)
-            for channel in 0..<2 { buffer.floatChannelData![channel].update(from: samples, count: samples.count) }
+            buffer.floatChannelData![0].update(from: silence, count: samples.count)
+            buffer.floatChannelData![1].update(from: samples, count: samples.count)
             try file!.write(from: buffer)
             try pipe.fileHandleForWriting.write(
-                contentsOf: WAVStream.samples([samples, samples], count: samples.count)
+                contentsOf: WAVStream.samples([silence, samples], count: samples.count)
             )
         }
 

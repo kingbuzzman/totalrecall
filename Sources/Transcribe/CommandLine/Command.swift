@@ -35,6 +35,8 @@ let usage = """
 struct Options: Equatable {
     var language = "en-US"
     var mixesChannels = false
+    /// Known to be you on the left, them on the right, as the app records: no listening first to tell.
+    var isSplit = false
     /// Show the live transcript on stdout (`--live`), even when writing a text file.
     var showsLive = false
     /// Tell the people on a channel apart by voice (`--identify-speakers`), remembering them in `speakers`.

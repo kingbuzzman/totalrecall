@@ -94,6 +94,7 @@ package func transcribeLive(
 ) async throws {
     var options = Options()
     options.language = language?.nonEmpty ?? options.language
+    options.isSplit = true
     if let speakers {
         options.identifiesSpeakers = true
         options.speakers = speakers

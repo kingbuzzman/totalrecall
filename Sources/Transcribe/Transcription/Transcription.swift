@@ -34,8 +34,8 @@ func transcribe(
     output: TranscriptionOutput
 ) async throws {
     var pendingChunks: [[[Float]]] = []
-    var separatesSpeakers = false
-    if source.channelCount >= 2 && !options.mixesChannels {
+    var separatesSpeakers = options.isSplit
+    if !options.isSplit && source.channelCount >= 2 && !options.mixesChannels {
         (separatesSpeakers, pendingChunks) = try hasSeparateSpeakers(source)
     }
     let voices = await Voices.load(if: options.identifiesSpeakers, from: options.speakers, warn: output.warn)

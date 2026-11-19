@@ -4,6 +4,10 @@ Each release's notes on GitHub come from its section here (see `.github/workflow
 
 ## Unreleased
 
+### TotalRecall.app
+
+- Fixed: a recording that started silent lost the You/Them split, so its transcript had unlabeled lines.
+
 ## 0.7.0
 
 ### transcribe
